@@ -1,0 +1,67 @@
+config_version: 1
+log_level: info
+
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: false
+
+models:
+  - name: openai_qwen3-235b-a22b-instruct-2507
+    display_name: AIDP / openai_qwen3-235b-a22b-instruct-2507
+    use: langchain_openai:AzureChatOpenAI
+    model: openai_qwen3-235b-a22b-instruct-2507
+    openai_api_type: azure
+    openai_api_version: 2024-03-01-preview
+    azure_endpoint: https://aidp.bytedance.net/api/modelhub/online/v2/crawl
+    openai_api_key: $AIDP_AK
+    deployment_name: openai_qwen3-235b-a22b-instruct-2507
+    request_timeout: 600.0
+    max_retries: 2
+    max_tokens: 4096
+    default_headers:
+      X-TT-LOGID: $AIDP_LOGID
+    extra_body:
+      model: openai_qwen3-235b-a22b-instruct-2507
+    supports_thinking: false
+    supports_vision: false
+  - name: gemini-2.5-pro
+    display_name: AIDP / gemini-2.5-pro
+    use: langchain_openai:AzureChatOpenAI
+    model: gemini-2.5-pro
+    openai_api_type: azure
+    openai_api_version: 2024-03-01-preview
+    azure_endpoint: https://aidp.bytedance.net/api/modelhub/online/v2/crawl
+    openai_api_key: $AIDP_AK
+    deployment_name: gemini-2.5-pro
+    max_tokens: 4096
+    request_timeout: 600.0
+    max_retries: 2
+    default_headers:
+      X-TT-LOGID: $AIDP_LOGID
+    extra_body:
+      model: gemini-2.5-pro
+      thinking:
+        include_thoughts: true
+        budget_tokens: 2000
+    supports_thinking: true
+    supports_vision: false
+  # Example: Volcengine (Doubao) model
+  - name: doubao-seed-1.8
+    display_name: Doubao-Seed-1.8
+    use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
+    model: doubao-seed-1-8-251228
+    api_base: https://ark.cn-beijing.volces.com/api/v3
+    api_key: $VOLCENGINE_API_KEY
+    timeout: 600.0
+    max_retries: 2
+    supports_thinking: true
+    supports_vision: true
+    supports_reasoning_effort: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+    when_thinking_disabled:
+      extra_body:
+        thinking:
+          type: disabled

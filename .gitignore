@@ -3,4 +3,7 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
-gateway
+.deer-flow/
+.idea/
+.vscode/
+gateway/

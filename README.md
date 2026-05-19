@@ -1,100 +1,66 @@
 # Agentic Workflow Studio
 
-一个通过 Agent 自动生成、执行、调试并固化工作流的开源平台。
+`Agentic Workflow Studio` 是一个面向工作流生成、编排、调试与固化的 Agent 工作台。项目采用前后端独立架构：
 
-`Agentic Workflow Studio` 的目标不是只提供一个聊天式 Agent，而是让 Agent 参与整个工作流搭建过程：
+- 后端位于 `app/`，基于 `FastAPI` 和 DeerFlow Harness Runtime 提供 LangGraph 兼容的运行、流式输出、线程与历史消息能力。
+- 前端位于 `frontend/`，基于 `React + TypeScript + Vite` 提供工作流画布、节点配置、历史会话和 AI 助手交互界面。
 
-- 根据目标自动生成工作流节点能力
-- 在沙箱环境中执行、验证和调试节点逻辑
-- 以流式方式返回运行过程和中间状态
-- 在流程验证完成后，将动态生成过程沉淀为可复用的固化流程
+## 核心能力
 
-未来仓库将包含后端运行时与前端工作台，分别负责工作流生成、执行编排、调试验证与可视化操作。
+- `LangGraph` 兼容流式对话接口，支持 `messages`、`values`、`metadata`、`error` 等事件。
+- AI 助手支持流式输出、思考过程、工具调用、工具结果、澄清问题、子任务/子代理执行展示。
+- 支持线程会话与历史消息，前端可恢复历史会话并加载更早消息。
+- 前端已抽象统一的消息归一化与 timeline 渲染链路，历史消息与实时流式消息共用同一套展示逻辑。
+- 支持环境化配置，开发环境可通过 Vite 代理访问后端，生产环境可通过同域反向代理或完整 API 地址访问。
 
-## Why
+## 技术栈
 
-传统工作流系统通常依赖人工配置固定节点，存在几个问题：
+### 后端
 
-- 节点能力固定，难以按任务动态生成
-- 搭建和调试流程成本高
-- 一次性的 Agent 执行过程难以沉淀为长期可复用资产
-- 缺少“生成 -> 验证 -> 固化”这一整条闭环
+- `Python`
+- `FastAPI`
+- `StreamingResponse`
+- `DeerFlow Harness Runtime`
+- `LangGraph` 消息与运行时协议兼容
 
-这个项目希望把 Agent、Sandbox 和 Workflow Orchestration 结合起来，让工作流具备自生成和可固化的能力。
+### 前端
 
-## Core Ideas
+- `React 18`
+- `TypeScript`
+- `Vite`
+- `Tailwind CSS v4`
+- `Zustand`
+- `Axios`
+- `@langchain/langgraph-sdk`
+- `FlowGram.AI`
+- `lucide-react`
 
-- `Agent-based Node Generation`
-  - Agent 根据目标自动生成工作流节点逻辑，而不是只消费预置节点
-- `Sandbox Execution`
-  - 每个节点都可以在隔离环境中执行和验证，降低生成即上线的风险
-- `Streaming Runtime`
-  - 通过流式接口实时返回事件、消息、中间状态和错误信息
-- `Workflow Debugging`
-  - Agent 可以围绕节点执行进行调试、修正和迭代
-- `Workflow Solidification`
-  - 当动态生成的流程验证完成后，可以进一步沉淀为稳定、可重复执行的固定流程
-
-## Current Status
-
-当前仓库已经具备第一阶段的后端基础能力：
-
-- 基于 `FastAPI` 提供服务入口
-- 基于 `deerflow harness` 运行时承接 Agent 执行链路
-- 提供与 `gateway` 风格对齐的 `/api/stream` 流式接口
-- 支持通过 `config.yaml` 和 `.env` 配置模型与沙箱
-- 已验证模型配置、SSE 输出链路和基础运行时初始化流程
-
-当前重点仍然是后端运行时与接口复刻，前端工作台会作为后续阶段逐步加入。
-
-## Architecture
-
-当前实现可以概括为：
-
-1. `FastAPI` 接收运行请求
-2. `RunService` 负责组装 run、thread 和 stream 响应
-3. `deerflow harness` 负责 Agent 执行、工具调用和沙箱运行
-4. `StreamingResponse` 按 SSE 持续输出事件
-5. 后续在此基础上扩展工作流节点生成、调试与固化能力
-
-## Project Structure
+## 项目结构
 
 ```text
-app/
-  api/
-    routes/
-      stream.py
-    router.py
-  harness/
-    deerflow/
-  schemas/
-    run.py
-  services/
-    runs.py
-  deps.py
-  main.py
-  runtime.py
-config.yaml
-requirements.txt
-README.md
+agentic-workflow-studio/
+  app/                         # 后端 FastAPI 应用
+    api/
+      routes/
+        stream.py              # 流式运行接口
+        threads.py             # 历史线程与历史消息接口
+      router.py                # API 路由聚合
+    harness/deerflow/          # DeerFlow Harness Runtime
+    schemas/                   # 请求/响应模型
+    services/                  # RunService 等业务服务
+    main.py                    # FastAPI 应用入口
+    runtime.py                 # 应用运行时初始化
+  frontend/                    # 前端工作台
+    src/
+      api/                     # HTTP 与 AI 助手 API
+      features/workflow/       # 工作流页面、画布、AI 助手
+      store/                   # Zustand 状态
+      types/                   # 类型定义
+  config.yaml                  # 后端模型、沙箱、运行时配置
+  requirements.txt             # 后端 Python 依赖
 ```
 
-主要目录说明：
-
-- `app/main.py`
-  - `FastAPI` 应用入口与生命周期管理
-- `app/runtime.py`
-  - 应用运行时初始化
-- `app/api/routes/stream.py`
-  - `/api/stream` 流式接口
-- `app/services/runs.py`
-  - 运行服务、SSE 事件转换与 run 生命周期处理
-- `app/harness/deerflow`
-  - 当前内置使用的 `deerflow harness` 代码
-- `config.yaml`
-  - 模型、沙箱和运行相关配置
-
-## Quick Start
+## 后端启动
 
 ### 1. 安装依赖
 
@@ -104,132 +70,185 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` 会通过 `-e ./app/harness` 安装本地的 `deerflow harness`。
+`requirements.txt` 会通过本地路径安装 `app/harness` 中的 DeerFlow Harness。
 
 ### 2. 配置环境变量
 
-在项目根目录创建 `.env`，例如：
+在项目根目录创建 `.env`，按实际模型网关配置填写：
 
 ```env
-# AIDP models
+# CORS，开发环境可保持 *，生产建议指定前端域名
+APP_CORS_ORIGINS=*
+
+# 模型或网关凭证，按 config.yaml 中启用的 provider 填写
 AIDP_AK=your_api_key
 AIDP_LOGID=your_log_id
-
-# Volcengine models
 VOLCENGINE_API_KEY=your_volcengine_api_key
 ```
 
-### 3. 配置模型与沙箱
+模型、沙箱、持久化与运行时配置主要由根目录 `config.yaml` 管理。
 
-项目通过根目录的 `config.yaml` 读取配置，当前已经支持：
-
-- 本地沙箱：`deerflow.sandbox.local:LocalSandboxProvider`
-- AIDP Azure 兼容模型
-- Volcengine / DeepSeek 风格模型
-
-如果你有自己的模型网关，也可以直接替换 `config.yaml` 中的 provider 配置。
-
-### 4. 启动服务
+### 3. 启动服务
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-启动后可访问：
+默认访问地址：
 
-- Swagger UI: <http://127.0.0.1:8000/docs>
+- API 文档：`http://127.0.0.1:8000/docs`
+- API 前缀：`http://127.0.0.1:8000/api`
 
-## Streaming API
-
-当前已实现的核心接口：
-
-```python
-@router.post("/stream")
-async def stream(body: RunCreateRequest, request: Request) -> StreamingResponse:
-```
-
-请求示例：
+## 前端启动
 
 ```bash
-curl -N -X POST "http://127.0.0.1:8000/api/stream" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "assistant_id": "lead_agent",
-    "input": {
-      "messages": [
-        {
-          "role": "user",
-          "content": "你好，请帮我规划一个工作流节点生成方案"
-        }
-      ]
-    },
-    "stream_mode": [
-      "values",
-      "messages-tuple",
-      "custom"
-    ],
-    "multitask_strategy": "reject",
-    "on_disconnect": "cancel"
-  }'
+cd frontend
+npm install
+npm run dev
 ```
 
-接口返回 `text/event-stream`，当前支持的事件类型包括：
+开发环境默认通过 `.env.development` 使用：
 
-- `metadata`
-- `values`
-- `messages-tuple`
-- `custom`
-- `error`
-- `end`
+```env
+VITE_API_BASE_URL=/api
+VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8000
+```
 
-## Implemented Today
+Vite 会把 `/api` 请求代理到本地后端。
 
-目前已经完成：
+## 生产构建
 
-- `/api/stream` 的网关式 SSE 输出
-- `RunCreateRequest` 的兼容请求结构
-- `RunManager / StreamBridge / Checkpointer / Store / ThreadStore` 启动注入
-- 自动生成 `thread_id` 并写入 `Content-Location`
-- 通过 `config.yaml + .env` 驱动模型配置
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
-## Roadmap
+生产环境推荐：
 
-接下来计划逐步补齐：
+- 前后端同域部署：`VITE_API_BASE_URL=/api`
+- 前后端不同域部署：`VITE_API_BASE_URL=https://api.example.com/api`
+- 后端通过 `APP_CORS_ORIGINS` 配置允许访问的前端域名
 
-- `/wait`
-- `/cancel`
-- `/threads/{thread_id}/runs`
-- run messages / feedback / join 等接口
-- 工作流节点生成与调试协议
-- 工作流固化与复用能力
-- 前端工作台与可视化编排界面
+## 核心接口
 
-## Use Cases
+### 流式运行
 
-- 自动生成业务审批流和任务编排流
-- 自动搭建抓取、解析、清洗、总结类流程
-- 让 Agent 为每个工作流节点生成执行逻辑
-- 在沙箱中调试节点行为后沉淀为稳定流程模板
+```text
+POST /api/stream
+POST /api/runs/stream
+POST /api/threads/{thread_id}/runs/stream
+```
 
-## Repository Info
+前端通过 `@langchain/langgraph-sdk` 发起流式请求，后端返回 `text/event-stream`。
 
-- Repository name: `agentic-workflow-studio`
-- Description: `An open-source agentic workflow builder that generates, executes, debugs, and solidifies workflows through sandbox-driven agents.`
-- Slogan: `Build workflows with agents, verify them in sandboxes, and solidify them into reusable automation.`
+请求体兼容 LangGraph runs stream 风格：
 
+```json
+{
+  "assistant_id": "lead_agent",
+  "input": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "帮我生成一个订单查询工作流"
+      }
+    ]
+  },
+  "stream_mode": ["messages", "values"]
+}
+```
 
-## TODO
-- 与前端建立sse对话
-1. 把前端项目导入进来
-2. 通过模型完善功能，能够打通对话
-- 生成工作流，langgraph(澄清确认)
-1. 几个基本的节点的创建（大模型节点、选择器节点、循环节点）
-2. 可通过langgragh可进行编排运行
-3. 定义系统级别的skill,让其找到目前有哪些已有的节点，补全待创建的用户节点
-4. 可跟助手互动，调整这个编排流
-- 沙箱环境绑定
+### 历史会话
 
-- 节点功能生成
-1. 插件功能编码生成，创建一个插件功能的skill
-测试数据->功能编码->调用测试[沙箱中的项目、编码，功能能力清单]
-- 持久化
+```text
+GET /api/threads
+GET /api/threads/{thread_id}
+GET /api/threads/{thread_id}/messages
+```
+
+历史消息接口支持：
+
+- `limit`
+- `before_seq`
+- `after_seq`
+
+前端会使用这些接口展示历史会话侧栏、恢复会话消息，并加载更早消息。
+
+## 前端 AI 助手结构
+
+AI 助手相关代码位于：
+
+```text
+frontend/src/features/workflow/components/
+  ai-assistant-panel.tsx       # 面板状态编排与页面骨架
+  assistant-message-utils.ts   # 兼容旧引用的统一导出
+  assistant/
+    index.ts                   # 统一导出入口
+    types.ts                   # 类型定义
+    message-content.ts         # 文本、reasoning、结构化内容提取
+    message-normalizer.ts      # 历史/流式消息归一化与 chunk 拼接
+    message-merge.ts           # 局部流式消息合并
+    timeline.ts                # Message[] -> TimelineItem[] 业务解释
+    timeline-message-list.tsx  # timeline 渲染
+    tool-cards.tsx             # 工具调用与子任务卡片
+    thread-sidebar.tsx         # 历史会话侧栏
+    thread-utils.ts            # 线程标题、时间、本地存储工具
+    ui-primitives.tsx          # 通用 UI 原语
+```
+
+当前链路：
+
+```text
+LangGraph stream/history data
+  -> AssistantMessageNormalizer
+  -> Message[]
+  -> getAssistantTimelineItems()
+  -> TimelineMessageList
+```
+
+这样可以避免历史消息和实时流式消息因数据形态不同而走不同渲染逻辑。
+
+## 调试建议
+
+### PyCharm 后端 Debug
+
+推荐使用 Python Module 启动：
+
+```text
+Module name: uvicorn
+Parameters: app.main:app --reload
+Working directory: 项目根目录
+```
+
+如果希望断点更稳定，也可以先去掉 `--reload`。
+
+### 前端联调
+
+1. 启动后端：`uvicorn app.main:app --reload`
+2. 启动前端：`cd frontend && npm run dev`
+3. 确认 `frontend/.env.development` 中 `VITE_DEV_API_PROXY_TARGET` 指向后端地址
+4. 浏览器访问 Vite 输出的本地地址
+
+## 质量检查
+
+前端投产前建议执行：
+
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+后端建议至少执行启动检查：
+
+```bash
+uvicorn app.main:app --reload
+```
+
+## 后续方向
+
+- 完善工作流节点生成、调试、固化闭环。
+- 将 AI 助手生成结果进一步映射到 FlowGram 工作流画布。
+- 增强历史消息持久化一致性，尤其是工具结果、澄清消息和中断恢复。
+- 增加运行记录、反馈、取消、等待等运行时接口。

@@ -46,6 +46,28 @@ npm install
 npm run dev
 ```
 
+## 环境配置
+
+- `VITE_API_BASE_URL`：前端通过 `langgraph-sdk` 请求后端时使用的 API 基地址。
+- `VITE_DEV_API_PROXY_TARGET`：仅本地开发时使用，Vite 会把 `/api` 代理到这个后端地址。
+
+推荐配置：
+
+```bash
+# .env.development
+VITE_API_BASE_URL=/api
+VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8000
+
+# .env.production
+VITE_API_BASE_URL=/api
+```
+
+如果线上前后端不是同域，也可以把 `VITE_API_BASE_URL` 改成完整地址，例如：
+
+```bash
+VITE_API_BASE_URL=https://api.example.com/api
+```
+
 ## 下一步建议
 
 1. 接入 `FlowGram.AI` 编辑器实例，替换当前 mock canvas。

@@ -216,3 +216,20 @@ curl -N -X POST "http://127.0.0.1:8000/api/stream" \
 - Repository name: `agentic-workflow-studio`
 - Description: `An open-source agentic workflow builder that generates, executes, debugs, and solidifies workflows through sandbox-driven agents.`
 - Slogan: `Build workflows with agents, verify them in sandboxes, and solidify them into reusable automation.`
+
+
+## TODO
+- 与前端建立sse对话
+1. 把前端项目导入进来
+2. 通过模型完善功能，能够打通对话
+- 生成工作流，langgraph(澄清确认)
+1. 几个基本的节点的创建（大模型节点、选择器节点、循环节点）
+2. 可通过langgragh可进行编排运行
+3. 定义系统级别的skill,让其找到目前有哪些已有的节点，补全待创建的用户节点
+4. 可跟助手互动，调整这个编排流
+- 沙箱环境绑定
+
+- 节点功能生成
+1. 插件功能编码生成，创建一个插件功能的skill
+测试数据->功能编码->调用测试[沙箱中的项目、编码，功能能力清单]
+- 持久化

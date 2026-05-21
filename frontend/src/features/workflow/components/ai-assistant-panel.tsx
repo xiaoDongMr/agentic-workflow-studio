@@ -18,11 +18,13 @@ import {
   getThreadSummarySubtitle,
   getThreadSummaryTitle,
   isRecord,
+  mergeThreadSummaries,
   mergePartialMessage,
   persistThreadId,
   readStoredThreadId,
   ThreadSidebar,
   TimelineMessageList,
+  upsertThreadTitle,
   type NoticeMessage,
 } from './assistant'
 
@@ -151,7 +153,8 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
   const refreshThreads = useCallback(async () => {
     setThreadsLoading(true)
     try {
-      setThreads(await listAssistantThreads())
+      const remoteThreads = await listAssistantThreads()
+      setThreads((current) => mergeThreadSummaries(remoteThreads, current))
     } catch (error) {
       const nextError = error instanceof Error ? error.message : '加载历史会话失败'
       setErrorText(nextError)
@@ -234,7 +237,12 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
     setOldestHistorySeq(undefined)
     setOptimisticUserMessage(null)
     setEphemeralMessages((current) => current.filter((message) => message.id && !nextIds.has(message.id)))
-  }, [])
+
+    const nextTitle = typeof data.title === 'string' ? data.title.trim() : ''
+    if (nextTitle && threadId) {
+      setThreads((current) => upsertThreadTitle(current, threadId, nextTitle, isStreaming ? 'running' : 'idle'))
+    }
+  }, [isStreaming, threadId])
 
   const consumeTupleMessage = useCallback(
     (data: unknown) => {

@@ -1,425 +1,133 @@
-import type { HumanMessage, Message } from '@langchain/langgraph-sdk'
-import { type HTMLAttributes, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronsUp, History, PanelLeftClose, RefreshCw, SendHorizontal, Sparkles } from 'lucide-react'
+import { type HTMLAttributes, type KeyboardEvent, useCallback, useEffect, useRef } from 'react'
+import { ChevronsUp, Coins, FileText, History, PanelLeftClose, RefreshCw, SendHorizontal, Sparkles, Square } from 'lucide-react'
 
-import { streamAssistantMessage, type AssistantStreamEvent } from '@/api/assistant'
-import {
-  getAssistantThreadMessages,
-  listAssistantThreads,
-  type AssistantThreadMessageRecord,
-  type AssistantThreadSummary,
-} from '@/api/assistant-history'
+import { useAssistantThreadStream } from '@/features/workflow/hooks/use-assistant-thread-stream'
 import { cn } from '@/lib/utils'
 
 import {
-  createAssistantMessageNormalizer,
   formatRelativeTimestamp,
-  getAssistantTimelineItems,
-  getThreadSummarySubtitle,
   getThreadSummaryTitle,
-  isRecord,
-  mergeThreadSummaries,
-  mergePartialMessage,
-  persistThreadId,
-  readStoredThreadId,
+  getThreadUpdatedAt,
   ThreadSidebar,
   TimelineMessageList,
-  upsertThreadTitle,
-  type NoticeMessage,
 } from './assistant'
 
 interface AiAssistantPanelProps extends HTMLAttributes<HTMLDivElement> {
   onCollapse?: () => void
 }
 
-function createMessageId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}-${crypto.randomUUID()}`
-  }
-
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function createOptimisticHumanMessage(content: string): HumanMessage {
-  return {
-    id: createMessageId('user'),
-    type: 'human',
-    content,
-  }
-}
-
-function buildNotice(content: string, tone: NoticeMessage['tone']): NoticeMessage {
-  return {
-    id: createMessageId('notice'),
-    tone,
-    content,
-  }
-}
-
-function normalizeEventName(eventName: string) {
-  return eventName.split('|')[0] ?? eventName
-}
-
-function mergeConversationMessages({
-  backendMessages,
-  ephemeralMessages,
-  optimisticUserMessage,
-}: {
-  backendMessages: Message[]
-  ephemeralMessages: Message[]
-  optimisticUserMessage: HumanMessage | null
-}) {
-  const nextMessages = [...backendMessages]
-
-  if (optimisticUserMessage) {
-    nextMessages.push(optimisticUserMessage)
-  }
-
-  for (const partialMessage of ephemeralMessages) {
-    const targetIndex = partialMessage.id ? nextMessages.findIndex((message) => message.id === partialMessage.id) : -1
-
-    if (targetIndex === -1) {
-      nextMessages.push(partialMessage)
-    } else {
-      nextMessages[targetIndex] = partialMessage
-    }
-  }
-
-  return nextMessages
-}
-
-function dedupeMessagesById(messages: Message[]) {
-  const seen = new Set<string>()
-
-  return messages.filter((message) => {
-    if (!message.id) {
-      return true
-    }
-    if (seen.has(message.id)) {
-      return false
-    }
-    seen.add(message.id)
-    return true
-  })
-}
-
-function scheduleAsyncTask(task: () => void) {
-  queueMicrotask(task)
-}
+const SUGGESTED_PROMPTS = [
+  '帮我生成一个订单查询工作流',
+  '给当前画布补一套客服投诉处理链路',
+  '检查这个工作流还缺哪些节点',
+  '把流程改成先校验权限再调用工具',
+]
 
 export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistantPanelProps) {
-  const [backendMessages, setBackendMessages] = useState<Message[]>([])
-  const [ephemeralMessages, setEphemeralMessages] = useState<Message[]>([])
-  const [optimisticUserMessage, setOptimisticUserMessage] = useState<HumanMessage | null>(null)
-  const [notices, setNotices] = useState<NoticeMessage[]>([])
-  const [inputValue, setInputValue] = useState('')
-  const [threadId, setThreadId] = useState<string | undefined>(() => readStoredThreadId())
-  const [threads, setThreads] = useState<AssistantThreadSummary[]>([])
-  const [threadsLoading, setThreadsLoading] = useState(false)
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyHasMore, setHistoryHasMore] = useState(false)
-  const [oldestHistorySeq, setOldestHistorySeq] = useState<number>()
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
-  const [errorText, setErrorText] = useState('')
-  const abortControllerRef = useRef<AbortController | null>(null)
-  const messageNormalizerRef = useRef(createAssistantMessageNormalizer())
+  const {
+    activeThread,
+    artifactPaths,
+    closeHistoryDrawer,
+    currentThreadTitle,
+    currentRunId,
+    deleteThread,
+    errorText,
+    exportThread,
+    feedbackByRunId,
+    hasAssistantOutput,
+    historyDrawerOpen,
+    historyHasMore,
+    historyLoading,
+    inputValue,
+    isStreaming,
+    loadMoreHistory,
+    messages,
+    notices,
+    openHistoryDrawer,
+    renameThread,
+    resetConversation,
+    selectThread,
+    sendMessage,
+    setInputValue,
+    stopStreaming,
+    submitFeedback,
+    threadId,
+    threads,
+    threadsLoading,
+    timelineItems,
+    tokenUsage,
+  } = useAssistantThreadStream()
   const viewportRef = useRef<HTMLDivElement | null>(null)
-
-  const appendNotice = useCallback((content: string, tone: NoticeMessage['tone']) => {
-    setNotices((current) => [...current, buildNotice(content, tone)])
-  }, [])
-
-  const conversationMessages = useMemo(
-    () => mergeConversationMessages({ backendMessages, ephemeralMessages, optimisticUserMessage }),
-    [backendMessages, ephemeralMessages, optimisticUserMessage],
-  )
-
-  const timelineItems = useMemo(() => getAssistantTimelineItems(conversationMessages), [conversationMessages])
-  const hasAssistantOutput = useMemo(() => timelineItems.some((item) => item.type !== 'human'), [timelineItems])
-  const activeThread = useMemo(() => threads.find((item) => item.thread_id === threadId), [threadId, threads])
-
-  const normalizeHistoryRecords = useCallback((records: AssistantThreadMessageRecord[]) => {
-    return records
-      .map((record) =>
-        messageNormalizerRef.current.normalizeMessage(
-          record.content,
-          isRecord(record.metadata) ? record.metadata : undefined,
-        ),
-      )
-      .filter((message): message is Message => message !== null)
-  }, [])
-
-  const refreshThreads = useCallback(async () => {
-    setThreadsLoading(true)
-    try {
-      const remoteThreads = await listAssistantThreads()
-      setThreads((current) => mergeThreadSummaries(remoteThreads, current))
-    } catch (error) {
-      const nextError = error instanceof Error ? error.message : '加载历史会话失败'
-      setErrorText(nextError)
-      appendNotice(nextError, 'error')
-    } finally {
-      setThreadsLoading(false)
-    }
-  }, [appendNotice])
-
-  const upsertEphemeralMessage = useCallback((message: Message, mode: 'append' | 'replace' = 'append') => {
-    setEphemeralMessages((current) => {
-      const targetIndex = message.id ? current.findIndex((item) => item.id === message.id) : -1
-      if (targetIndex === -1) {
-        return [...current, message]
-      }
-
-      const nextMessages = [...current]
-      nextMessages[targetIndex] = mode === 'append' ? mergePartialMessage(nextMessages[targetIndex], message) : message
-      return nextMessages
-    })
-  }, [])
-
-  const replaceConversationWithHistory = useCallback(
-    async (nextThreadId: string) => {
-      setHistoryLoading(true)
-      try {
-        const result = await getAssistantThreadMessages(nextThreadId)
-        const nextMessages = normalizeHistoryRecords(result.data)
-        setThreadId(nextThreadId)
-        setBackendMessages(nextMessages)
-        setEphemeralMessages([])
-        setOptimisticUserMessage(null)
-        setNotices([])
-        setErrorText('')
-        setHistoryHasMore(result.has_more)
-        setOldestHistorySeq(result.data[0]?.seq)
-        messageNormalizerRef.current.clear()
-      } catch (error) {
-        const nextError = error instanceof Error ? error.message : '加载历史消息失败'
-        setErrorText(nextError)
-        appendNotice(nextError, 'error')
-      } finally {
-        setHistoryLoading(false)
-      }
-    },
-    [appendNotice, normalizeHistoryRecords],
-  )
-
-  const loadMoreHistory = useCallback(async () => {
-    if (!threadId || !oldestHistorySeq || historyLoading || isStreaming) {
-      return
-    }
-
-    setHistoryLoading(true)
-    try {
-      const result = await getAssistantThreadMessages(threadId, oldestHistorySeq)
-      const olderMessages = normalizeHistoryRecords(result.data)
-      setBackendMessages((current) => dedupeMessagesById([...olderMessages, ...current]))
-      setHistoryHasMore(result.has_more)
-      setOldestHistorySeq(result.data[0]?.seq ?? oldestHistorySeq)
-    } catch (error) {
-      const nextError = error instanceof Error ? error.message : '加载更早历史消息失败'
-      setErrorText(nextError)
-      appendNotice(nextError, 'error')
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [appendNotice, historyLoading, isStreaming, normalizeHistoryRecords, oldestHistorySeq, threadId])
-
-  const syncSnapshotMessages = useCallback((data: unknown) => {
-    if (!isRecord(data) || !Array.isArray(data.messages)) {
-      return
-    }
-
-    const nextMessages = messageNormalizerRef.current.normalizeMessageList(data.messages)
-    const nextIds = new Set(nextMessages.map((message) => message.id).filter(Boolean))
-
-    setBackendMessages(nextMessages)
-    setHistoryHasMore(false)
-    setOldestHistorySeq(undefined)
-    setOptimisticUserMessage(null)
-    setEphemeralMessages((current) => current.filter((message) => message.id && !nextIds.has(message.id)))
-
-    const nextTitle = typeof data.title === 'string' ? data.title.trim() : ''
-    if (nextTitle && threadId) {
-      setThreads((current) => upsertThreadTitle(current, threadId, nextTitle, isStreaming ? 'running' : 'idle'))
-    }
-  }, [isStreaming, threadId])
-
-  const consumeTupleMessage = useCallback(
-    (data: unknown) => {
-      const message = messageNormalizerRef.current.normalizeMessageTuple(data)
-      if (message) {
-        upsertEphemeralMessage(message, 'replace')
-      }
-    },
-    [upsertEphemeralMessage],
-  )
-
-  const consumeMessageList = useCallback(
-    (data: unknown, mode: 'append' | 'replace') => {
-      messageNormalizerRef.current.normalizeMessageList(data).forEach((message) => {
-        upsertEphemeralMessage(message, mode)
-      })
-    },
-    [upsertEphemeralMessage],
-  )
-
-  const handleStreamEvent = useCallback(
-    (event: AssistantStreamEvent) => {
-      const eventName = normalizeEventName(event.event)
-
-      if (eventName === 'metadata') {
-        if (isRecord(event.data) && typeof event.data.thread_id === 'string') {
-          setThreadId(event.data.thread_id)
-        }
-        return
-      }
-
-      if (eventName === 'messages') {
-        consumeTupleMessage(event.data)
-        return
-      }
-
-      if (eventName === 'messages/partial') {
-        consumeMessageList(event.data, 'replace')
-        return
-      }
-
-      if (eventName === 'messages/complete') {
-        consumeMessageList(event.data, 'replace')
-        return
-      }
-
-      if (eventName === 'values') {
-        syncSnapshotMessages(event.data)
-        return
-      }
-
-      if (eventName === 'error') {
-        const nextError =
-          isRecord(event.data) && typeof event.data.message === 'string'
-            ? event.data.message
-            : 'AI 助手返回了错误事件'
-        setErrorText(nextError)
-        appendNotice(nextError, 'error')
-      }
-    },
-    [appendNotice, consumeMessageList, consumeTupleMessage, syncSnapshotMessages],
-  )
-
-  const resetConversation = useCallback(() => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    messageNormalizerRef.current.clear()
-    setThreadId(undefined)
-    setBackendMessages([])
-    setEphemeralMessages([])
-    setHistoryHasMore(false)
-    setOldestHistorySeq(undefined)
-    setOptimisticUserMessage(null)
-    setNotices([])
-    setInputValue('')
-    setErrorText('')
-    setIsStreaming(false)
-  }, [])
-
-  const handleSelectThread = useCallback(
-    (nextThreadId: string) => {
-      if (isStreaming || historyLoading || (nextThreadId === threadId && backendMessages.length > 0)) {
-        return
-      }
-
-      void replaceConversationWithHistory(nextThreadId)
-    },
-    [backendMessages.length, historyLoading, isStreaming, replaceConversationWithHistory, threadId],
-  )
-
-  const openHistoryDrawer = useCallback(() => {
-    setHistoryDrawerOpen(true)
-    scheduleAsyncTask(() => void refreshThreads())
-  }, [refreshThreads])
-
-  const handleSend = useCallback(async () => {
-    const prompt = inputValue.trim()
-    if (!prompt || isStreaming) {
-      return
-    }
-
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-    setIsStreaming(true)
-    setErrorText('')
-    setEphemeralMessages([])
-    setHistoryHasMore(false)
-    setOldestHistorySeq(undefined)
-    messageNormalizerRef.current.clear()
-    setOptimisticUserMessage(createOptimisticHumanMessage(prompt))
-    setInputValue('')
-
-    try {
-      await streamAssistantMessage({
-        message: prompt,
-        threadId,
-        signal: controller.signal,
-        onThreadId: setThreadId,
-        onEvent: handleStreamEvent,
-      })
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return
-      }
-
-      const nextError = error instanceof Error ? error.message : '发起流式对话失败'
-      setErrorText(nextError)
-      appendNotice(nextError, 'error')
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null
-      }
-      setIsStreaming(false)
-    }
-  }, [appendNotice, handleStreamEvent, inputValue, isStreaming, threadId])
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
+  const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastLoadMoreAtRef = useRef(0)
+  const lastTailItemIdRef = useRef<string | undefined>()
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void handleSend()
+      void sendMessage()
     }
   }
 
-  useEffect(() => {
-    const viewport = viewportRef.current
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight
-    }
-  }, [timelineItems, notices, isStreaming])
-
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort()
-    }
-  }, [])
-
-  useEffect(() => {
-    scheduleAsyncTask(() => void refreshThreads())
-  }, [refreshThreads])
-
-  useEffect(() => {
-    persistThreadId(threadId)
-  }, [threadId])
-
-  useEffect(() => {
-    if (!threadId || backendMessages.length > 0 || ephemeralMessages.length > 0 || optimisticUserMessage) {
+  const throttledLoadMoreHistory = useCallback(() => {
+    if (!historyHasMore || historyLoading || isStreaming) {
       return
     }
 
-    scheduleAsyncTask(() => void replaceConversationWithHistory(threadId))
-  }, [backendMessages.length, ephemeralMessages.length, optimisticUserMessage, replaceConversationWithHistory, threadId])
+    const now = Date.now()
+    const remaining = 1200 - (now - lastLoadMoreAtRef.current)
+    if (remaining <= 0) {
+      lastLoadMoreAtRef.current = now
+      void loadMoreHistory()
+      return
+    }
+
+    if (loadMoreTimeoutRef.current) {
+      return
+    }
+
+    loadMoreTimeoutRef.current = window.setTimeout(() => {
+      loadMoreTimeoutRef.current = null
+      if (!historyHasMore || historyLoading || isStreaming) {
+        return
+      }
+      lastLoadMoreAtRef.current = Date.now()
+      void loadMoreHistory()
+    }, remaining)
+  }, [historyHasMore, historyLoading, isStreaming, loadMoreHistory])
 
   useEffect(() => {
-    if (!isStreaming) {
-      scheduleAsyncTask(() => void refreshThreads())
+    const viewport = viewportRef.current
+    const tailItemId = timelineItems[timelineItems.length - 1]?.id
+    if (viewport && (lastTailItemIdRef.current !== tailItemId || isStreaming)) {
+      viewport.scrollTop = viewport.scrollHeight
     }
-  }, [isStreaming, refreshThreads, threadId])
+    lastTailItemIdRef.current = tailItemId
+  }, [timelineItems, notices, isStreaming])
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    const viewport = viewportRef.current
+    if (!sentinel || !viewport || !historyHasMore) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          throttledLoadMoreHistory()
+        }
+      },
+      {
+        root: viewport,
+        rootMargin: '160px 0px 0px 0px',
+      },
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [historyHasMore, throttledLoadMoreHistory])
 
   return (
     <section
@@ -477,26 +185,30 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
           historyLoading={historyLoading}
           isStreaming={isStreaming}
           open={historyDrawerOpen}
-          onClose={() => setHistoryDrawerOpen(false)}
+          onClose={closeHistoryDrawer}
           onNewThread={resetConversation}
-          onSelectThread={handleSelectThread}
+          onDeleteThread={deleteThread}
+          onExportThread={exportThread}
+          onRenameThread={renameThread}
+          onSelectThread={selectThread}
         />
 
         <div className="min-h-0 flex flex-1 flex-col">
           <div className="border-b border-white/8 px-4 py-3">
             <div className="line-clamp-1 text-sm font-medium text-white">
-              {activeThread ? getThreadSummaryTitle(activeThread) : '当前会话'}
+              {activeThread ? getThreadSummaryTitle(activeThread) : currentThreadTitle || '当前会话'}
             </div>
             <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
               <span className="line-clamp-1">
                 {threadId ? `线程：${threadId}` : '发送首条消息后自动创建线程'}
               </span>
-              <span>{activeThread ? formatRelativeTimestamp(activeThread.updated_at) : '未开始'}</span>
+              <span>{activeThread ? formatRelativeTimestamp(getThreadUpdatedAt(activeThread)) : '未开始'}</span>
             </div>
           </div>
 
           <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             <div className="space-y-4">
+              <div ref={loadMoreSentinelRef} className="h-1" />
               {historyHasMore && (
                 <button
                   type="button"
@@ -509,7 +221,7 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
                 </button>
               )}
 
-              {conversationMessages.length === 0 && (
+              {messages.length === 0 && (
                 <>
                   <div className="flex items-start gap-3 rounded-[24px] border border-blue-400/15 bg-blue-500/8 p-4">
                     <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-400/20 bg-blue-500/10 text-blue-200">
@@ -525,10 +237,31 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
                   <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-xs leading-5 text-slate-400">
                     试试输入「帮我生成一个订单查询工作流」或「给当前画布补一套客服投诉处理链路」。
                   </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {SUGGESTED_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => void sendMessage(prompt)}
+                        disabled={isStreaming || historyLoading}
+                        className="rounded-2xl border border-white/8 bg-white/4 px-3 py-2 text-left text-xs leading-5 text-slate-300 transition-colors hover:border-blue-400/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </>
               )}
 
-              <TimelineMessageList items={timelineItems} notices={notices} isStreaming={isStreaming} />
+              <TimelineMessageList
+                items={timelineItems}
+                notices={notices}
+                isStreaming={isStreaming}
+                threadId={threadId}
+                currentRunId={currentRunId}
+                feedbackByRunId={feedbackByRunId}
+                onFeedback={submitFeedback}
+              />
 
               {isStreaming && !hasAssistantOutput && (
                 <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-xs text-slate-300">
@@ -539,6 +272,33 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
           </div>
 
           <div className="border-t border-white/8 px-4 py-4">
+            {(artifactPaths.length > 0 || tokenUsage.totalTokens > 0) && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
+                {tokenUsage.totalTokens > 0 && (
+                  <span className="inline-flex items-center gap-1.5 rounded-xl border border-white/8 bg-white/4 px-2.5 py-1.5 text-slate-400">
+                    <Coins className="h-3.5 w-3.5 text-amber-300" />
+                    Token {tokenUsage.totalTokens} · 输入 {tokenUsage.inputTokens} / 输出 {tokenUsage.outputTokens}
+                  </span>
+                )}
+                {artifactPaths.slice(0, 3).map((artifactPath) => (
+                  <a
+                    key={artifactPath}
+                    href={artifactPath.startsWith('/api/') ? artifactPath : `/api/threads/${threadId}/artifacts${artifactPath}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex max-w-[220px] items-center gap-1.5 truncate rounded-xl border border-white/8 bg-white/4 px-2.5 py-1.5 text-slate-400 transition-colors hover:border-blue-400/30 hover:text-white"
+                  >
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-300" />
+                    <span className="truncate">{artifactPath.split('/').pop() || artifactPath}</span>
+                  </a>
+                ))}
+                {artifactPaths.length > 3 && (
+                  <span className="rounded-xl border border-white/8 bg-white/4 px-2.5 py-1.5 text-slate-500">
+                    另有 {artifactPaths.length - 3} 个文件
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-slate-950/85 px-4 py-3">
               <input
                 type="text"
@@ -550,22 +310,27 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
               />
               <button
                 type="button"
-                onClick={() => void handleSend()}
-                disabled={!inputValue.trim() || isStreaming || historyLoading}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500 text-white transition-colors hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-slate-700"
-                aria-label="发送"
+                onClick={() => (isStreaming ? stopStreaming() : void sendMessage())}
+                disabled={(!inputValue.trim() && !isStreaming) || historyLoading}
+                className={cn(
+                  'flex h-10 w-10 items-center justify-center rounded-xl text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-700',
+                  isStreaming ? 'bg-rose-500 hover:bg-rose-400' : 'bg-blue-500 hover:bg-blue-400',
+                )}
+                aria-label={isStreaming ? '停止生成' : '发送'}
               >
-                <SendHorizontal className="h-4 w-4" />
+                {isStreaming ? <Square className="h-4 w-4 fill-current" /> : <SendHorizontal className="h-4 w-4" />}
               </button>
             </div>
             <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-slate-500">
-              <span>{activeThread ? getThreadSummarySubtitle(activeThread) : '发送首条消息后自动创建线程'}</span>
+              <span>
+                {activeThread ? `最近更新：${formatRelativeTimestamp(getThreadUpdatedAt(activeThread))}` : '发送首条消息后自动创建线程'}
+              </span>
               <span>
                 {errorText ||
                   (historyLoading
                     ? '正在加载历史消息'
                     : isStreaming
-                      ? '正在通过 langgraph-sdk 接收结构化流式消息'
+                      ? '正在通过 langgraph-sdk/react useStream 接收结构化流式消息'
                       : '等待输入')}
               </span>
             </div>

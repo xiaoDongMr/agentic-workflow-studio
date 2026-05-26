@@ -1,6 +1,7 @@
 import type { AssistantThreadSummary } from '@/api/assistant-history'
 
 const THREAD_STORAGE_KEY = 'workflow-ai-assistant-thread-id'
+const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 export function readStoredThreadId() {
   if (typeof window === 'undefined') {
@@ -29,7 +30,8 @@ export function formatRelativeTimestamp(value?: string) {
     return '刚刚'
   }
 
-  const timestamp = new Date(value).getTime()
+  const date = new Date(value)
+  const timestamp = date.getTime()
   if (Number.isNaN(timestamp)) {
     return '最近更新'
   }
@@ -38,7 +40,25 @@ export function formatRelativeTimestamp(value?: string) {
   const minute = 60 * 1000
   const hour = 60 * minute
   const day = 24 * hour
+  const absDelta = Math.abs(delta)
+  const timeText = date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 
+  if (delta < 0 && absDelta < minute) {
+    return '刚刚'
+  }
+  if (delta < 0) {
+    return date.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+  }
   if (delta < minute) {
     return '刚刚'
   }
@@ -48,21 +68,37 @@ export function formatRelativeTimestamp(value?: string) {
   if (delta < day) {
     return `${Math.floor(delta / hour)} 小时前`
   }
-  return `${Math.floor(delta / day)} 天前`
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const dayDiff = Math.floor((startOfToday - startOfTarget) / day)
+
+  if (dayDiff === 1) {
+    return `昨天 ${timeText}`
+  }
+  if (dayDiff > 1 && dayDiff < 7) {
+    return `${WEEKDAY_LABELS[date.getDay()]} ${timeText}`
+  }
+
+  const sameYear = date.getFullYear() === now.getFullYear()
+  return date.toLocaleString('zh-CN', {
+    year: sameYear ? undefined : 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 export function getThreadSummaryTitle(thread: AssistantThreadSummary) {
-  return getThreadTitle(thread) || '未命名会话'
+  return getThreadTitle(thread) || 'Untitled'
 }
 
 export function getThreadTitle(thread: AssistantThreadSummary) {
-  const displayName = thread.display_name?.trim()
-  if (displayName) {
-    return displayName
-  }
-
-  const metadataTitle = typeof thread.metadata?.title === 'string' ? thread.metadata.title.trim() : ''
-  return metadataTitle || ''
+  const valueTitle = typeof thread.values?.title === 'string' ? thread.values.title.trim() : ''
+  return valueTitle || ''
 }
 
 export function mergeThreadSummaries(
@@ -84,7 +120,10 @@ export function mergeThreadSummaries(
 
     return {
       ...remoteThread,
-      display_name: currentTitle,
+      values: {
+        ...remoteThread.values,
+        title: currentTitle,
+      },
     }
   })
   const localOnlyThreads = currentThreads.filter((thread) => !remoteIds.has(thread.thread_id) && getThreadTitle(thread))
@@ -103,7 +142,9 @@ export function upsertThreadTitle(
     return [
       {
         thread_id: threadId,
-        display_name: title,
+        values: {
+          title,
+        },
         status,
         updated_at: new Date().toISOString(),
       },
@@ -114,16 +155,15 @@ export function upsertThreadTitle(
   const nextThreads = [...threads]
   nextThreads[index] = {
     ...nextThreads[index],
-    display_name: title,
+    values: {
+      ...nextThreads[index].values,
+      title,
+    },
     updated_at: nextThreads[index].updated_at ?? new Date().toISOString(),
   }
   return nextThreads
 }
 
-export function getThreadSummarySubtitle(thread: AssistantThreadSummary) {
-  const assistantId = thread.assistant_id?.trim()
-  if (assistantId) {
-    return assistantId
-  }
-  return thread.status?.trim() || '线程会话'
+export function getThreadUpdatedAt(thread: AssistantThreadSummary) {
+  return thread.updated_at || thread.created_at
 }

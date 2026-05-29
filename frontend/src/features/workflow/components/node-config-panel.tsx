@@ -74,7 +74,7 @@ export function NodeConfigPanel({
             <SelectField
               label="模型"
               value={node.config.model}
-              options={['GPT-4o', 'Embedding + Rerank', 'Function Calling', 'Rule Engine', 'HTTP Bridge', 'System', 'N/A']}
+              options={['', 'Rule Engine', 'Loop Engine', 'Python', 'System', 'N/A']}
               onChange={(value) => onUpdateNode({ config: { model: value } })}
             />
             <SelectField

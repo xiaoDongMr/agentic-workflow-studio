@@ -36,7 +36,6 @@ import type {
   TrialRunNodeExecution,
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
-  buildTrialRunNodeExecutions,
   createNodeData,
   fromFlowgramJSON,
   getNextNodeCanvasPosition,
@@ -45,6 +44,7 @@ import {
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
 import { FlowgramNodeCard } from '@/features/workflow/editor/workflow-node-card'
+import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
@@ -114,7 +114,7 @@ export function WorkflowEditor({
     {
       name: 'input2',
       type: 'json',
-      value: '{\n  "userInput": "我要查询订单进度",\n  "session": {\n    "userId": "U20260428",\n    "channel": "app"\n  }\n}',
+      value: '{\n  "userInput": "我要查询订单进度",\n  "items": ["订单", "物流", "售后"],\n  "message": {\n    "content": "我要查询订单进度"\n  },\n  "session": {\n    "userId": "U20260428",\n    "channel": "app"\n  }\n}',
     },
     {
       name: 'ujsj',
@@ -124,16 +124,22 @@ export function WorkflowEditor({
   ])
   const [globalDebugJsonMode, setGlobalDebugJsonMode] = useState(false)
   const [globalDebugCombinedJson, setGlobalDebugCombinedJson] = useState(
-    '{\n  "input2": {\n    "userInput": "我要查询订单进度",\n    "session": {\n      "userId": "U20260428",\n      "channel": "app"\n    }\n  },\n  "ujsj": "test string"\n}',
+    '{\n  "input2": {\n    "userInput": "我要查询订单进度",\n    "items": ["订单", "物流", "售后"],\n    "message": {\n      "content": "我要查询订单进度"\n    },\n    "session": {\n      "userId": "U20260428",\n      "channel": "app"\n    }\n  },\n  "ujsj": "test string"\n}',
   )
   const [globalDebugJsonError, setGlobalDebugJsonError] = useState('')
   const [trialRunExecutions, setTrialRunExecutions] = useState<Record<string, TrialRunNodeExecution>>({})
   const [trialRunning, setTrialRunning] = useState(false)
   const runTimerIdsRef = useRef<number[]>([])
+  const runAbortControllerRef = useRef<AbortController | null>(null)
 
   const clearTrialRunTimers = useCallback(() => {
     runTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId))
     runTimerIdsRef.current = []
+  }, [])
+
+  const abortTrialRunStream = useCallback(() => {
+    runAbortControllerRef.current?.abort()
+    runAbortControllerRef.current = null
   }, [])
 
   const syncNodeTrialRunExecution = useCallback(
@@ -425,70 +431,37 @@ export function WorkflowEditor({
   useEffect(() => {
     return () => {
       clearTrialRunTimers()
+      abortTrialRunStream()
     }
-  }, [clearTrialRunTimers])
+  }, [abortTrialRunStream, clearTrialRunTimers])
 
-  const startTrialRun = useCallback(() => {
+  const startTrialRun = useCallback(async () => {
     clearTrialRunTimers()
+    abortTrialRunStream()
     setTrialRunOpen(true)
     setTrialRunExecutions({})
     clearAllNodeTrialRunExecutions()
 
     try {
+      const abortController = new AbortController()
+      runAbortControllerRef.current = abortController
       const payload = globalDebugJsonMode
         ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
         : buildDebugPayloadFromFields(globalDebugFields)
-      const userInput =
-        typeof payload.userInput === 'string' && payload.userInput.trim().length > 0
-          ? payload.userInput.trim()
-          : '未提供用户输入'
-      const userId =
-        typeof payload.session === 'object' &&
-        payload.session !== null &&
-        typeof (payload.session as { userId?: unknown }).userId === 'string'
-          ? ((payload.session as { userId: string }).userId ?? '').trim() || 'unknown-user'
-          : 'unknown-user'
-      const channel =
-        typeof payload.session === 'object' &&
-        payload.session !== null &&
-        typeof (payload.session as { channel?: unknown }).channel === 'string'
-          ? ((payload.session as { channel: string }).channel ?? '').trim() || 'unknown-channel'
-          : 'unknown-channel'
-      const executions = buildTrialRunNodeExecutions({
-        fields: globalDebugFields,
-        userInput,
-        userId,
-        channel,
-      })
+      const workflow = {
+        id: 'current-canvas',
+        name: '当前画布工作流',
+        description: '前端画布提交到后端 LangGraph 执行的工作流。',
+        version: 'v0.1.0',
+        nodes,
+        edges,
+      }
       setGlobalDebugJsonError('')
 
       setTrialRunning(true)
-
-      executions.forEach((execution, index) => {
-        const startTimerId = window.setTimeout(() => {
-          setTrialRunExecutions((prev) => {
-            const next = { ...prev }
-
-            Object.entries(next).forEach(([nodeId, item]) => {
-              if (item.status === 'running') {
-                next[nodeId] = {
-                  ...item,
-                  status: 'success',
-                }
-              }
-            })
-
-            next[execution.nodeId] = {
-              ...execution,
-              status: 'running',
-            }
-            syncNodeTrialRunExecution(execution.nodeId, next[execution.nodeId])
-
-            return next
-          })
-        }, index * 520)
-
-        const finishTimerId = window.setTimeout(() => {
+      await streamWorkflow(workflow, payload, {
+        signal: abortController.signal,
+        onStep: (execution) => {
           setTrialRunExecutions((prev) => {
             const next = {
               ...prev,
@@ -497,38 +470,41 @@ export function WorkflowEditor({
             syncNodeTrialRunExecution(execution.nodeId, execution)
             return next
           })
-
-          if (index === executions.length - 1) {
-            setTrialRunning(false)
-          }
-        }, index * 520 + 320)
-
-        runTimerIdsRef.current.push(startTimerId, finishTimerId)
+        },
       })
-
-      return
-    } catch {
+      if (runAbortControllerRef.current === abortController) {
+        runAbortControllerRef.current = null
+      }
+      setTrialRunning(false)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
       setTrialRunning(false)
       setTrialRunExecutions({})
       clearAllNodeTrialRunExecutions()
-      setGlobalDebugJsonError('请输入正确的 JSON 结构')
+      setGlobalDebugJsonError('运行失败，请检查 JSON、节点配置或后端服务')
     }
   }, [
     clearAllNodeTrialRunExecutions,
     clearTrialRunTimers,
+    abortTrialRunStream,
+    edges,
     globalDebugCombinedJson,
     globalDebugFields,
     globalDebugJsonMode,
+    nodes,
     syncNodeTrialRunExecution,
   ])
 
   const closeTrialRun = useCallback(() => {
     clearTrialRunTimers()
+    abortTrialRunStream()
     setTrialRunning(false)
     setTrialRunOpen(false)
     setTrialRunExecutions({})
     clearAllNodeTrialRunExecutions()
-  }, [clearAllNodeTrialRunExecutions, clearTrialRunTimers])
+  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunTimers])
 
   const updateGlobalDebugField = useCallback((fieldName: string, value: string) => {
     setGlobalDebugFields((prev) =>

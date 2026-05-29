@@ -1,11 +1,10 @@
 export type WorkflowNodeType =
   | 'start'
-  | 'intent'
-  | 'knowledge'
-  | 'skill'
-  | 'http'
-  | 'condition'
-  | 'response'
+  | 'llm'
+  | 'selector'
+  | 'loop'
+  | 'code'
+  | 'end'
 
 export interface WorkflowNodeIO {
   name: string

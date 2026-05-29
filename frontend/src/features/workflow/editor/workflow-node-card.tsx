@@ -34,7 +34,7 @@ export function FlowgramNodeCard({
   const nodeJson = node.toJSON() as WorkflowJSON['nodes'][number] & { data?: FlowgramNodeData }
   const data = nodeJson.data
   const effectiveExecution = trialRunExecution ?? data?.trialRunExecution
-  const kind: WorkflowNode['type'] = data?.kind ?? 'intent'
+  const kind: WorkflowNode['type'] = data?.kind ?? 'llm'
   const Icon = nodeIcons[kind]
   const nodeId = String(nodeJson.id)
   const isSelected = selectedNodeId === nodeId

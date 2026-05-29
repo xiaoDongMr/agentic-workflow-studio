@@ -1,16 +1,10 @@
 import {
-  Blocks,
   Bot,
-  BrainCircuit,
   Braces,
-  Cable,
   ChevronDown,
-  Database,
-  DatabaseZap,
   FileCode2,
   GitBranch,
   ImagePlus,
-  LibraryBig,
   MessageSquareCode,
   Play,
   Plus,
@@ -24,7 +18,7 @@ import { useMemo, useState, type HTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
 interface NodeLibraryProps extends HTMLAttributes<HTMLDivElement> {
-  onAddNode?: (key: 'ai' | 'knowledge' | 'skill' | 'condition' | 'http' | 'custom') => void
+  onAddNode?: (key: 'llm' | 'selector' | 'loop' | 'code' | 'end') => void
 }
 
 export function NodeLibrary({ className, onAddNode, ...props }: NodeLibraryProps) {
@@ -36,45 +30,11 @@ export function NodeLibrary({ className, onAddNode, ...props }: NodeLibraryProps
       {
         title: '基础能力',
         items: [
-          { title: '大模型', icon: Bot, nodeKey: 'ai' as const },
-          { title: '插件', icon: Blocks, nodeKey: 'skill' as const },
-          { title: '工作流', icon: Workflow, nodeKey: 'custom' as const },
-        ],
-      },
-      {
-        title: '业务逻辑',
-        items: [
-          { title: '代码', icon: FileCode2, nodeKey: 'custom' as const },
-          { title: '意图识别', icon: BrainCircuit, nodeKey: 'ai' as const },
-          { title: '批处理', icon: Settings2, nodeKey: 'condition' as const },
-          { title: '异步任务', icon: Cable, nodeKey: 'skill' as const },
-          { title: '选择器', icon: GitBranch, nodeKey: 'condition' as const },
-          { title: '循环', icon: Waypoints, nodeKey: 'condition' as const },
-          { title: '变量聚合', icon: Braces, nodeKey: 'http' as const },
-        ],
-      },
-      {
-        title: '输入&输出',
-        items: [
-          { title: '输入', icon: Plus, nodeKey: 'custom' as const },
-          { title: '输出', icon: MessageSquareCode, nodeKey: 'custom' as const },
-        ],
-      },
-      {
-        title: '数据库',
-        items: [
-          { title: 'SQL 自定义', icon: Database, nodeKey: 'http' as const },
-          { title: '新增数据', icon: DatabaseZap, nodeKey: 'http' as const },
-          { title: '更新数据', icon: DatabaseZap, nodeKey: 'http' as const },
-          { title: '查询数据', icon: Search, nodeKey: 'http' as const },
-          { title: '删除数据', icon: DatabaseZap, nodeKey: 'http' as const },
-        ],
-      },
-      {
-        title: '知识库&数据',
-        items: [
-          { title: '知识库写入', icon: LibraryBig, nodeKey: 'knowledge' as const },
-          { title: '知识库检索', icon: LibraryBig, nodeKey: 'knowledge' as const },
+          { title: '大模型', icon: Bot, nodeKey: 'llm' as const },
+          { title: '选择器', icon: GitBranch, nodeKey: 'selector' as const },
+          { title: '循环', icon: Waypoints, nodeKey: 'loop' as const },
+          { title: '编码', icon: FileCode2, nodeKey: 'code' as const },
+          { title: '结束', icon: Braces, nodeKey: 'end' as const },
         ],
       },
     ],

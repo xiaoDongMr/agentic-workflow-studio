@@ -91,6 +91,7 @@ export function FlowgramNodeCard({
         <div className="aw-flow-node__io">
           <NodeIoRow label="输入" items={inputItems} />
           <NodeIoRow label="输出" items={outputItems} />
+          {kind === 'llm' && <NodeMetaRow label="模型" value={data?.config.model || '默认模型'} />}
         </div>
       </div>
       <div className="aw-flow-node__quick-add aw-flow-ignore-deselect">
@@ -161,6 +162,15 @@ function NodeExecutionPanel({
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+function NodeMetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="aw-flow-node__io-row">
+      <span className="aw-flow-node__io-label">{label}</span>
+      <span className="aw-flow-node__io-empty">{value}</span>
     </div>
   )
 }

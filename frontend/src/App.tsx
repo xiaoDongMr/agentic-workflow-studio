@@ -68,8 +68,10 @@ function App() {
 
               {selectedNode && (
                 <NodeConfigPanel
-                  className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[360px]"
+                  className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[420px] max-w-[calc(100%-24px)]"
                   node={selectedNode}
+                  nodes={workflow.nodes}
+                  edges={workflow.edges}
                   onUpdateNode={(partial) => {
                     if (canvasApi) {
                       canvasApi.updateSelectedNode(partial)

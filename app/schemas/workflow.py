@@ -13,14 +13,25 @@ class WorkflowInputMapping(BaseModel):
 
 class WorkflowNodeConfig(BaseModel):
     prompt: str = ""
+    systemPrompt: str = ""
+    userPrompt: str = ""
     model: str = ""
+    modelProvider: str = "deerflow"
     temperature: float = 0
     maxTokens: int = 0
     enabled: bool = True
     fallbackToHuman: bool = False
     responseMode: Literal["text", "json", "stream"] = "text"
     outputKey: str = "output"
+    reasoningKey: str = "reasoning_content"
     inputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
+    visionInputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
+    supportContinuation: bool = False
+    timeoutSeconds: int = 180
+    firstTokenTimeoutEnabled: bool = False
+    retryCount: int = 0
+    errorStrategy: Literal["interrupt", "fallback", "ignore"] = "interrupt"
+    fallbackOutput: str = ""
 
 
 class WorkflowNodeIO(BaseModel):

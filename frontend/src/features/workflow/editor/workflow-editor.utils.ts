@@ -27,6 +27,7 @@ export function createNodeData(type: WorkflowNode['type']): FlowgramNodeData {
     config: {
       ...base.config,
       inputMappings: base.config.inputMappings.map((mapping) => ({ ...mapping })),
+      visionInputMappings: base.config.visionInputMappings?.map((mapping) => ({ ...mapping })) ?? [],
     },
     inputs: base.inputs.map((item) => ({ ...item })),
     outputs: base.outputs.map((item) => ({ ...item })),
@@ -47,6 +48,7 @@ export function normalizeNodeData(
       ...base.config,
       ...data?.config,
       inputMappings: mergeInputMappings(base.config.inputMappings, data?.config?.inputMappings),
+      visionInputMappings: mergeInputMappings(base.config.visionInputMappings ?? [], data?.config?.visionInputMappings),
     },
     inputs: data?.inputs ?? base.inputs,
     outputs: data?.outputs ?? base.outputs,
@@ -83,6 +85,7 @@ export function toFlowgramJSON(nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
         config: {
           ...node.config,
           inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
+          visionInputMappings: node.config.visionInputMappings?.map((item) => ({ ...item })) ?? [],
         },
         inputs: node.inputs,
         outputs: node.outputs,

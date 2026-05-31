@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from deerflow.config.app_config import AppConfig
-from deerflow.models import create_chat_model
 
 from app.schemas.workflow import WorkflowNode, WorkflowRunStep
+from app.services.workflow_llm import DeerFlowModelProvider, LlmInvokeRequest, LlmInvokeResult, build_llm_request
 
 
 class WorkflowState(TypedDict, total=False):
@@ -32,6 +31,103 @@ class WorkflowNodeExecutor(Protocol):
         state: WorkflowState,
     ) -> dict[str, Any]:
         ...
+
+
+def _normalize_value_type(value_type: str) -> str:
+    normalized = value_type.strip().lower()
+    if normalized.startswith("array<") and normalized.endswith(">"):
+        return "array"
+    aliases = {
+        "str": "string",
+        "string": "string",
+        "int": "integer",
+        "integer": "integer",
+        "float": "number",
+        "number": "number",
+        "bool": "boolean",
+        "boolean": "boolean",
+        "time": "time",
+        "date": "time",
+        "datetime": "time",
+        "object": "object",
+        "json": "object",
+        "array": "array",
+        "list": "array",
+    }
+    return aliases.get(normalized, normalized or "string")
+
+
+def _array_item_type(value_type: str) -> str | None:
+    value_type = value_type.strip()
+    if value_type.lower().startswith("array<") and value_type.endswith(">"):
+        return value_type[6:-1].strip() or None
+    return None
+
+
+def _parse_json_if_string(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    if not ((stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]"))):
+        return value
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return value
+
+
+def _convert_value(value: Any, value_type: str) -> Any:
+    normalized_type = _normalize_value_type(value_type)
+    if value is None:
+        return None
+    if normalized_type == "string":
+        return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if normalized_type == "integer":
+        if isinstance(value, bool):
+            return int(value)
+        return int(float(value))
+    if normalized_type == "number":
+        return float(value)
+    if normalized_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "yes", "y", "on", "是"}
+        return bool(value)
+    if normalized_type == "time":
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str):
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return value
+        raise ValueError(f"无法将 {value!r} 转换为 Time")
+    if normalized_type == "object":
+        parsed = _parse_json_if_string(value)
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError(f"无法将 {value!r} 转换为 Object")
+    if normalized_type == "array":
+        parsed = _parse_json_if_string(value)
+        items = parsed if isinstance(parsed, list) else [parsed]
+        item_type = _array_item_type(value_type)
+        if item_type:
+            return [_convert_value(item, item_type) for item in items]
+        return items
+    return value
+
+
+def _coerce_by_io_definitions(values: dict[str, Any], io_definitions: list[Any]) -> dict[str, Any]:
+    next_values = dict(values)
+    for item in io_definitions:
+        field_name = getattr(item, "name", "")
+        if not field_name or field_name not in next_values:
+            continue
+        next_values[field_name] = _convert_value(next_values[field_name], getattr(item, "type", "string"))
+    return next_values
 
 
 def _extract_message_content(payload: dict[str, Any]) -> str:
@@ -65,9 +161,9 @@ def _resolve_mapping(source: str, state: WorkflowState) -> Any:
     return None
 
 
-def _build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
+def _build_mapped_values(mappings: list[Any], state: WorkflowState) -> dict[str, Any]:
     result: dict[str, Any] = {}
-    for mapping in node.config.inputMappings:
+    for mapping in mappings:
         if not mapping.field:
             continue
         if mapping.sourceType == "context":
@@ -76,12 +172,18 @@ def _build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any
             result[mapping.field] = _resolve_mapping(mapping.source, state)
         else:
             result[mapping.field] = mapping.source
-    if not result:
-        result["input"] = state.get("input", {})
     return result
 
 
+def _build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
+    result = _build_mapped_values(node.config.inputMappings, state)
+    if not result:
+        result["input"] = state.get("input", {})
+    return _coerce_by_io_definitions(result, node.inputs)
+
+
 def _store_node_output(node: WorkflowNode, state: WorkflowState, node_output: dict[str, Any]) -> WorkflowState:
+    node_output = _coerce_by_io_definitions(node_output, node.outputs)
     variables = dict(state.get("variables", {}))
     variables[node.id] = node_output
     output_key = node.config.outputKey or "output"
@@ -123,13 +225,6 @@ def _model_name(node: WorkflowNode, app_config: AppConfig | None) -> str | None:
     return node.config.model if node.config.model in configured_names else None
 
 
-def _message_text(message: Any) -> str:
-    content = getattr(message, "content", message)
-    if isinstance(content, str):
-        return content
-    return json.dumps(content, ensure_ascii=False)
-
-
 def _safe_exec(code: str, node_input: dict[str, Any], variables: dict[str, Any]) -> Any:
     local_vars: dict[str, Any] = {"input": node_input, "variables": variables, "result": None}
     safe_builtins = {
@@ -160,29 +255,63 @@ class StartNodeExecutor:
 class LlmNodeExecutor:
     def __init__(self, app_config: AppConfig | None):
         self.app_config = app_config
+        self.model_provider = DeerFlowModelProvider(app_config)
 
     async def run(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> dict[str, Any]:
-        model = create_chat_model(
-            name=_model_name(node, self.app_config),
-            thinking_enabled=False,
-            app_config=self.app_config,
+        request = build_llm_request(
+            model=_model_name(node, self.app_config),
+            system_prompt_template=node.config.systemPrompt or node.config.prompt or "请根据输入生成结果。",
+            user_prompt_template=node.config.userPrompt or "{{input}}",
+            node_input=self._merge_vision_input(node, node_input, state),
+            variables=state.get("variables", {}),
+            run_input=state.get("input", {}),
+            temperature=node.config.temperature,
+            max_tokens=node.config.maxTokens,
+            timeout_seconds=node.config.timeoutSeconds,
         )
-        prompt = node.config.prompt or "请根据输入生成结果。"
-        response = await model.ainvoke(
-            [
-                SystemMessage(content=prompt),
-                HumanMessage(content=json.dumps(node_input, ensure_ascii=False)),
-            ]
-        )
-        text = _message_text(response)
-        output_key = node.config.outputKey or "text"
+        result = await self._invoke_with_policy(node, request)
+        return self._format_output(node, result.content, result.reasoning_content)
+
+    def _merge_vision_input(
+        self,
+        node: WorkflowNode,
+        node_input: dict[str, Any],
+        state: WorkflowState,
+    ) -> dict[str, Any]:
+        vision_input = _build_mapped_values(node.config.visionInputMappings, state)
+        if not vision_input:
+            return node_input
+        return {**node_input, "vision": vision_input}
+
+    async def _invoke_with_policy(self, node: WorkflowNode, request: LlmInvokeRequest) -> LlmInvokeResult:
+        attempts = max(node.config.retryCount, 0) + 1
+        last_error: Exception | None = None
+        for _ in range(attempts):
+            try:
+                return await self.model_provider.invoke(request)
+            except Exception as exc:
+                last_error = exc
+
+        if node.config.errorStrategy == "fallback":
+            return LlmInvokeResult(content=node.config.fallbackOutput or "", reasoning_content="")
+        if node.config.errorStrategy == "ignore":
+            return LlmInvokeResult(content="", reasoning_content="")
+        raise last_error or RuntimeError("大模型调用失败")
+
+    def _format_output(self, node: WorkflowNode, content: str, reasoning_content: str) -> dict[str, Any]:
+        output_key = node.config.outputKey or "output"
+        reasoning_key = node.config.reasoningKey or "reasoning_content"
+        output: dict[str, Any]
         if node.config.responseMode == "json":
             try:
-                parsed = json.loads(text)
-                return parsed if isinstance(parsed, dict) else {output_key: parsed}
+                parsed = json.loads(content)
+                output = parsed if isinstance(parsed, dict) else {output_key: parsed}
             except json.JSONDecodeError:
-                return {output_key: text}
-        return {output_key: text}
+                output = {output_key: content}
+        else:
+            output = {output_key: content}
+        output.setdefault(reasoning_key, reasoning_content)
+        return output
 
 
 class SelectorNodeExecutor:
@@ -249,6 +378,7 @@ class WorkflowNodeExecutorRegistry:
             try:
                 executor = self.get(node.type)
                 node_output = {"skipped": True} if not node.config.enabled else await executor.run(node, node_input, state)
+                node_output = _coerce_by_io_definitions(node_output, node.outputs)
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
                 next_state = _store_node_output(node, state, node_output)
                 return _append_step(node, next_state, node_input, node_output, duration_ms)

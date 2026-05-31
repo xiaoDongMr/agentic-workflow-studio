@@ -6,9 +6,24 @@ export type WorkflowNodeType =
   | 'code'
   | 'end'
 
+export type WorkflowValueType =
+  | 'String'
+  | 'Integer'
+  | 'Number'
+  | 'Boolean'
+  | 'Time'
+  | 'Object'
+  | 'Array'
+  | 'Array<String>'
+  | 'Array<Integer>'
+  | 'Array<Number>'
+  | 'Array<Boolean>'
+  | 'Array<Time>'
+  | 'Array<Object>'
+
 export interface WorkflowNodeIO {
   name: string
-  type: string
+  type: WorkflowValueType | string
   description: string
 }
 
@@ -20,14 +35,25 @@ export interface WorkflowInputMapping {
 
 export interface WorkflowNodeConfig {
   prompt: string
+  systemPrompt?: string
+  userPrompt?: string
   model: string
+  modelProvider?: 'deerflow' | 'labelgpt'
   temperature: number
   maxTokens: number
   enabled: boolean
   fallbackToHuman: boolean
   responseMode: 'text' | 'json' | 'stream'
   outputKey: string
+  reasoningKey?: string
   inputMappings: WorkflowInputMapping[]
+  visionInputMappings?: WorkflowInputMapping[]
+  supportContinuation?: boolean
+  timeoutSeconds?: number
+  firstTokenTimeoutEnabled?: boolean
+  retryCount?: number
+  errorStrategy?: 'interrupt' | 'fallback' | 'ignore'
+  fallbackOutput?: string
 }
 
 export interface WorkflowNode {

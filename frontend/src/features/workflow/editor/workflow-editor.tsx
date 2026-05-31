@@ -97,6 +97,20 @@ function buildDebugPayloadFromCombinedJson(value: string) {
   return parsed
 }
 
+function createUniqueNodeId(type: WorkflowNode['type'], existingIds: Set<string>) {
+  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const baseId = `${type}-${suffix}`
+  if (!existingIds.has(baseId)) {
+    return baseId
+  }
+
+  let index = 2
+  while (existingIds.has(`${baseId}-${index}`)) {
+    index += 1
+  }
+  return `${baseId}-${index}`
+}
+
 export function WorkflowEditor({
   nodes,
   edges,
@@ -219,7 +233,10 @@ export function WorkflowEditor({
           }
         : getNextNodeCanvasPosition(fromNodeLike, edges)
 
+      const existingIds = new Set(ctx.document.getAllNodes().map((node) => String(node.id)))
+      const nodeId = createUniqueNodeId(type, existingIds)
       const createdNode = ctx.document.createWorkflowNodeByType(type, position, {
+        id: nodeId,
         data: createNodeData(type),
       })
 

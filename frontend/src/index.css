@@ -31,6 +31,58 @@ textarea {
   font: inherit;
 }
 
+.aw-node-config-panel input:not([type='range']),
+.aw-node-config-panel textarea,
+.aw-node-config-panel select {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
+.aw-node-config-panel input::placeholder,
+.aw-node-config-panel textarea::placeholder {
+  font-size: 12px !important;
+}
+
+.aw-node-config-panel .aw-variable-input {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+.aw-node-config-panel .aw-variable-input::placeholder {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+.aw-node-config-panel .aw-variable-select-trigger {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+.aw-node-config-panel .aw-variable-menu-item {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+.aw-node-config-panel .aw-variable-menu-item-muted {
+  font-size: 9px !important;
+  line-height: 13px !important;
+}
+
+.aw-node-config-panel .aw-variable-type-badge {
+  font-size: 8px !important;
+  line-height: 10px !important;
+}
+
+.aw-node-config-panel .aw-variable-placeholder {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+.aw-node-config-panel .aw-variable-add-button {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
 .canvas-grid {
   background-image:
     linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),

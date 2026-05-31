@@ -11,6 +11,19 @@ from app.schemas.workflow import WorkflowDocument, WorkflowNode
 from app.services.workflow_execution import WorkflowNodeExecutorRegistry, WorkflowRunEvent, WorkflowState
 
 
+def _ensure_unique_node_ids(workflow: WorkflowDocument) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for node in workflow.nodes:
+        if node.id in seen:
+            duplicates.add(node.id)
+        seen.add(node.id)
+
+    if duplicates:
+        duplicate_list = ", ".join(sorted(duplicates))
+        raise ValueError(f"工作流节点 id 必须唯一，重复 id: {duplicate_list}")
+
+
 def _topological_nodes(workflow: WorkflowDocument) -> list[WorkflowNode]:
     nodes_by_id = {node.id: node for node in workflow.nodes}
     indegree = {node.id: 0 for node in workflow.nodes}
@@ -84,6 +97,7 @@ class WorkflowRunner:
         }
 
     def _compile(self, workflow: WorkflowDocument):
+        _ensure_unique_node_ids(workflow)
         graph = StateGraph(WorkflowState)
         nodes = _topological_nodes(workflow)
         nodes_by_id = {node.id: node for node in workflow.nodes}

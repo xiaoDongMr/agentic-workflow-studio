@@ -9,6 +9,7 @@ class WorkflowInputMapping(BaseModel):
     field: str
     sourceType: Literal["node", "context", "literal"]
     source: str
+    valueType: str = ""
 
 
 class WorkflowNodeConfig(BaseModel):

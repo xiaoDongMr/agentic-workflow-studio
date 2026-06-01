@@ -27,6 +27,7 @@ import {
   EditorBottomBar,
   EditorTrialRunPanel,
   FlowgramNodePanel,
+  SingleNodeTrialPanel,
 } from '@/features/workflow/editor/workflow-editor-components'
 import type {
   AddNodeOptions,
@@ -48,7 +49,7 @@ import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
-import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
+import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode, WorkflowDocument } from '@/types/workflow'
 
 export interface WorkflowCanvasApi {
   addNode: (key: NodePaletteKey, options?: AddNodeOptions) => void
@@ -97,6 +98,52 @@ function buildDebugPayloadFromCombinedJson(value: string) {
   return parsed
 }
 
+const NODE_COPY_OFFSET = 36
+
+interface SingleNodeTrialCache {
+  fields: GlobalDebugFieldValue[]
+  jsonMode: boolean
+  combinedJson: string
+}
+
+function buildPayloadFromFieldEntries(fields: GlobalDebugFieldValue[]) {
+  return Object.fromEntries(
+    fields.map((field) => [
+      field.name,
+      field.type === 'json' ? safeParseJsonField(field.value) : field.value,
+    ]),
+  )
+}
+
+function isStructuredWorkflowType(type: string) {
+  const normalized = type.toLowerCase()
+  return normalized.includes('object') || normalized.includes('array') || normalized.includes('json')
+}
+
+function createSingleNodeTrialFields(node: WorkflowNode, fallbackPayload: Record<string, unknown>) {
+  return node.inputs
+    .filter((input) => input.name)
+    .map((input) => {
+      const value = fallbackPayload[input.name]
+      const structured = isStructuredWorkflowType(input.type)
+      return {
+        name: input.name,
+        type: structured || (typeof value === 'object' && value !== null) ? 'json' : 'string',
+        value: formatInputFieldValue(value, structured),
+      } satisfies GlobalDebugFieldValue
+    })
+}
+
+function formatInputFieldValue(value: unknown, structured: boolean) {
+  if (value === undefined) {
+    return structured ? '{}' : ''
+  }
+  if (typeof value === 'string') {
+    return structured ? value : value
+  }
+  return JSON.stringify(value, null, 2)
+}
+
 function createUniqueNodeId(type: WorkflowNode['type'], existingIds: Set<string>) {
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const baseId = `${type}-${suffix}`
@@ -109,6 +156,69 @@ function createUniqueNodeId(type: WorkflowNode['type'], existingIds: Set<string>
     index += 1
   }
   return `${baseId}-${index}`
+}
+
+function cloneWorkflowNode(node: WorkflowNode): WorkflowNode {
+  return {
+    ...node,
+    position: { ...node.position },
+    inputs: node.inputs.map((item) => ({ ...item })),
+    outputs: node.outputs.map((item) => ({ ...item })),
+    config: {
+      ...node.config,
+      inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
+      visionInputMappings: node.config.visionInputMappings?.map((item) => ({ ...item })) ?? [],
+    },
+  }
+}
+
+function toSingleNodeTestWorkflow(node: WorkflowNode): WorkflowDocument {
+  const singleNode = cloneWorkflowNode(node)
+  const contextMappings = createSingleNodeContextMappings(singleNode)
+
+  return {
+    id: `single-node-${singleNode.id}`,
+    name: `${singleNode.title} 单节点测试`,
+    description: '仅执行当前节点，用于快速验证节点配置。',
+    version: 'v0.1.0',
+    nodes: [
+      {
+        ...singleNode,
+        config: {
+          ...singleNode.config,
+          inputMappings: contextMappings,
+          visionInputMappings: singleNode.config.visionInputMappings?.map(normalizeSingleNodeMapping) ?? [],
+        },
+      },
+    ],
+    edges: [],
+  }
+}
+
+function createSingleNodeContextMappings(node: WorkflowNode): WorkflowInputMapping[] {
+  if (node.inputs.length > 0) {
+    return node.inputs
+      .filter((input) => input.name)
+      .map((input) => ({
+        field: input.name,
+        sourceType: 'context',
+        source: input.name,
+      }))
+  }
+
+  return node.config.inputMappings.map(normalizeSingleNodeMapping)
+}
+
+function normalizeSingleNodeMapping(mapping: WorkflowInputMapping): WorkflowInputMapping {
+  if (mapping.sourceType !== 'node') {
+    return { ...mapping }
+  }
+
+  return {
+    ...mapping,
+    sourceType: 'context',
+    source: mapping.field,
+  }
 }
 
 export function WorkflowEditor({
@@ -143,8 +253,20 @@ export function WorkflowEditor({
   const [globalDebugJsonError, setGlobalDebugJsonError] = useState('')
   const [trialRunExecutions, setTrialRunExecutions] = useState<Record<string, TrialRunNodeExecution>>({})
   const [trialRunning, setTrialRunning] = useState(false)
+  const [singleNodeTrialOpen, setSingleNodeTrialOpen] = useState(false)
+  const [singleNodeTrialNodeId, setSingleNodeTrialNodeId] = useState('')
+  const [singleNodeTrialFields, setSingleNodeTrialFields] = useState<GlobalDebugFieldValue[]>([])
+  const [singleNodeJsonMode, setSingleNodeJsonMode] = useState(false)
+  const [singleNodeCombinedJson, setSingleNodeCombinedJson] = useState('{}')
+  const [singleNodeJsonError, setSingleNodeJsonError] = useState('')
   const runTimerIdsRef = useRef<number[]>([])
   const runAbortControllerRef = useRef<AbortController | null>(null)
+  const singleNodeTrialCacheRef = useRef<Record<string, SingleNodeTrialCache>>({})
+
+  const singleNodeTrialNode = useMemo(
+    () => nodes.find((node) => node.id === singleNodeTrialNodeId),
+    [nodes, singleNodeTrialNodeId],
+  )
 
   const clearTrialRunTimers = useCallback(() => {
     runTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId))
@@ -154,6 +276,13 @@ export function WorkflowEditor({
   const abortTrialRunStream = useCallback(() => {
     runAbortControllerRef.current?.abort()
     runAbortControllerRef.current = null
+  }, [])
+
+  const saveSingleNodeTrialCache = useCallback((nodeId: string, cache: SingleNodeTrialCache) => {
+    singleNodeTrialCacheRef.current = {
+      ...singleNodeTrialCacheRef.current,
+      [nodeId]: cache,
+    }
   }, [])
 
   const syncNodeTrialRunExecution = useCallback(
@@ -356,6 +485,212 @@ export function WorkflowEditor({
     ctxRef.current = ctx
   }, [])
 
+  const openSingleNodeTrial = useCallback((nodeId: string) => {
+    const ctx = ctxRef.current
+    const [latestNodes] = ctx ? fromFlowgramJSON(ctx.document.toJSON()) : [nodes]
+    const targetNode = latestNodes.find((item) => item.id === nodeId)
+    if (!targetNode) {
+      return
+    }
+
+    const cached = singleNodeTrialCacheRef.current[nodeId]
+    const fallbackPayload = globalDebugJsonMode
+      ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
+      : buildPayloadFromFieldEntries(globalDebugFields)
+    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload)
+    const combinedJson = cached?.combinedJson ?? JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
+
+    clearTrialRunTimers()
+    abortTrialRunStream()
+    onSelectNode('')
+    setTrialRunOpen(false)
+    setSingleNodeTrialNodeId(nodeId)
+    setSingleNodeTrialFields(fields)
+    setSingleNodeCombinedJson(combinedJson)
+    setSingleNodeJsonMode(cached?.jsonMode ?? false)
+    setSingleNodeJsonError('')
+    setTrialRunExecutions((prev) => {
+      if (!prev[nodeId]) {
+        return prev
+      }
+      const next = { ...prev }
+      delete next[nodeId]
+      return next
+    })
+    syncNodeTrialRunExecution(nodeId, undefined)
+    setSingleNodeTrialOpen(true)
+  }, [
+    abortTrialRunStream,
+    clearTrialRunTimers,
+    globalDebugCombinedJson,
+    globalDebugFields,
+    globalDebugJsonMode,
+    nodes,
+    onSelectNode,
+    syncNodeTrialRunExecution,
+  ])
+
+  const runSingleNode = useCallback(async (nodeId: string, payloadOverride?: Record<string, unknown>) => {
+    clearTrialRunTimers()
+    abortTrialRunStream()
+    setTrialRunOpen(false)
+    setTrialRunExecutions({})
+    clearAllNodeTrialRunExecutions()
+
+    const ctx = ctxRef.current
+    const [latestNodes] = ctx ? fromFlowgramJSON(ctx.document.toJSON()) : [nodes]
+    const targetNode = latestNodes.find((item) => item.id === nodeId)
+    if (!targetNode) {
+      return
+    }
+
+    const runningExecution: TrialRunNodeExecution = {
+      nodeId,
+      nodeTitle: targetNode.title,
+      log: `${targetNode.title} 单节点测试运行中`,
+      input: '{}',
+      output: '{}',
+      durationMs: 0,
+      status: 'running',
+      summaryInput: '准备执行',
+      summaryOutput: '等待输出',
+    }
+
+    setTrialRunExecutions({ [nodeId]: runningExecution })
+    syncNodeTrialRunExecution(nodeId, runningExecution)
+
+    try {
+      const abortController = new AbortController()
+      runAbortControllerRef.current = abortController
+      const payload = payloadOverride ?? (globalDebugJsonMode
+        ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
+        : buildPayloadFromFieldEntries(globalDebugFields))
+
+      setTrialRunning(true)
+      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode), payload, {
+        signal: abortController.signal,
+        onStep: (execution) => {
+          setTrialRunExecutions({ [nodeId]: execution })
+          syncNodeTrialRunExecution(nodeId, execution)
+        },
+      })
+      const fallbackExecution = executions.at(-1)
+      if (fallbackExecution) {
+        setTrialRunExecutions({ [nodeId]: fallbackExecution })
+        syncNodeTrialRunExecution(nodeId, fallbackExecution)
+      }
+      if (runAbortControllerRef.current === abortController) {
+        runAbortControllerRef.current = null
+      }
+      setTrialRunning(false)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
+      const failedExecution: TrialRunNodeExecution = {
+        ...runningExecution,
+        log: error instanceof Error ? error.message : '单节点测试失败',
+        status: 'error',
+        summaryOutput: '运行失败',
+      }
+      setTrialRunning(false)
+      setTrialRunExecutions({ [nodeId]: failedExecution })
+      syncNodeTrialRunExecution(nodeId, failedExecution)
+    }
+  }, [
+    abortTrialRunStream,
+    clearAllNodeTrialRunExecutions,
+    clearTrialRunTimers,
+    globalDebugCombinedJson,
+    globalDebugFields,
+    globalDebugJsonMode,
+    nodes,
+    syncNodeTrialRunExecution,
+  ])
+
+  const copyNode = useCallback((nodeId: string) => {
+    const ctx = ctxRef.current
+    if (!ctx) {
+      return
+    }
+
+    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
+    if (!targetNode) {
+      return
+    }
+
+    const nodeJson = targetNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
+    const type = nodeJson.type as WorkflowNode['type']
+    const existingIds = new Set(ctx.document.getAllNodes().map((item) => String(item.id)))
+    const newNodeId = createUniqueNodeId(type, existingIds)
+    const position = (nodeJson.meta as { position?: { x?: number; y?: number } } | undefined)?.position
+    const copiedNode = ctx.document.copyNode(
+      targetNode,
+      newNodeId,
+      (json) => {
+        const data = normalizeNodeData(json.data as Partial<FlowgramNodeData>, type)
+        return {
+          ...json,
+          id: newNodeId,
+          data: {
+            ...data,
+            title: `${data.title} 副本`,
+            trialRunExecution: undefined,
+          },
+        }
+      },
+      {
+        x: (position?.x ?? CANVAS_OFFSET_X) + NODE_COPY_OFFSET,
+        y: (position?.y ?? CANVAS_OFFSET_Y) + NODE_COPY_OFFSET,
+      },
+    )
+    const nextSelectedId = String(copiedNode.id)
+    onSelectNode(nextSelectedId)
+    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+  }, [onSelectNode, setWorkflowGraph])
+
+  const deleteNode = useCallback((nodeId: string) => {
+    const ctx = ctxRef.current
+    if (!ctx) {
+      return
+    }
+
+    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
+    if (!targetNode || !ctx.document.canRemove(targetNode, true)) {
+      return
+    }
+
+    targetNode.dispose()
+    if (selectedNodeId === nodeId) {
+      onSelectNode('')
+    }
+    setTrialRunExecutions((prev) => {
+      const next = { ...prev }
+      delete next[nodeId]
+      return next
+    })
+    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+  }, [onSelectNode, selectedNodeId, setWorkflowGraph])
+
+  const closeDebugPanels = useCallback(() => {
+    clearTrialRunTimers()
+    abortTrialRunStream()
+    setTrialRunning(false)
+    setTrialRunOpen(false)
+    setSingleNodeTrialOpen(false)
+  }, [abortTrialRunStream, clearTrialRunTimers])
+
+  const selectNodeForConfig = useCallback(
+    (nodeId: string) => {
+      if (nodeId) {
+        closeDebugPanels()
+      }
+      onSelectNode(nodeId)
+    },
+    [closeDebugPanels, onSelectNode],
+  )
+
   const editorProps = useMemo<FreeLayoutProps>(
     () => ({
       background: false,
@@ -366,14 +701,19 @@ export function WorkflowEditor({
         renderDefaultNode: (props: WorkflowNodeProps) => (
           <FlowgramNodeCard
             node={props.node}
-            onSelectNode={onSelectNode}
+            onSelectNode={selectNodeForConfig}
             selectedNodeId={selectedNodeId}
             quickAddOpenNodeId={quickAddNodeId}
             trialRunExecution={trialRunExecutions[String(props.node.id)]}
+            nodeActionRunning={trialRunning}
+            onRunNode={openSingleNodeTrial}
+            onCopyNode={copyNode}
+            onDeleteNode={deleteNode}
             onToggleQuickAdd={(nodeId) => {
               clearTrialRunTimers()
               setTrialRunning(false)
               setTrialRunOpen(false)
+              setSingleNodeTrialOpen(false)
               setTrialRunExecutions({})
               void openNodePanel({ connectFromNodeId: nodeId })
             }}
@@ -431,7 +771,20 @@ export function WorkflowEditor({
         ctx.tools.fitView(false)
       },
     }),
-    [clearTrialRunTimers, initialData, onSelectNode, openNodePanel, quickAddNodeId, selectedNodeId, setWorkflowGraph, trialRunExecutions],
+    [
+      clearTrialRunTimers,
+      copyNode,
+      deleteNode,
+      initialData,
+      openNodePanel,
+      openSingleNodeTrial,
+      quickAddNodeId,
+      selectNodeForConfig,
+      selectedNodeId,
+      setWorkflowGraph,
+      trialRunExecutions,
+      trialRunning,
+    ],
   )
 
   useEffect(() => {
@@ -456,6 +809,7 @@ export function WorkflowEditor({
     clearTrialRunTimers()
     abortTrialRunStream()
     setTrialRunOpen(true)
+    setSingleNodeTrialOpen(false)
     setTrialRunExecutions({})
     clearAllNodeTrialRunExecutions()
 
@@ -577,6 +931,79 @@ export function WorkflowEditor({
     }
   }, [])
 
+  const updateSingleNodeTrialField = useCallback((fieldName: string, value: string) => {
+    setSingleNodeTrialFields((prev) => {
+      const nextFields = prev.map((field) => {
+        if (field.name !== fieldName) {
+          return field
+        }
+
+        if (field.type === 'json') {
+          try {
+            JSON.parse(value)
+            setSingleNodeJsonError('')
+          } catch {
+            setSingleNodeJsonError('请输入正确的 JSON 结构')
+          }
+        }
+
+        return {
+          ...field,
+          value,
+        }
+      })
+
+      if (singleNodeTrialNodeId) {
+        saveSingleNodeTrialCache(singleNodeTrialNodeId, {
+          fields: nextFields,
+          jsonMode: singleNodeJsonMode,
+          combinedJson: singleNodeJsonMode
+            ? singleNodeCombinedJson
+            : JSON.stringify(buildPayloadFromFieldEntries(nextFields), null, 2),
+        })
+      }
+      return nextFields
+    })
+  }, [saveSingleNodeTrialCache, singleNodeCombinedJson, singleNodeJsonMode, singleNodeTrialNodeId])
+
+  const updateSingleNodeCombinedJson = useCallback((value: string) => {
+    setSingleNodeCombinedJson(value)
+
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>
+      const nextFields = singleNodeTrialFields.map((field) => {
+        if (!Object.prototype.hasOwnProperty.call(parsed, field.name)) {
+          return field
+        }
+        const nextValue = parsed[field.name]
+        const nextType = typeof nextValue === 'object' && nextValue !== null ? 'json' : field.type
+        return {
+          ...field,
+          type: nextType,
+          value: formatInputFieldValue(nextValue, nextType === 'json'),
+        } satisfies GlobalDebugFieldValue
+      })
+      setSingleNodeTrialFields(nextFields)
+      if (singleNodeTrialNodeId) {
+        saveSingleNodeTrialCache(singleNodeTrialNodeId, {
+          fields: nextFields,
+          jsonMode: singleNodeJsonMode,
+          combinedJson: value,
+        })
+      }
+      setSingleNodeJsonError('')
+    } catch {
+      if (singleNodeTrialNodeId) {
+        saveSingleNodeTrialCache(singleNodeTrialNodeId, {
+          fields: singleNodeTrialFields,
+          jsonMode: singleNodeJsonMode,
+          combinedJson: value,
+        })
+      }
+      setSingleNodeJsonError('请输入正确的 JSON 结构')
+    }
+  }, [saveSingleNodeTrialCache, singleNodeJsonMode, singleNodeTrialFields, singleNodeTrialNodeId])
+
   const toggleGlobalDebugJsonMode = useCallback(() => {
     setGlobalDebugJsonMode((prev) => {
       const next = !prev
@@ -599,6 +1026,54 @@ export function WorkflowEditor({
       return next
     })
   }, [globalDebugFields])
+
+  const toggleSingleNodeJsonMode = useCallback(() => {
+    setSingleNodeJsonMode((prev) => {
+      const next = !prev
+      let combinedJson = singleNodeCombinedJson
+      if (!prev) {
+        combinedJson = JSON.stringify(buildPayloadFromFieldEntries(singleNodeTrialFields), null, 2)
+        setSingleNodeCombinedJson(combinedJson)
+        setSingleNodeJsonError('')
+      }
+      if (singleNodeTrialNodeId) {
+        saveSingleNodeTrialCache(singleNodeTrialNodeId, {
+          fields: singleNodeTrialFields,
+          jsonMode: next,
+          combinedJson,
+        })
+      }
+      return next
+    })
+  }, [saveSingleNodeTrialCache, singleNodeCombinedJson, singleNodeTrialFields, singleNodeTrialNodeId])
+
+  const closeSingleNodeTrial = useCallback(() => {
+    abortTrialRunStream()
+    setTrialRunning(false)
+    setSingleNodeTrialOpen(false)
+  }, [abortTrialRunStream])
+
+  const startSingleNodeTrialRun = useCallback(() => {
+    if (!singleNodeTrialNodeId) {
+      return
+    }
+
+    try {
+      const payload = singleNodeJsonMode
+        ? JSON.parse(singleNodeCombinedJson) as Record<string, unknown>
+        : buildPayloadFromFieldEntries(singleNodeTrialFields)
+      setSingleNodeJsonError('')
+      void runSingleNode(singleNodeTrialNodeId, payload)
+    } catch {
+      setSingleNodeJsonError('请输入正确的 JSON 结构')
+    }
+  }, [
+    runSingleNode,
+    singleNodeCombinedJson,
+    singleNodeJsonMode,
+    singleNodeTrialFields,
+    singleNodeTrialNodeId,
+  ])
 
   return (
     <section
@@ -649,6 +1124,21 @@ export function WorkflowEditor({
             onClose={closeTrialRun}
             onRun={startTrialRun}
           />
+          <SingleNodeTrialPanel
+            open={singleNodeTrialOpen}
+            node={singleNodeTrialNode}
+            fields={singleNodeTrialFields}
+            running={trialRunning}
+            execution={singleNodeTrialNodeId ? trialRunExecutions[singleNodeTrialNodeId] : undefined}
+            jsonMode={singleNodeJsonMode}
+            combinedJson={singleNodeCombinedJson}
+            jsonError={singleNodeJsonError}
+            onFieldChange={updateSingleNodeTrialField}
+            onCombinedJsonChange={updateSingleNodeCombinedJson}
+            onToggleJsonMode={toggleSingleNodeJsonMode}
+            onClose={closeSingleNodeTrial}
+            onRun={startSingleNodeTrialRun}
+          />
           <EditorBottomBar
             trialRunOpen={trialRunOpen}
             onAddNode={() => {
@@ -656,6 +1146,7 @@ export function WorkflowEditor({
             }}
             onToggleTrialRun={() => {
               setQuickAddNodeId('')
+              setSingleNodeTrialOpen(false)
               setTrialRunOpen(true)
             }}
           />

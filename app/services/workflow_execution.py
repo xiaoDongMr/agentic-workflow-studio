@@ -171,8 +171,23 @@ def _build_mapped_values(mappings: list[Any], state: WorkflowState) -> dict[str,
         elif mapping.sourceType == "node":
             result[mapping.field] = _resolve_mapping(mapping.source, state)
         else:
-            result[mapping.field] = mapping.source
+            result[mapping.field] = _parse_literal_mapping_value(mapping.source, getattr(mapping, "valueType", ""))
     return result
+
+
+def _parse_literal_mapping_value(source: Any, value_type: str) -> Any:
+    if not isinstance(source, str) or not value_type.startswith("Array<"):
+        return source
+    text = source.strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return [item.strip() for item in text.split(",") if item.strip()]
 
 
 def _build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:

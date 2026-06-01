@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronDown, GitBranchPlus } from 'lucide-react'
+import { useCallback, useRef, useState } from 'react'
+import { ChevronDown, Copy, GitBranchPlus, MoreHorizontal, Play, Trash2 } from 'lucide-react'
 import {
   WorkflowNodeRenderer,
   type WorkflowJSON,
@@ -10,6 +10,7 @@ import {
   nodeIcons,
   nodeThemeClass,
 } from '@/features/workflow/editor/workflow-editor.config'
+import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
 import type { FlowgramNodeData, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
@@ -22,6 +23,10 @@ export function FlowgramNodeCard({
   quickAddOpenNodeId,
   onToggleQuickAdd,
   trialRunExecution,
+  onRunNode,
+  onCopyNode,
+  onDeleteNode,
+  nodeActionRunning = false,
 }: {
   node: WorkflowNodeProps['node']
   onSelectNode: (nodeId: string) => void
@@ -29,8 +34,14 @@ export function FlowgramNodeCard({
   quickAddOpenNodeId: string
   onToggleQuickAdd: (nodeId: string) => void
   trialRunExecution?: TrialRunNodeExecution
+  onRunNode: (nodeId: string) => void
+  onCopyNode: (nodeId: string) => void
+  onDeleteNode: (nodeId: string) => void
+  nodeActionRunning?: boolean
 }) {
   const setSelectedNodeId = useWorkflowStore((state) => state.setSelectedNodeId)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const actionsRef = useRef<HTMLDivElement>(null)
   const nodeJson = node.toJSON() as WorkflowJSON['nodes'][number] & { data?: FlowgramNodeData }
   const data = nodeJson.data
   const effectiveExecution = trialRunExecution ?? data?.trialRunExecution
@@ -41,6 +52,10 @@ export function FlowgramNodeCard({
   const quickAddOpen = quickAddOpenNodeId === nodeId
   const inputItems = data?.inputs ?? []
   const outputItems = data?.outputs ?? []
+  const canDeleteOrCopy = kind !== 'start'
+  const isNodeRunning = nodeActionRunning || effectiveExecution?.status === 'running'
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
+  useClickOutside(actionsRef, menuOpen, closeMenu)
   const runtimeStatusLabel =
     effectiveExecution?.status === 'running'
       ? '运行中'
@@ -93,6 +108,59 @@ export function FlowgramNodeCard({
           <NodeIoRow label="输出" items={outputItems} />
           {kind === 'llm' && <NodeMetaRow label="模型" value={data?.config.model || '默认模型'} />}
         </div>
+      </div>
+      <div
+        ref={actionsRef}
+        className="aw-flow-node__actions aw-flow-ignore-deselect"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={() => onRunNode(nodeId)}
+          disabled={isNodeRunning}
+          className="aw-flow-node__action-button"
+          aria-label="测试当前节点"
+        >
+          <Play className="h-3.5 w-3.5 fill-current" />
+        </button>
+        {canDeleteOrCopy && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              className="aw-flow-node__action-button aw-flow-node__action-button--menu"
+              aria-label="节点操作"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <div className="aw-flow-node__action-menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onCopyNode(nodeId)
+                  }}
+                  className="aw-flow-node__action-menu-item"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  复制
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onDeleteNode(nodeId)
+                  }}
+                  className="aw-flow-node__action-menu-item aw-flow-node__action-menu-item--danger"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  删除
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="aw-flow-node__quick-add aw-flow-ignore-deselect">
         <button

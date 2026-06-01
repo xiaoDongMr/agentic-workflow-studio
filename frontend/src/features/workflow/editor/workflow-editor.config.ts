@@ -64,42 +64,42 @@ export const defaultRegistries: WorkflowNodeRegistry[] = [
       isStart: true,
       deleteDisable: true,
       copyDisable: true,
-      size: { width: 228, height: 132 },
+      size: { width: 260, height: 146 },
       defaultPorts: [{ type: 'output' }],
     },
   },
   {
     type: 'llm',
     meta: {
-      size: { width: 236, height: 144 },
+      size: { width: 276, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'selector',
     meta: {
-      size: { width: 236, height: 144 },
+      size: { width: 276, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'loop',
     meta: {
-      size: { width: 236, height: 144 },
+      size: { width: 276, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'code',
     meta: {
-      size: { width: 236, height: 144 },
+      size: { width: 276, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'end',
     meta: {
-      size: { width: 236, height: 144 },
+      size: { width: 276, height: 154 },
       defaultPorts: [{ type: 'input' }],
     },
   },

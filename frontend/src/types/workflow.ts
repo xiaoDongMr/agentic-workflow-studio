@@ -13,6 +13,8 @@ export type WorkflowValueType =
   | 'Boolean'
   | 'Time'
   | 'Object'
+  | 'Image'
+  | 'Video'
   | 'Array'
   | 'Array<String>'
   | 'Array<Integer>'
@@ -20,6 +22,8 @@ export type WorkflowValueType =
   | 'Array<Boolean>'
   | 'Array<Time>'
   | 'Array<Object>'
+  | 'Array<Image>'
+  | 'Array<Video>'
 
 export interface WorkflowNodeIO {
   name: string
@@ -31,6 +35,7 @@ export interface WorkflowInputMapping {
   field: string
   sourceType: 'node' | 'context' | 'literal'
   source: string
+  valueType?: WorkflowValueType | string
 }
 
 export interface WorkflowNodeConfig {

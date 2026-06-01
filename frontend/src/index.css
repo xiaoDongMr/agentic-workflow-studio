@@ -134,8 +134,8 @@ textarea {
 
 .aw-flow-node {
   position: relative;
-  min-width: 228px;
-  min-height: 132px;
+  min-width: 260px;
+  min-height: 146px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.94) 0%, rgba(11, 18, 32, 0.98) 100%);
@@ -284,6 +284,98 @@ textarea {
 .aw-flow-node__io-empty {
   font-size: 10px;
   color: #64748b;
+}
+
+.aw-flow-node__actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  overflow: visible;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.aw-flow-node:hover .aw-flow-node__actions,
+.aw-flow-node--external-selected .aw-flow-node__actions,
+.aw-flow-node__actions:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.aw-flow-node__action-button {
+  display: inline-flex;
+  height: 28px;
+  min-width: 30px;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.aw-flow-node__action-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #eff6ff;
+}
+
+.aw-flow-node__action-button:disabled {
+  cursor: not-allowed;
+  color: #64748b;
+}
+
+.aw-flow-node__action-button--menu {
+  border-left: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.aw-flow-node__action-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 8;
+  width: 118px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.98);
+  padding: 4px;
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.32);
+}
+
+.aw-flow-node__action-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9px;
+  padding: 7px 8px;
+  font-size: 12px;
+  line-height: 1;
+  color: #cbd5e1;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.aw-flow-node__action-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.aw-flow-node__action-menu-item--danger:hover {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fecdd3;
 }
 
 .aw-flow-node__quick-add {

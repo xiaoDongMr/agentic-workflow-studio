@@ -1,12 +1,14 @@
+import { useMemo } from 'react'
+
 import { LlmNodeConfigPanel } from '@/features/workflow/components/node-config/llm-node-config-panel'
 import {
   BasicInfoSection,
   ConfigSection,
   ConfigShell,
   IOSection,
-  getAvailableInputSources,
   type NodeConfigPanelProps,
 } from '@/features/workflow/components/node-config/config-fields'
+import { getAvailableInputSources } from '@/features/workflow/components/node-config/variable-utils'
 
 export function NodeConfigPanel({
   node,
@@ -15,10 +17,11 @@ export function NodeConfigPanel({
   onUpdateNode,
   className,
 }: NodeConfigPanelProps) {
+  const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
+
   if (node.type === 'llm') {
     return <LlmNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
-  const inputSources = getAvailableInputSources(node, nodes, edges)
   const isStartNode = node.type === 'start'
 
   return (

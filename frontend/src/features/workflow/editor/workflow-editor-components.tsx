@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { ChevronDown, LayoutGrid, Minus, Play, Plus, Redo2, Scan, Search, Undo2, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Clipboard, LayoutGrid, Minus, Play, Plus, Redo2, Scan, Search, Undo2, X } from 'lucide-react'
 import { useClientContext, usePlaygroundTools } from '@flowgram.ai/free-layout-editor'
 import type { NodePanelRenderProps } from '@flowgram.ai/free-node-panel-plugin'
 
@@ -8,6 +8,8 @@ import {
   paletteToNodeType,
 } from '@/features/workflow/editor/workflow-editor.config'
 import { cn } from '@/lib/utils'
+import type { GlobalDebugFieldValue, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
+import type { WorkflowNode } from '@/types/workflow'
 
 export function FlowgramNodePanel({
   position,
@@ -271,6 +273,297 @@ export function EditorTrialRunPanel({
       </section>
     </div>
   )
+}
+
+export function SingleNodeTrialPanel({
+  open,
+  node,
+  fields,
+  running,
+  execution,
+  jsonMode,
+  combinedJson,
+  jsonError,
+  onFieldChange,
+  onCombinedJsonChange,
+  onToggleJsonMode,
+  onClose,
+  onRun,
+}: {
+  open: boolean
+  node?: WorkflowNode
+  fields: GlobalDebugFieldValue[]
+  running: boolean
+  execution?: TrialRunNodeExecution
+  jsonMode: boolean
+  combinedJson: string
+  jsonError?: string
+  onFieldChange: (fieldName: string, value: string) => void
+  onCombinedJsonChange: (value: string) => void
+  onToggleJsonMode: () => void
+  onClose: () => void
+  onRun: () => void
+}) {
+  const parsedInput = useMemo(() => parseExecutionJson(execution?.input), [execution?.input])
+  const parsedOutput = useMemo(() => parseExecutionJson(execution?.output), [execution?.output])
+  const statusLabel = execution?.status === 'error' ? '运行失败' : execution?.status === 'success' ? '运行成功' : '等待运行'
+  const durationLabel = execution ? `${(execution.durationMs / 1000).toFixed(execution.durationMs >= 1000 ? 0 : 3)}s` : ''
+
+  if (!open || !node) {
+    return null
+  }
+
+  return (
+    <div className="aw-flow-ignore-deselect pointer-events-none absolute inset-y-4 right-4 z-40 flex justify-end">
+      <section className="pointer-events-auto flex w-[520px] max-w-[calc(100vw-520px)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/96 shadow-[0_24px_56px_rgba(2,6,23,0.48)] backdrop-blur">
+        <div className="flex items-center justify-between gap-4 border-b border-white/8 px-4 py-3">
+          <div>
+            <p className="text-base font-semibold text-white">试运行</p>
+            <p className="mt-1 text-[11px] text-slate-400">{node.title} · 单节点调试</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {execution && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium',
+                  execution.status === 'error'
+                    ? 'bg-rose-500/14 text-rose-200'
+                    : 'bg-emerald-500/14 text-emerald-200',
+                )}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {durationLabel}
+                {execution.status === 'success' && <span>查看日志</span>}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+              aria-label="关闭单节点调试面板"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-100">试运行输入</p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-300">JSON模式</span>
+              <button
+                type="button"
+                onClick={onToggleJsonMode}
+                className={cn(
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                  jsonMode ? 'bg-violet-500/70' : 'bg-white/10',
+                )}
+                aria-label="切换单节点 JSON 模式"
+              >
+                <span
+                  className={cn(
+                    'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                    jsonMode ? 'translate-x-4' : 'translate-x-0.5',
+                  )}
+                />
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-400/20 bg-violet-500/10 px-2 py-1.5 text-xs font-semibold text-violet-100 transition-colors hover:bg-violet-500/16"
+              >
+                AI 补全
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {jsonMode ? (
+              <JsonInputEditor
+                value={combinedJson}
+                error={jsonError}
+                onChange={onCombinedJsonChange}
+              />
+            ) : fields.length > 0 ? (
+              fields.map((field) => (
+                <FieldInputEditor key={field.name} field={field} error={jsonError} onChange={onFieldChange} />
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-xs text-slate-500">
+                当前节点没有输入变量，点击运行将使用空输入执行。
+              </div>
+            )}
+          </div>
+
+          {execution && (
+            <>
+              <div className="mt-6 space-y-5">
+                <p className="text-base font-semibold text-white">运行结果</p>
+                <ExecutionBlock title="输入" value={formatRecord(parsedInput)} />
+                <ExecutionBlock title="推理内容" value={getRecordValue(parsedOutput, 'reasoning_content')} emptyLabel="无推理内容" />
+                <ExecutionBlock title="技能调用" value="" emptyLabel="无技能调用" />
+                <ExecutionBlock title="输出" value={formatRecord(parsedOutput)} />
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        'inline-flex h-7 w-7 items-center justify-center rounded-full',
+                        execution.status === 'error' ? 'bg-rose-500/18 text-rose-200' : 'bg-emerald-500/18 text-emerald-200',
+                      )}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </span>
+                    <span className="text-base font-semibold text-white">{statusLabel}</span>
+                    {durationLabel && (
+                      <span className="rounded-lg bg-emerald-500/12 px-2 py-1 text-xs font-medium text-emerald-200">
+                        {durationLabel}
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown className="h-4 w-4 rotate-180 text-slate-400" />
+                </div>
+                <ExecutionBlock title="输入" value={formatRecord(parsedInput)} compact />
+                <ExecutionBlock title="输出" value={formatRecord(parsedOutput)} compact />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="border-t border-white/8 p-4">
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={running}
+            className={cn(
+              'inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-semibold text-white transition-colors',
+              running ? 'cursor-not-allowed bg-emerald-400/75' : 'bg-emerald-500 hover:bg-emerald-400',
+            )}
+          >
+            <Play className="h-4 w-4 fill-white" />
+            {running ? '运行中...' : '运行'}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function FieldInputEditor({
+  field,
+  error,
+  onChange,
+}: {
+  field: GlobalDebugFieldValue
+  error?: string
+  onChange: (fieldName: string, value: string) => void
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-sm font-medium text-slate-200">{field.name}</span>
+        <span className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
+          {field.type === 'json' ? 'Object' : 'String'}
+        </span>
+      </div>
+      {field.type === 'json' ? (
+        <JsonInputEditor value={field.value} error={error} onChange={(value) => onChange(field.name, value)} />
+      ) : (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(event) => onChange(field.name, event.target.value)}
+          className="w-full rounded-xl border border-white/10 bg-slate-900/90 px-3 py-2.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
+        />
+      )}
+    </div>
+  )
+}
+
+function JsonInputEditor({
+  value,
+  error,
+  onChange,
+}: {
+  value: string
+  error?: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        className={cn(
+          'h-[132px] w-full resize-none rounded-xl border bg-slate-900/90 px-3 py-2.5 font-mono text-[12px] leading-5 text-slate-100 outline-none transition-colors placeholder:text-slate-500',
+          error ? 'border-rose-400/70 focus:border-rose-400/70' : 'border-white/10 focus:border-blue-400/40',
+        )}
+        placeholder="JSON"
+      />
+      {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+    </div>
+  )
+}
+
+function ExecutionBlock({
+  title,
+  value,
+  emptyLabel = '暂无内容',
+  compact = false,
+}: {
+  title: string
+  value?: string
+  emptyLabel?: string
+  compact?: boolean
+}) {
+  return (
+    <div className={compact ? 'mt-3 first:mt-0' : ''}>
+      <div className="mb-2 flex items-center gap-2">
+        <span className={cn('font-semibold text-slate-100', compact ? 'text-sm' : 'text-base')}>{title}</span>
+        <Clipboard className="h-3.5 w-3.5 text-slate-400" />
+      </div>
+      <pre
+        className={cn(
+          'whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2.5 font-sans text-sm leading-6 text-slate-200',
+          compact ? 'max-h-40 overflow-auto' : 'min-h-[42px]',
+        )}
+      >
+        {value?.trim() ? value : emptyLabel}
+      </pre>
+    </div>
+  )
+}
+
+function parseExecutionJson(value?: string): Record<string, unknown> {
+  if (!value) {
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : { value: parsed }
+  } catch {
+    return { value }
+  }
+}
+
+function getRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  if (value === undefined || value === null || value === '') {
+    return ''
+  }
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+function formatRecord(record: Record<string, unknown>) {
+  const entries = Object.entries(record)
+  if (entries.length === 0) {
+    return ''
+  }
+  return entries.map(([key, value]) => `${key} : ${typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value, null, 2)}`).join('\n')
 }
 
 export function EditorBottomBar({

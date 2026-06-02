@@ -1,5 +1,12 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { Braces, Check, ChevronDown, Maximize2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { EditorState, RangeSetBuilder } from '@codemirror/state'
+import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { tags as t } from '@lezer/highlight'
 
 import { listModelOptions, type ModelOption } from '@/api/config'
 import {
@@ -44,6 +51,19 @@ const ERROR_STRATEGY_LABEL: Record<NonNullable<WorkflowNode['config']['errorStra
 const REASONING_OUTPUT_NAME = 'reasoning_content'
 const REASONING_OUTPUT_TYPE: WorkflowValueType = 'String'
 const VISION_REFERENCE_TYPES = new Set<WorkflowValueType>(['Image', 'Video', 'Array<Image>', 'Array<Video>'])
+
+// 提示词编辑器的 Markdown 暗色语法高亮配色
+const promptMarkdownHighlightStyle = HighlightStyle.define([
+  { tag: t.heading, color: 'rgb(125 211 252)', fontWeight: '600' },
+  { tag: t.strong, color: 'rgb(226 232 240)', fontWeight: '700' },
+  { tag: t.emphasis, color: 'rgb(226 232 240)', fontStyle: 'italic' },
+  { tag: t.strikethrough, textDecoration: 'line-through', color: 'rgb(148 163 184)' },
+  { tag: [t.link, t.url], color: 'rgb(147 197 253)', textDecoration: 'underline' },
+  { tag: [t.monospace, t.contentSeparator], color: 'rgb(252 211 77)' },
+  { tag: t.list, color: 'rgb(110 231 183)' },
+  { tag: t.quote, color: 'rgb(148 163 184)', fontStyle: 'italic' },
+  { tag: t.processingInstruction, color: 'rgb(100 116 139)' },
+])
 
 interface ModelOptionsState {
   items: ModelOption[]
@@ -117,6 +137,12 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       : removeReasoningOutput(node.outputs),
     [node.outputs, selectedModel.supportsThinking],
   )
+  const promptVariables = useMemo(
+    () => node.inputs
+      .map((input) => ({ name: input.name.trim(), type: normalizeValueType(input.type) }))
+      .filter((input) => input.name.length > 0),
+    [node.inputs],
+  )
   const handleModelChange = useCallback((model: ModelOption) => {
     onUpdateNode({
       config: {
@@ -169,16 +195,18 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       </ConfigSection>
 
       <ConfigSection title="提示词">
-        <EditableArea
+        <PromptEditor
           label="系统提示词"
-          value={config.systemPrompt ?? config.prompt}
+          value={config.systemPrompt ?? config.prompt ?? ''}
+          variables={promptVariables}
           placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
           onChange={(value) => onUpdateNode({ config: { systemPrompt: value, prompt: value } })}
           rows={6}
         />
-        <EditableArea
+        <PromptEditor
           label="用户提示词"
           value={config.userPrompt ?? '{{input}}'}
+          variables={promptVariables}
           placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
           onChange={(value) => onUpdateNode({ config: { userPrompt: value } })}
           rows={6}
@@ -342,6 +370,421 @@ function ModelSelectField({
       )}
     </div>
   )
+}
+
+function PromptEditor(props: {
+  label: string
+  value: string
+  variables: { name: string; type: WorkflowValueType }[]
+  placeholder?: string
+  onChange: (value: string) => void
+  rows: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    if (!expanded) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setExpanded(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [expanded])
+
+  return (
+    <>
+      <PromptEditorCore
+        {...props}
+        headerAction={
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            title="放大编辑"
+            className="inline-flex h-5 items-center gap-1 rounded-md border border-white/8 bg-slate-950/70 px-1.5 text-[9px] leading-none text-slate-400 transition-colors hover:border-blue-400/25 hover:text-white"
+          >
+            <Maximize2 className="h-3 w-3" />
+            <span className="text-[9px]">放大</span>
+          </button>
+        }
+      />
+      {expanded && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-6 backdrop-blur-sm"
+          onMouseDown={() => setExpanded(false)}
+        >
+          <div
+            className="flex h-[80vh] w-[min(900px,92vw)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 shadow-[0_24px_80px_rgba(2,6,23,0.6)]"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+              <p className="text-[13px] font-medium text-slate-200">{props.label}</p>
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                title="关闭"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/8 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-4">
+              <PromptEditorCore {...props} label="" fill />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function PromptEditorCore({
+  label,
+  value,
+  variables,
+  placeholder,
+  onChange,
+  rows,
+  fill,
+  headerAction,
+}: {
+  label: string
+  value: string
+  variables: { name: string; type: WorkflowValueType }[]
+  placeholder?: string
+  onChange: (value: string) => void
+  rows: number
+  fill?: boolean
+  headerAction?: React.ReactNode
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
+  const onChangeRef = useRef(onChange)
+  const variablesRef = useRef(variables)
+  const initialValueRef = useRef(value)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useClickOutside(menuRef, menuOpen, useCallback(() => setMenuOpen(false), []))
+
+  useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
+
+  useEffect(() => {
+    variablesRef.current = variables
+    viewRef.current?.dispatch({})
+  }, [variables])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) {
+      return
+    }
+
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: initialValueRef.current,
+        extensions: [
+          EditorView.lineWrapping,
+          markdown({ base: markdownLanguage }),
+          syntaxHighlighting(promptMarkdownHighlightStyle),
+          EditorView.theme({
+            '&': {
+              ...(fill ? { height: '100%' } : { minHeight: `${rows * 16 + 20}px` }),
+              fontSize: '11px',
+              lineHeight: '16px',
+              color: 'rgb(226 232 240)',
+            },
+            '.cm-scroller': {
+              fontFamily: 'inherit',
+              padding: '10px',
+              outline: 'none',
+            },
+            '.cm-content': {
+              ...(fill ? {} : { minHeight: `${rows * 16}px` }),
+              padding: 0,
+              caretColor: 'rgb(226 232 240)',
+            },
+            '.cm-line': {
+              padding: 0,
+            },
+            '.cm-tooltip': {
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(2,6,23,0.98)',
+              color: 'rgb(203 213 225)',
+              overflow: 'hidden',
+            },
+            '.cm-tooltip-autocomplete ul': {
+              fontFamily: 'inherit',
+              fontSize: '11px',
+              maxHeight: '224px',
+            },
+            '.cm-tooltip-autocomplete li[aria-selected]': {
+              backgroundColor: 'rgba(255,255,255,0.08)',
+              color: 'white',
+            },
+            '.cm-completionLabel': {
+              color: 'rgb(226 232 240)',
+            },
+            '.cm-completionDetail': {
+              marginLeft: '8px',
+              fontStyle: 'normal',
+              color: 'rgb(148 163 184)',
+            },
+            '.cm-completionInfo': {
+              minWidth: '160px',
+              maxWidth: '240px',
+              marginLeft: '6px',
+              padding: '8px 10px',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(2,6,23,0.98)',
+              color: 'rgb(203 213 225)',
+            },
+          }),
+          createPromptVariableHighlighter(() => new Set(variablesRef.current.map((variable) => variable.name))),
+          createPromptVariableAutocomplete(() => variablesRef.current),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              onChangeRef.current(update.state.doc.toString())
+            }
+          }),
+        ],
+      }),
+    })
+
+    viewRef.current = view
+    return () => {
+      view.destroy()
+      viewRef.current = null
+    }
+  }, [rows, fill])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || view.state.doc.toString() === value) {
+      return
+    }
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: value },
+    })
+  }, [value])
+
+  const insertFromMenu = useCallback((name: string) => {
+    const view = viewRef.current
+    if (!view) {
+      return
+    }
+    const token = `{{${name}}}`
+    const selection = view.state.selection.main
+    view.dispatch({
+      changes: { from: selection.from, to: selection.to, insert: token },
+      selection: { anchor: selection.from + token.length },
+    })
+    view.focus()
+    setMenuOpen(false)
+  }, [])
+
+  return (
+    <div className={cn(fill && 'flex h-full flex-col')}>
+      <div className="flex items-center justify-between gap-2">
+        {label ? <p className="text-[11px] text-slate-400">{label}</p> : <span />}
+        <div className="flex items-center gap-1.5">
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((current) => !current)}
+              disabled={variables.length === 0}
+              className={cn(
+                'inline-flex h-5 items-center gap-1 rounded-md border border-white/8 bg-slate-950/70 px-1.5 text-[9px] leading-none text-slate-400 transition-colors hover:border-blue-400/25 hover:text-white',
+                variables.length === 0 && 'cursor-not-allowed opacity-50 hover:border-white/8 hover:text-slate-400',
+              )}
+            >
+              <Braces className="h-3 w-3" />
+              <span className="text-[9px]">插入变量</span>
+            </button>
+            {menuOpen && variables.length > 0 && (
+              <VariableSuggestList
+                variables={variables}
+                className="right-0 top-[calc(100%+5px)] w-44"
+                onSelect={insertFromMenu}
+              />
+            )}
+          </div>
+          {headerAction}
+        </div>
+      </div>
+      <div
+        className={cn(
+          'relative mt-1.5 rounded-xl border border-white/8 bg-slate-950/80 focus-within:border-blue-400/50',
+          fill && 'flex-1 overflow-auto',
+        )}
+      >
+        {!value && (
+          <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 text-[11px] leading-4 text-slate-600">
+            {placeholder}
+          </span>
+        )}
+        <div ref={hostRef} className={cn(fill && 'h-full')} />
+      </div>
+    </div>
+  )
+}
+
+function VariableSuggestList({
+  variables,
+  className,
+  onSelect,
+  onMouseDownSelect,
+}: {
+  variables: { name: string; type: WorkflowValueType }[]
+  className?: string
+  onSelect?: (name: string) => void
+  onMouseDownSelect?: (name: string) => void
+}) {
+  return (
+    <div
+      className={cn(
+        'absolute z-50 max-h-56 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur',
+        className,
+      )}
+    >
+      {variables.map((variable) => (
+        <button
+          key={variable.name}
+          type="button"
+          onClick={onSelect ? () => onSelect(variable.name) : undefined}
+          onMouseDown={onMouseDownSelect ? (event) => {
+            event.preventDefault()
+            onMouseDownSelect(variable.name)
+          } : undefined}
+          className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-300 transition-colors hover:bg-white/8 hover:text-white"
+        >
+          <span className="min-w-0 flex-1 truncate text-[11px]">{variable.name}</span>
+          <span className="shrink-0 rounded bg-white/6 px-1 py-0.5 text-[9px] text-slate-400">
+            {variable.type}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function createPromptVariableHighlighter(getKnownNames: () => Set<string>) {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+
+      constructor(view: EditorView) {
+        this.decorations = buildPromptVariableDecorations(view, getKnownNames())
+      }
+
+      update(update: ViewUpdate) {
+        this.decorations = buildPromptVariableDecorations(update.view, getKnownNames())
+      }
+    },
+    {
+      decorations: (plugin) => plugin.decorations,
+    },
+  )
+}
+
+function buildPromptVariableDecorations(view: EditorView, knownNames: Set<string>) {
+  const builder = new RangeSetBuilder<Decoration>()
+  const text = view.state.doc.toString()
+  const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    const rootName = match[1].split(/[.[]/)[0].trim()
+    builder.add(
+      match.index,
+      match.index + match[0].length,
+      Decoration.mark({
+        attributes: {
+          style: knownNames.has(rootName) ? 'color: rgb(147 197 253);' : 'color: rgb(253 164 175);',
+        },
+      }),
+    )
+  }
+  return builder.finish()
+}
+
+function createPromptVariableAutocomplete(getVariables: () => { name: string; type: WorkflowValueType }[]) {
+  return autocompletion({
+    activateOnTyping: true,
+    defaultKeymap: true,
+    closeOnBlur: true,
+    icons: false,
+    override: [
+      (context: CompletionContext) => {
+        const variables = getVariables()
+        if (variables.length === 0) {
+          return null
+        }
+        const textBefore = context.state.sliceDoc(Math.max(0, context.pos - 80), context.pos)
+        const match = textBefore.match(/(\{\{?)([\p{L}\p{N}_.\[\]-]*)$/u)
+        if (!match && !context.explicit) {
+          return null
+        }
+        const braces = match?.[1] ?? ''
+        const word = match?.[2] ?? ''
+        const query = word.toLowerCase()
+        // 候选词从“变量名”起点开始匹配（不含 {{），否则 {{ 会被当作过滤词导致候选被全部过滤
+        const wordFrom = context.pos - word.length
+        const braceFrom = wordFrom - braces.length
+        const options = variables
+          .filter((variable) => variable.name.toLowerCase().includes(query))
+          .map((variable) => {
+            const token = `{{${variable.name}}}`
+            return {
+              label: variable.name,
+              detail: variable.type,
+              type: 'variable',
+              info: () => buildVariableInfo(variable),
+              // 连同已输入的 {{ 一起替换为完整的 {{变量名}}
+              apply: (view: EditorView) => {
+                view.dispatch({
+                  changes: { from: braceFrom, to: context.pos, insert: token },
+                  selection: { anchor: braceFrom + token.length },
+                })
+              },
+            }
+          })
+
+        return {
+          from: wordFrom,
+          options,
+          validFor: /^[\p{L}\p{N}_.\[\]-]*$/u,
+        }
+      },
+    ],
+  })
+}
+
+function buildVariableInfo(variable: { name: string; type: WorkflowValueType }) {
+  const dom = document.createElement('div')
+  dom.className = 'flex flex-col gap-1'
+
+  const nameEl = document.createElement('div')
+  nameEl.textContent = variable.name
+  nameEl.style.cssText = 'font-size:11px;font-weight:600;color:rgb(226 232 240);word-break:break-all;'
+
+  const typeEl = document.createElement('div')
+  typeEl.textContent = `类型：${variable.type}`
+  typeEl.style.cssText = 'font-size:10px;color:rgb(148 163 184);'
+
+  const tokenEl = document.createElement('div')
+  tokenEl.textContent = `引用：{{${variable.name}}}`
+  tokenEl.style.cssText = 'font-size:10px;color:rgb(147 197 253);word-break:break-all;'
+
+  dom.append(nameEl, typeEl, tokenEl)
+  return dom
 }
 
 function ensureReasoningOutput(outputs: WorkflowNode['outputs']) {

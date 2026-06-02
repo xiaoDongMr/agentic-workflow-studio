@@ -15,7 +15,7 @@ import type { WorkflowNode } from '@/types/workflow'
 
 export const CANVAS_OFFSET_X = 420
 export const CANVAS_OFFSET_Y = 90
-export const NODE_GAP_X = 264
+export const NODE_GAP_X = 308
 export const NODE_GAP_Y = 142
 
 export const paletteToNodeType: Record<string, WorkflowNode['type']> = {
@@ -64,42 +64,42 @@ export const defaultRegistries: WorkflowNodeRegistry[] = [
       isStart: true,
       deleteDisable: true,
       copyDisable: true,
-      size: { width: 260, height: 146 },
+      size: { width: 300, height: 146 },
       defaultPorts: [{ type: 'output' }],
     },
   },
   {
     type: 'llm',
     meta: {
-      size: { width: 276, height: 154 },
+      size: { width: 320, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'selector',
     meta: {
-      size: { width: 276, height: 154 },
+      size: { width: 320, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'loop',
     meta: {
-      size: { width: 276, height: 154 },
+      size: { width: 320, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'code',
     meta: {
-      size: { width: 276, height: 154 },
+      size: { width: 320, height: 154 },
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
     },
   },
   {
     type: 'end',
     meta: {
-      size: { width: 276, height: 154 },
+      size: { width: 320, height: 154 },
       defaultPorts: [{ type: 'input' }],
     },
   },

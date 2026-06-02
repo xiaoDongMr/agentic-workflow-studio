@@ -134,7 +134,7 @@ textarea {
 
 .aw-flow-node {
   position: relative;
-  min-width: 260px;
+  min-width: 300px;
   min-height: 146px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);

@@ -659,20 +659,59 @@ function UrlListEditor({
   placeholder: string
   onChange: (values: string[]) => void
 }) {
-  const displayValue = multiple ? values.join('\n') : values[0] ?? ''
+  const [draft, setDraft] = useState('')
+
+  if (!multiple) {
+    return (
+      <input
+        type="text"
+        value={values[0] ?? ''}
+        onChange={(event) => onChange([event.target.value.trim()].filter(Boolean))}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
+      />
+    )
+  }
+
+  const addDraft = () => {
+    const url = draft.trim()
+    if (!url) {
+      return
+    }
+    onChange([...values, url])
+    setDraft('')
+  }
+
   return (
-    <textarea
-      value={displayValue}
-      onChange={(event) =>
-        onChange(
-          multiple
-            ? event.target.value.split('\n').map((item) => item.trim()).filter(Boolean)
-            : [event.target.value.trim()].filter(Boolean),
-        )
-      }
-      className="h-[92px] w-full resize-none rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm leading-5 text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
-      placeholder={multiple ? `${placeholder}，每行一个` : placeholder}
-    />
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            addDraft()
+          }
+        }}
+        placeholder={`${placeholder}，回车或点击添加`}
+        className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
+      />
+      <button
+        type="button"
+        onClick={addDraft}
+        disabled={!draft.trim()}
+        className={cn(
+          'inline-flex shrink-0 items-center gap-1 rounded-xl border px-3 py-2.5 text-xs font-semibold transition',
+          draft.trim()
+            ? 'border-blue-400/30 bg-blue-500/16 text-blue-100 hover:bg-blue-500/24'
+            : 'cursor-not-allowed border-white/8 bg-white/5 text-slate-500',
+        )}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        添加
+      </button>
+    </div>
   )
 }
 

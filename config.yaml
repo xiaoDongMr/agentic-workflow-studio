@@ -5,6 +5,12 @@ sandbox:
   use: deerflow.sandbox.local:LocalSandboxProvider
   allow_host_bash: false
 
+object_storage:
+  provider: local
+  local_dir: .deer-flow/storage/workflow-uploads
+  public_url_prefix: /api/storage/files
+  max_file_size_mb: 20
+
 models:
   - name: openai_qwen3-235b-a22b-instruct-2507
     display_name: AIDP / openai_qwen3-235b-a22b-instruct-2507

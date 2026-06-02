@@ -17,10 +17,9 @@ import { useClickOutside } from '@/features/workflow/components/node-config/use-
 import {
   getAvailableInputSources,
   normalizeValueType,
-  type WorkflowVariableSource,
 } from '@/features/workflow/components/node-config/variable-utils'
 import { cn } from '@/lib/utils'
-import type { WorkflowInputMapping, WorkflowNode, WorkflowNodeIO, WorkflowValueType } from '@/types/workflow'
+import type { WorkflowNode, WorkflowValueType } from '@/types/workflow'
 
 const DEFAULT_MODEL_OPTION: ModelOption = {
   name: '',
@@ -102,9 +101,21 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
     [config.model, modelOptions],
   )
   const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
+  const availableInputSources = useMemo(
+    () => selectedModel.supportsVision
+      ? inputSources
+      : inputSources.filter((source) => !isVisionValueType(source.type)),
+    [inputSources, selectedModel.supportsVision],
+  )
   const errorStrategyOptions = useMemo(
     () => ERROR_STRATEGY_OPTIONS.map((item) => ERROR_STRATEGY_LABEL[item]),
     [],
+  )
+  const visibleOutputs = useMemo(
+    () => selectedModel.supportsThinking
+      ? ensureReasoningOutput(node.outputs)
+      : removeReasoningOutput(node.outputs),
+    [node.outputs, selectedModel.supportsThinking],
   )
   const handleModelChange = useCallback((model: ModelOption) => {
     onUpdateNode({
@@ -112,7 +123,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
         model: model.name,
         ...(model.supportsThinking ? { reasoningKey: REASONING_OUTPUT_NAME } : {}),
       },
-      ...(model.supportsThinking ? { outputs: ensureReasoningOutput(node.outputs) } : {}),
+      outputs: model.supportsThinking ? ensureReasoningOutput(node.outputs) : removeReasoningOutput(node.outputs),
     })
   }, [node.outputs, onUpdateNode])
 
@@ -125,7 +136,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           title=""
           emptyLabel="输入变量"
           items={node.inputs}
-          sourceOptions={inputSources}
+          sourceOptions={availableInputSources}
           inputMappings={config.inputMappings}
           onChange={(items) => onUpdateNode({ inputs: items })}
           onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
@@ -141,37 +152,47 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           error={modelOptionsState.error}
           onChange={handleModelChange}
         />
+        {selectedModel.supportsVision && (
+          <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+            <p className="text-[11px] font-medium text-slate-300">视觉理解</p>
+            <SwitchRow
+              label="图片/视频转 Base64"
+              checked={Boolean(config.visionInputAsBase64)}
+              onChange={(checked) => onUpdateNode({ config: { visionInputAsBase64: checked } })}
+              description="开启后后端会将视觉理解输入中的图片或视频 URL 转为 base64 传给模型。"
+            />
+            <p className="text-[10px] leading-4 text-slate-500">
+              图片和视频变量请在“输入变量”中添加或引用，仅支持视觉的模型会展示 Image / Video 类型变量。
+            </p>
+          </div>
+        )}
       </ConfigSection>
-
-      {selectedModel.supportsVision && (
-        <ConfigSection title="视觉理解输入">
-          <VisionInputSection
-            sourceOptions={inputSources}
-            mappings={config.visionInputMappings ?? []}
-            onChange={(visionInputMappings) => onUpdateNode({ config: { visionInputMappings } })}
-          />
-        </ConfigSection>
-      )}
 
       <ConfigSection title="提示词">
         <EditableArea
           label="系统提示词"
           value={config.systemPrompt ?? config.prompt}
-          placeholder="可以使用 {{变量名}}、{{变量名.子变量名}} 引用输入变量。"
+          placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
           onChange={(value) => onUpdateNode({ config: { systemPrompt: value, prompt: value } })}
           rows={6}
         />
         <EditableArea
           label="用户提示词"
           value={config.userPrompt ?? '{{input}}'}
-          placeholder="例如：请基于 {{input}} 输出总结。"
+          placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
           onChange={(value) => onUpdateNode({ config: { userPrompt: value } })}
           rows={6}
         />
       </ConfigSection>
 
       <ConfigSection title="输出变量">
-        <IOSection title="" emptyLabel="输出变量" items={node.outputs} onChange={(items) => onUpdateNode({ outputs: items })} />
+        <IOSection
+          title=""
+          emptyLabel="输出变量"
+          items={visibleOutputs}
+          onChange={(items) => onUpdateNode({ outputs: normalizeReasoningOutputs(items, selectedModel.supportsThinking) })}
+          readonlyNames={selectedModel.supportsThinking ? [REASONING_OUTPUT_NAME] : []}
+        />
       </ConfigSection>
 
       <ConfigSection title="异常处理">
@@ -323,66 +344,10 @@ function ModelSelectField({
   )
 }
 
-function VisionInputSection({
-  sourceOptions,
-  mappings,
-  onChange,
-}: {
-  sourceOptions: WorkflowVariableSource[]
-  mappings: WorkflowInputMapping[]
-  onChange: (mappings: WorkflowInputMapping[]) => void
-}) {
-  const visionSources = useMemo(
-    () => sourceOptions.filter((option) => isVisionReferenceType(option.type)),
-    [sourceOptions],
-  )
-  const items = useMemo(() => mappingsToVisionItems(mappings, visionSources), [mappings, visionSources])
-  const handleItemsChange = useCallback(
-    (nextItems: WorkflowNodeIO[]) => {
-      onChange(nextItems.map((item, index) => ({
-        field: item.name,
-        sourceType: mappings[index]?.sourceType ?? 'node',
-        source: mappings[index]?.source ?? '',
-        valueType: item.type,
-      })))
-    },
-    [mappings, onChange],
-  )
-  const handleMappingsChange = useCallback(
-    (nextMappings: WorkflowInputMapping[]) => {
-      onChange(nextMappings.map((mapping, index) => ({
-        ...mapping,
-        sourceType: 'node',
-        valueType: getVisionMappingType(mapping, visionSources) ?? items[index]?.type ?? 'Image',
-      })))
-    },
-    [items, onChange, visionSources],
-  )
-
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] leading-4 text-slate-500">
-        变量值仅可引用上游 Image / Video / Array&lt;Image&gt; / Array&lt;Video&gt; 类型变量，图片和视频本质都是上传后的 URL。
-      </p>
-      <IOSection
-        title=""
-        emptyLabel="视觉理解输入"
-        items={items}
-        sourceOptions={visionSources}
-        inputMappings={mappings}
-        onChange={handleItemsChange}
-        onInputMappingsChange={handleMappingsChange}
-      />
-    </div>
-  )
-}
-
 function ensureReasoningOutput(outputs: WorkflowNode['outputs']) {
-  if (outputs.some((output) => output.name === REASONING_OUTPUT_NAME)) {
-    return outputs
-  }
+  const normalizedOutputs = removeReasoningOutput(outputs)
   return [
-    ...outputs,
+    ...normalizedOutputs,
     {
       name: REASONING_OUTPUT_NAME,
       type: REASONING_OUTPUT_TYPE,
@@ -391,30 +356,17 @@ function ensureReasoningOutput(outputs: WorkflowNode['outputs']) {
   ]
 }
 
-function isVisionReferenceType(type: string): boolean {
-  return VISION_REFERENCE_TYPES.has(normalizeValueType(type))
+function removeReasoningOutput(outputs: WorkflowNode['outputs']) {
+  return outputs.filter((output) => output.name !== REASONING_OUTPUT_NAME)
 }
 
-function getVisionMappingType(
-  mapping: WorkflowInputMapping,
-  sourceOptions: WorkflowVariableSource[],
-): WorkflowValueType | undefined {
-  const sourceType = sourceOptions.find((option) => option.value === mapping.source)?.type
-  const normalizedSourceType = sourceType ? normalizeValueType(sourceType) : undefined
-  if (normalizedSourceType && VISION_REFERENCE_TYPES.has(normalizedSourceType)) {
-    return normalizedSourceType
+function normalizeReasoningOutputs(outputs: WorkflowNode['outputs'], supportsThinking: boolean) {
+  if (!supportsThinking) {
+    return removeReasoningOutput(outputs)
   }
-  const normalizedMappingType = mapping.valueType ? normalizeValueType(mapping.valueType) : undefined
-  return normalizedMappingType && VISION_REFERENCE_TYPES.has(normalizedMappingType) ? normalizedMappingType : undefined
+  return ensureReasoningOutput(outputs)
 }
 
-function mappingsToVisionItems(
-  mappings: WorkflowInputMapping[],
-  sourceOptions: WorkflowVariableSource[],
-): WorkflowNodeIO[] {
-  return mappings.map((mapping, index) => ({
-    name: mapping.field || `vision_${index + 1}`,
-    type: getVisionMappingType(mapping, sourceOptions) ?? 'Image',
-    description: '',
-  }))
+function isVisionValueType(type: string): boolean {
+  return VISION_REFERENCE_TYPES.has(normalizeValueType(type))
 }

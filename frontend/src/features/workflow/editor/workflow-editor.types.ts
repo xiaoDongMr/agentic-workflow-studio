@@ -36,6 +36,7 @@ export interface TrialRunNodeExecution {
 
 export interface GlobalDebugFieldValue {
   name: string
-  type: 'json' | 'string'
+  type: 'json' | 'string' | 'image' | 'video' | 'image-array' | 'video-array'
+  valueType?: string
   value: string
 }

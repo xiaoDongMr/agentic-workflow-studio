@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { CheckCircle2, ChevronDown, Clipboard, LayoutGrid, Minus, Play, Plus, Redo2, Scan, Search, Undo2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { Check, CheckCircle2, ChevronDown, Clipboard, ImageUp, LayoutGrid, Link, Minus, Play, Plus, Redo2, Scan, Search, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useClientContext, usePlaygroundTools } from '@flowgram.ai/free-layout-editor'
 import type { NodePanelRenderProps } from '@flowgram.ai/free-node-panel-plugin'
 
@@ -7,6 +7,7 @@ import {
   bottomLibrarySections,
   paletteToNodeType,
 } from '@/features/workflow/editor/workflow-editor.config'
+import { uploadMediaFile } from '@/api/storage'
 import { cn } from '@/lib/utils'
 import type { GlobalDebugFieldValue, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowNode } from '@/types/workflow'
@@ -126,7 +127,8 @@ export function EditorTrialRunPanel({
   open: boolean
   fields: Array<{
     name: string
-    type: 'json' | 'string'
+    type: GlobalDebugFieldValue['type']
+    valueType?: string
     value: string
   }>
   running: boolean
@@ -222,7 +224,7 @@ export function EditorTrialRunPanel({
                   <div className="mb-2 flex items-center gap-2">
                     <span className="text-sm font-medium text-slate-200">{field.name}</span>
                     <span className="rounded-md border border-white/8 bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
-                      {field.type === 'json' ? 'Object' : 'String'}
+                      {field.valueType ?? getDebugFieldTypeLabel(field.type)}
                     </span>
                   </div>
                   {field.type === 'json' ? (
@@ -241,6 +243,11 @@ export function EditorTrialRunPanel({
                       />
                       {jsonError && <p className="mt-2 text-xs text-rose-400">{jsonError}</p>}
                     </>
+                  ) : isMediaFieldType(field.type) ? (
+                    <MediaInputEditor
+                      field={field}
+                      onChange={(value) => onFieldChange(field.name, value)}
+                    />
                   ) : (
                     <input
                       type="text"
@@ -466,11 +473,13 @@ function FieldInputEditor({
       <div className="mb-1.5 flex items-center gap-2">
         <span className="text-sm font-medium text-slate-200">{field.name}</span>
         <span className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
-          {field.type === 'json' ? 'Object' : 'String'}
+          {field.valueType ?? getDebugFieldTypeLabel(field.type)}
         </span>
       </div>
       {field.type === 'json' ? (
         <JsonInputEditor value={field.value} error={error} onChange={(value) => onChange(field.name, value)} />
+      ) : isMediaFieldType(field.type) ? (
+        <MediaInputEditor field={field} onChange={(value) => onChange(field.name, value)} />
       ) : (
         <input
           type="text"
@@ -481,6 +490,221 @@ function FieldInputEditor({
       )}
     </div>
   )
+}
+
+function MediaInputEditor({
+  field,
+  onChange,
+}: {
+  field: GlobalDebugFieldValue
+  onChange: (value: string) => void
+}) {
+  const multiple = field.type.endsWith('-array')
+  const mediaKind = field.type.includes('video') ? 'video' : 'image'
+  const accept = mediaKind === 'image' ? 'image/*' : 'video/*'
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [mode, setMode] = useState<'upload' | 'url'>('upload')
+  const [uploading, setUploading] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [error, setError] = useState('')
+  const values = useMemo(() => parseMediaValues(field.value, multiple), [field.value, multiple])
+
+  const updateValues = (nextValues: string[]) => {
+    onChange(multiple ? JSON.stringify(nextValues, null, 2) : nextValues[0] ?? '')
+  }
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files?.length) {
+      return
+    }
+    setUploading(true)
+    setError('')
+    try {
+      const uploaded = await Promise.all(Array.from(files).map((file) => uploadMediaFile(file)))
+      const nextUrls = uploaded.map((item) => item.url)
+      updateValues(multiple ? [...values, ...nextUrls] : nextUrls.slice(0, 1))
+    } catch {
+      setError('上传失败，请检查文件类型或后端服务')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-2.5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-0.5">
+          <MediaModeButton active={mode === 'upload'} onClick={() => setMode('upload')}>
+            <Upload className="h-3.5 w-3.5" />
+            上传
+          </MediaModeButton>
+          <MediaModeButton active={mode === 'url'} onClick={() => setMode('url')}>
+            <Link className="h-3.5 w-3.5" />
+            输入 URL
+          </MediaModeButton>
+        </div>
+        <span className="text-[10px] text-slate-500">
+          {multiple ? '支持多个' : '单个'}{mediaKind === 'image' ? '图片' : '视频'}
+        </span>
+      </div>
+
+      {mode === 'upload' ? (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setDragging(true)
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault()
+            setDragging(false)
+            void handleUpload(event.dataTransfer.files)
+          }}
+          disabled={uploading}
+          className={cn(
+            'flex min-h-[116px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-600/80 bg-slate-950/50 px-4 py-5 text-center transition',
+            dragging && 'border-blue-400/80 bg-blue-500/12',
+            uploading ? 'cursor-wait opacity-80' : 'hover:border-blue-400/70 hover:bg-blue-500/8',
+          )}
+        >
+          <ImageUp className="mb-2 h-6 w-6 text-blue-300" />
+          <span className="text-sm font-medium text-slate-100">
+            {uploading ? '上传中...' : '拖拽文件上传 或 点击上传'}
+          </span>
+          <span className="mt-1 text-xs text-slate-500">可上传到本地存储，也可以切换为直接输入 URL</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={accept}
+            multiple={multiple}
+            className="hidden"
+            onChange={(event) => void handleUpload(event.target.files)}
+          />
+        </button>
+      ) : (
+        <UrlListEditor
+          multiple={multiple}
+          values={values}
+          placeholder={mediaKind === 'image' ? '请输入图片 URL' : '请输入视频 URL'}
+          onChange={updateValues}
+        />
+      )}
+
+      {values.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {values.map((url, index) => (
+            <div key={`${url}-${index}`} className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-2 py-1.5">
+              {mediaKind === 'image' ? (
+                <img src={url} alt="" className="h-8 w-8 shrink-0 rounded-lg border border-white/10 object-cover" />
+              ) : (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-slate-950/70 text-[9px] font-semibold text-blue-200">
+                  VIDEO
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{url}</span>
+              <button
+                type="button"
+                onClick={() => updateValues(values.filter((_, itemIndex) => itemIndex !== index))}
+                className="rounded-lg p-1 text-slate-500 transition hover:bg-rose-500/12 hover:text-rose-200"
+                aria-label="删除媒体 URL"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+    </div>
+  )
+}
+
+function MediaModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition',
+        active ? 'bg-blue-500/20 text-blue-100' : 'text-slate-400 hover:bg-white/7 hover:text-slate-100',
+      )}
+    >
+      {active && <Check className="h-3 w-3" />}
+      {children}
+    </button>
+  )
+}
+
+function UrlListEditor({
+  multiple,
+  values,
+  placeholder,
+  onChange,
+}: {
+  multiple: boolean
+  values: string[]
+  placeholder: string
+  onChange: (values: string[]) => void
+}) {
+  const displayValue = multiple ? values.join('\n') : values[0] ?? ''
+  return (
+    <textarea
+      value={displayValue}
+      onChange={(event) =>
+        onChange(
+          multiple
+            ? event.target.value.split('\n').map((item) => item.trim()).filter(Boolean)
+            : [event.target.value.trim()].filter(Boolean),
+        )
+      }
+      className="h-[92px] w-full resize-none rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm leading-5 text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
+      placeholder={multiple ? `${placeholder}，每行一个` : placeholder}
+    />
+  )
+}
+
+function parseMediaValues(value: string, multiple: boolean) {
+  if (!value.trim()) {
+    return []
+  }
+  if (!multiple) {
+    return [value.trim()]
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+  } catch {
+    return value.split('\n').map((item) => item.trim()).filter(Boolean)
+  }
+}
+
+function isMediaFieldType(type: GlobalDebugFieldValue['type']) {
+  return type === 'image' || type === 'video' || type === 'image-array' || type === 'video-array'
+}
+
+function getDebugFieldTypeLabel(type: GlobalDebugFieldValue['type']) {
+  const labels: Record<GlobalDebugFieldValue['type'], string> = {
+    json: 'Object',
+    string: 'String',
+    image: 'Image',
+    video: 'Video',
+    'image-array': 'Array<Image>',
+    'video-array': 'Array<Video>',
+  }
+  return labels[type]
 }
 
 function JsonInputEditor({

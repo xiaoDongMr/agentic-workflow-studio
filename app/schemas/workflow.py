@@ -27,6 +27,7 @@ class WorkflowNodeConfig(BaseModel):
     reasoningKey: str = "reasoning_content"
     inputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
     visionInputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
+    visionInputAsBase64: bool = False
     supportContinuation: bool = False
     timeoutSeconds: int = 180
     firstTokenTimeoutEnabled: bool = False

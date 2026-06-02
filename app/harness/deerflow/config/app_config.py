@@ -49,6 +49,15 @@ class CircuitBreakerConfig(BaseModel):
     recovery_timeout_sec: int = Field(default=60, description="Time in seconds before attempting to recover the circuit")
 
 
+class ObjectStorageConfig(BaseModel):
+    """Storage configuration for workflow uploaded media."""
+
+    provider: str = Field(default="local", description="Storage provider, currently supports local only")
+    local_dir: str = Field(default=".deer-flow/storage/workflow-uploads", description="Local upload storage directory")
+    public_url_prefix: str = Field(default="/api/storage/files", description="Public URL prefix for uploaded files")
+    max_file_size_mb: int = Field(default=20, description="Maximum upload file size in MB")
+
+
 def _legacy_config_candidates() -> tuple[Path, ...]:
     """Return source-tree config.yaml locations for monorepo compatibility."""
     backend_dir = Path(__file__).resolve().parents[4]
@@ -102,6 +111,7 @@ class AppConfig(BaseModel):
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig, description="Guardrail middleware configuration")
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig, description="LLM circuit breaker configuration")
     loop_detection: LoopDetectionConfig = Field(default_factory=LoopDetectionConfig, description="Loop detection middleware configuration")
+    object_storage: ObjectStorageConfig = Field(default_factory=ObjectStorageConfig, description="Object storage configuration")
     model_config = ConfigDict(extra="allow")
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, description="Unified database backend configuration")
     run_events: RunEventsConfig = Field(default_factory=RunEventsConfig, description="Run event storage configuration")

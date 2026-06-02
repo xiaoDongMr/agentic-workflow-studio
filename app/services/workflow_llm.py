@@ -108,8 +108,16 @@ class DeerFlowModelProvider:
 
 def _get_by_path(value: Any, path: str) -> Any:
     current = value
-    for part in path.split("."):
-        if isinstance(current, dict):
+    parts = _parse_template_path(path)
+    if not parts:
+        return None
+    for part in parts:
+        if isinstance(part, int):
+            if not isinstance(current, list):
+                return None
+            index = part
+            current = current[index] if 0 <= index < len(current) else None
+        elif isinstance(current, dict):
             current = current.get(part)
         elif isinstance(current, list) and part.isdigit():
             index = int(part)
@@ -117,6 +125,41 @@ def _get_by_path(value: Any, path: str) -> Any:
         else:
             return None
     return current
+
+
+def _parse_template_path(path: str) -> list[str | int]:
+    tokens: list[str | int] = []
+    token = ""
+    index = 0
+    text = path.strip()
+
+    while index < len(text):
+        char = text[index]
+        if char == ".":
+            if token:
+                tokens.append(token)
+                token = ""
+            index += 1
+            continue
+        if char == "[":
+            if token:
+                tokens.append(token)
+                token = ""
+            end_index = text.find("]", index + 1)
+            if end_index == -1:
+                return []
+            raw_index = text[index + 1:end_index].strip()
+            if not raw_index.isdigit():
+                return []
+            tokens.append(int(raw_index))
+            index = end_index + 1
+            continue
+        token += char
+        index += 1
+
+    if token:
+        tokens.append(token)
+    return tokens
 
 
 def _message_text(message: Any) -> str:

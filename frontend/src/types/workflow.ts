@@ -53,6 +53,7 @@ export interface WorkflowNodeConfig {
   reasoningKey?: string
   inputMappings: WorkflowInputMapping[]
   visionInputMappings?: WorkflowInputMapping[]
+  visionInputAsBase64?: boolean
   supportContinuation?: boolean
   timeoutSeconds?: number
   firstTokenTimeoutEnabled?: boolean

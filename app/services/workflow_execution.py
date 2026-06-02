@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import base64
+import mimetypes
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict
+from urllib.parse import unquote, urlparse
+from urllib.request import urlopen
 
 from deerflow.config.app_config import AppConfig
 
@@ -190,6 +195,70 @@ def _parse_literal_mapping_value(source: Any, value_type: str) -> Any:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
+def _convert_vision_input_to_base64(value: Any, app_config: AppConfig | None) -> Any:
+    if isinstance(value, dict):
+        return {key: _convert_vision_input_to_base64(item, app_config) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_convert_vision_input_to_base64(item, app_config) for item in value]
+    if isinstance(value, str):
+        return _media_url_to_data_url(value, app_config)
+    return value
+
+
+def _is_vision_value_type(value_type: str) -> bool:
+    normalized = value_type.strip().lower()
+    return normalized in {"image", "video", "array<image>", "array<video>"}
+
+
+def _build_vision_input_from_node_inputs(node: WorkflowNode, node_input: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for item in node.inputs:
+        if item.name and item.name in node_input and _is_vision_value_type(item.type):
+            result[item.name] = node_input[item.name]
+    return result
+
+
+def _media_url_to_data_url(url: str, app_config: AppConfig | None) -> str:
+    if url.startswith("data:"):
+        return url
+    data, mime_type = _read_media_bytes(url, app_config)
+    return f"data:{mime_type};base64,{base64.b64encode(data).decode('utf-8')}"
+
+
+def _read_media_bytes(url: str, app_config: AppConfig | None) -> tuple[bytes, str]:
+    local_path = _resolve_local_storage_url(url, app_config)
+    if local_path is not None:
+        data = local_path.read_bytes()
+        mime_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        return data, mime_type
+
+    with urlopen(url, timeout=20) as response:
+        data = response.read()
+        mime_type = response.headers.get_content_type() or mimetypes.guess_type(urlparse(url).path)[0] or "application/octet-stream"
+        return data, mime_type
+
+
+def _resolve_local_storage_url(url: str, app_config: AppConfig | None) -> Path | None:
+    if app_config is None:
+        return None
+    storage_config = app_config.object_storage
+    public_prefix = storage_config.public_url_prefix.rstrip("/")
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+    if not path.startswith(f"{public_prefix}/"):
+        return None
+
+    root = Path(storage_config.local_dir).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    root = root.resolve()
+    relative_path = path[len(public_prefix) + 1:]
+    target = (root / relative_path).resolve()
+    if not target.is_file() or root not in target.parents:
+        raise FileNotFoundError(f"视觉输入文件不存在: {url}")
+    return target
+
+
 def _build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
     result = _build_mapped_values(node.config.inputMappings, state)
     if not result:
@@ -264,6 +333,12 @@ def _safe_exec(code: str, node_input: dict[str, Any], variables: dict[str, Any])
 
 class StartNodeExecutor:
     async def run(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> dict[str, Any]:
+        run_input = state.get("input", {})
+        outputs = [output for output in node.outputs if output.name]
+        if outputs:
+            if len(outputs) == 1 and outputs[0].name not in run_input:
+                return {outputs[0].name: _extract_message_content(run_input)}
+            return {output.name: run_input.get(output.name) for output in outputs}
         return {node.config.outputKey or "query": _extract_message_content(state.get("input", {}))}
 
 
@@ -293,9 +368,13 @@ class LlmNodeExecutor:
         node_input: dict[str, Any],
         state: WorkflowState,
     ) -> dict[str, Any]:
-        vision_input = _build_mapped_values(node.config.visionInputMappings, state)
+        legacy_vision_input = _build_mapped_values(node.config.visionInputMappings, state)
+        input_vision_input = _build_vision_input_from_node_inputs(node, node_input)
+        vision_input = {**legacy_vision_input, **input_vision_input}
         if not vision_input:
             return node_input
+        if node.config.visionInputAsBase64:
+            vision_input = _convert_vision_input_to_base64(vision_input, self.app_config)
         return {**node_input, "vision": vision_input}
 
     async def _invoke_with_policy(self, node: WorkflowNode, request: LlmInvokeRequest) -> LlmInvokeResult:

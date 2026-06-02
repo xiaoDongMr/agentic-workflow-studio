@@ -77,9 +77,17 @@ function safeParseJsonField(value: string) {
   }
 }
 
+function parseArrayFieldValue(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return value.split('\n').map((item) => item.trim()).filter(Boolean)
+  }
+}
+
 function buildDebugPayloadFromFields(fields: GlobalDebugFieldValue[]) {
-  const payload = fields.find((field) => field.type === 'json')
-  return payload ? (safeParseJsonField(payload.value) as Record<string, unknown>) : {}
+  return buildPayloadFromFieldEntries(fields)
 }
 
 function buildDebugPayloadFromCombinedJson(value: string) {
@@ -110,7 +118,11 @@ function buildPayloadFromFieldEntries(fields: GlobalDebugFieldValue[]) {
   return Object.fromEntries(
     fields.map((field) => [
       field.name,
-      field.type === 'json' ? safeParseJsonField(field.value) : field.value,
+      field.type === 'json'
+        ? safeParseJsonField(field.value)
+        : field.type.endsWith('-array')
+          ? parseArrayFieldValue(field.value)
+          : field.value,
     ]),
   )
 }
@@ -120,18 +132,56 @@ function isStructuredWorkflowType(type: string) {
   return normalized.includes('object') || normalized.includes('array') || normalized.includes('json')
 }
 
+function getDebugFieldInputType(type: string): GlobalDebugFieldValue['type'] {
+  const normalized = type.trim().toLowerCase()
+  if (normalized === 'image') {
+    return 'image'
+  }
+  if (normalized === 'video') {
+    return 'video'
+  }
+  if (normalized === 'array<image>') {
+    return 'image-array'
+  }
+  if (normalized === 'array<video>') {
+    return 'video-array'
+  }
+  return isStructuredWorkflowType(type) ? 'json' : 'string'
+}
+
 function createSingleNodeTrialFields(node: WorkflowNode, fallbackPayload: Record<string, unknown>) {
   return node.inputs
     .filter((input) => input.name)
     .map((input) => {
       const value = fallbackPayload[input.name]
-      const structured = isStructuredWorkflowType(input.type)
+      const inputType = getDebugFieldInputType(input.type)
+      const structured = inputType === 'json'
       return {
         name: input.name,
-        type: structured || (typeof value === 'object' && value !== null) ? 'json' : 'string',
-        value: formatInputFieldValue(value, structured),
+        type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
+        valueType: input.type,
+        value: formatInputFieldValue(value, structured || inputType.endsWith('-array')),
       } satisfies GlobalDebugFieldValue
     })
+}
+
+function createGlobalDebugFields(nodes: WorkflowNode[], previousFields: GlobalDebugFieldValue[]) {
+  const startNode = nodes.find((node) => node.type === 'start')
+  const definitions = startNode?.outputs.filter((output) => output.name) ?? []
+  if (definitions.length === 0) {
+    return previousFields
+  }
+  const previousByName = new Map(previousFields.map((field) => [field.name, field]))
+  return definitions.map((definition) => {
+    const previous = previousByName.get(definition.name)
+    const type = getDebugFieldInputType(definition.type)
+    return {
+      name: definition.name,
+      type,
+      valueType: definition.type,
+      value: previous?.value ?? formatInputFieldValue(undefined, type === 'json' || type.endsWith('-array')),
+    } satisfies GlobalDebugFieldValue
+  })
 }
 
 function formatInputFieldValue(value: unknown, structured: boolean) {
@@ -1147,6 +1197,12 @@ export function WorkflowEditor({
             onToggleTrialRun={() => {
               setQuickAddNodeId('')
               setSingleNodeTrialOpen(false)
+              setGlobalDebugFields((prev) => {
+                const nextFields = createGlobalDebugFields(nodes, prev)
+                setGlobalDebugCombinedJson(JSON.stringify(buildPayloadFromFieldEntries(nextFields), null, 2))
+                setGlobalDebugJsonError('')
+                return nextFields
+              })
               setTrialRunOpen(true)
             }}
           />

@@ -27,6 +27,7 @@ interface IOSectionProps {
   onInputMappingsChange?: (mappings: WorkflowInputMapping[]) => void
   maxItems?: number
   canRemove?: boolean
+  readonlyNames?: string[]
 }
 
 export function IOSection({
@@ -39,6 +40,7 @@ export function IOSection({
   onInputMappingsChange,
   maxItems,
   canRemove = true,
+  readonlyNames = [],
 }: IOSectionProps) {
   const isInputReferenceMode = Boolean(sourceOptions)
   const canAddItem = maxItems === undefined || items.length < maxItems
@@ -111,12 +113,15 @@ export function IOSection({
 
   const removeItem = useCallback(
     (index: number) => {
+      if (readonlyNames.includes(items[index]?.name ?? '')) {
+        return
+      }
       onChange(items.filter((_, currentIndex) => currentIndex !== index))
       if (inputMappings && onInputMappingsChange) {
         onInputMappingsChange(inputMappings.filter((_, currentIndex) => currentIndex !== index))
       }
     },
-    [inputMappings, items, onChange, onInputMappingsChange],
+    [inputMappings, items, onChange, onInputMappingsChange, readonlyNames],
   )
 
   return (
@@ -151,7 +156,8 @@ export function IOSection({
             onChange={(nextItem) => updateItem(index, nextItem)}
             onChangeSource={(source) => updateSource(index, source)}
             onRemove={() => removeItem(index)}
-            canRemove={canRemove}
+            canRemove={canRemove && !readonlyNames.includes(item.name)}
+            readonly={readonlyNames.includes(item.name)}
           />
         ))}
         {items.length === 0 && (
@@ -191,6 +197,7 @@ function IOEditorRow({
   onChangeSource,
   onRemove,
   canRemove,
+  readonly,
 }: {
   item: WorkflowNodeIO
   gridClass: string
@@ -200,6 +207,7 @@ function IOEditorRow({
   onChangeSource?: (source: string) => void
   onRemove: () => void
   canRemove: boolean
+  readonly: boolean
 }) {
   const handleNameChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => onChange({ ...item, name: event.target.value }),
@@ -212,18 +220,24 @@ function IOEditorRow({
         value={item.name}
         placeholder="变量名"
         onChange={handleNameChange}
-        className="aw-variable-input h-7 min-w-0 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-slate-200 outline-none placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50"
+        disabled={readonly}
+        className={cn(
+          'aw-variable-input h-7 min-w-0 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-slate-200 outline-none placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50',
+          readonly && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
+        )}
       />
       {sourceOptions ? (
         <VariableSourceSelect
           value={selectedSource ?? DESELECT_SOURCE_VALUE}
           options={sourceOptions}
           onChange={(value) => onChangeSource?.(value)}
+          disabled={readonly}
         />
       ) : (
         <ValueTypeSelect
           value={normalizeValueType(item.type)}
           onChange={(type) => onChange({ ...item, type })}
+          disabled={readonly}
         />
       )}
       {canRemove ? (
@@ -245,9 +259,11 @@ function IOEditorRow({
 function ValueTypeSelect({
   value,
   onChange,
+  disabled = false,
 }: {
   value: WorkflowValueType
   onChange: (value: WorkflowValueType) => void
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [arrayOpen, setArrayOpen] = useState(value.startsWith('Array'))
@@ -273,7 +289,11 @@ function ValueTypeSelect({
       <button
         type="button"
         onClick={toggleMenu}
-        className="aw-variable-select-trigger flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50"
+        disabled={disabled}
+        className={cn(
+          'aw-variable-select-trigger flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50',
+          disabled && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
+        )}
       >
         <span className="truncate">{formatValueType(value)}</span>
         <ChevronDown className={cn('h-3 w-3 shrink-0 text-slate-400 transition-transform', open && 'rotate-180')} />
@@ -375,10 +395,12 @@ function VariableSourceSelect({
   value,
   options,
   onChange,
+  disabled = false,
 }: {
   value: string
   options: WorkflowVariableSource[]
   onChange: (value: string) => void
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -400,7 +422,11 @@ function VariableSourceSelect({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="aw-variable-select-trigger flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50"
+        disabled={disabled}
+        className={cn(
+          'aw-variable-select-trigger flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50',
+          disabled && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
+        )}
       >
         {selectedOption ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5">

@@ -407,7 +407,10 @@ export function SingleNodeTrialPanel({
 
           {execution && (
             <div className="mt-6 space-y-4 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
-              <p className="text-base font-semibold text-white">运行结果</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-base font-semibold text-white">运行结果</p>
+                {execution.tokenUsage && <TrialTokenUsagePill usage={execution.tokenUsage} />}
+              </div>
               <ExecutionBlock title="输入" value={formatJsonValue(parsedInput)} />
               <ExecutionBlock title="输出" value={formatJsonValue(parsedOutput)} />
             </div>
@@ -774,6 +777,14 @@ function ExecutionBlock({
         {value?.trim() ? value : emptyLabel}
       </pre>
     </div>
+  )
+}
+
+function TrialTokenUsagePill({ usage }: { usage: NonNullable<TrialRunNodeExecution['tokenUsage']> }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-medium text-cyan-100">
+      Token {usage.totalTokens} · 输入 {usage.inputTokens} / 输出 {usage.outputTokens}
+    </span>
   )
 }
 

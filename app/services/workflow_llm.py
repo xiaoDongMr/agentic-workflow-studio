@@ -235,11 +235,31 @@ class DeerFlowModelProvider:
             content=_message_text(response),
             reasoning_content=_extract_reasoning_content(response),
         )
+        token_usage = _extract_token_usage(response) or _estimate_token_usage(
+            model,
+            messages,
+            result.content,
+            result.reasoning_content,
+        )
+        usage_message = (
+            f" · Token {token_usage['totalTokens']}（输入 {token_usage['inputTokens']} / 输出 {token_usage['outputTokens']}）"
+            if token_usage
+            else ""
+        )
+        emit_workflow_event(build_workflow_event(
+            "llm_completed",
+            node_id=request.node_id,
+            node_title=request.node_title,
+            title="模型调用完成",
+            message=f"模型 {request.model or '(default)'} 调用完成{usage_message}",
+            data={"model": request.model or "(default)", "tokenUsage": token_usage} if token_usage else {"model": request.model or "(default)"},
+        ))
         logger.info(
-            "大模型返回: model=%s content_len=%d reasoning_len=%d",
+            "大模型返回: model=%s content_len=%d reasoning_len=%d token_usage=%s",
             request.model or "(default)",
             len(result.content),
             len(result.reasoning_content),
+            token_usage or {},
         )
         return result
 
@@ -249,6 +269,7 @@ class WorkflowLangChainCallbackHandler(BaseCallbackHandler):
         self.node_id = node_id
         self.node_title = node_title
         self.model = model
+        self._counted_run_ids: set[str] = set()
 
     def _emit(
         self,
@@ -301,11 +322,14 @@ class WorkflowLangChainCallbackHandler(BaseCallbackHandler):
         )
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-        self._emit(
-            "llm_completed",
-            title="模型调用完成",
-            message=f"模型 {self.model} 调用完成",
-        )
+        run_id = kwargs.get("run_id")
+        if run_id is not None:
+            run_id_text = str(run_id)
+            if run_id_text in self._counted_run_ids:
+                return
+            self._counted_run_ids.add(run_id_text)
+        # Completion is emitted after the final response is merged in the provider,
+        # because streamed callback payloads do not always include usage metadata.
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         self._emit(
@@ -435,3 +459,135 @@ def _extract_reasoning_content(message: Any) -> str:
             if isinstance(value, str):
                 return value
     return ""
+
+
+def _extract_token_usage(response: Any) -> dict[str, int] | None:
+    usages: list[dict[str, int]] = []
+    generations = getattr(response, "generations", None)
+    if isinstance(generations, list):
+        for generation_group in generations:
+            if not isinstance(generation_group, list):
+                continue
+            for generation in generation_group:
+                usage = _extract_token_usage_from_generation(generation)
+                if usage:
+                    usages.append(usage)
+    if usages:
+        return _sum_token_usage(usages)
+
+    for candidate in (
+        getattr(response, "llm_output", None),
+        getattr(response, "usage_metadata", None),
+        getattr(response, "response_metadata", None),
+        getattr(response, "additional_kwargs", None),
+    ):
+        usage = _extract_token_usage_from_mapping(candidate)
+        if usage:
+            return usage
+    return None
+
+
+def _extract_token_usage_from_generation(generation: Any) -> dict[str, int] | None:
+    for candidate in (
+        getattr(generation, "message", None),
+        getattr(generation, "generation_info", None),
+        generation,
+    ):
+        usage = _extract_token_usage_from_message(candidate)
+        if usage:
+            return usage
+    return None
+
+
+def _extract_token_usage_from_message(message: Any) -> dict[str, int] | None:
+    if message is None:
+        return None
+    for candidate in (
+        getattr(message, "usage_metadata", None),
+        getattr(message, "response_metadata", None),
+        getattr(message, "additional_kwargs", None),
+        message,
+    ):
+        usage = _extract_token_usage_from_mapping(candidate)
+        if usage:
+            return usage
+    return None
+
+
+def _extract_token_usage_from_mapping(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    for nested_key in ("token_usage", "usage", "usage_metadata"):
+        nested_usage = _extract_token_usage_from_mapping(value.get(nested_key))
+        if nested_usage:
+            return nested_usage
+
+    input_tokens = _read_int(value.get("input_tokens"), value.get("prompt_tokens"))
+    output_tokens = _read_int(value.get("output_tokens"), value.get("completion_tokens"))
+    total_tokens = _read_int(value.get("total_tokens"), value.get("total"))
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    if total_tokens <= 0:
+        return None
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "totalTokens": total_tokens,
+    }
+
+
+def _estimate_token_usage(
+    model: Any,
+    messages: list[Any],
+    content: str,
+    reasoning_content: str = "",
+) -> dict[str, int] | None:
+    input_text = "\n".join(_message_text(message) for message in messages)
+    output_text = "\n".join(item for item in (reasoning_content, content) if item)
+    input_tokens = _count_tokens(model, input_text)
+    output_tokens = _count_tokens(model, output_text)
+    total_tokens = input_tokens + output_tokens
+    if total_tokens <= 0:
+        return None
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "totalTokens": total_tokens,
+    }
+
+
+def _count_tokens(model: Any, text: str) -> int:
+    if not text:
+        return 0
+    get_num_tokens = getattr(model, "get_num_tokens", None)
+    if callable(get_num_tokens):
+        try:
+            return max(int(get_num_tokens(text)), 0)
+        except Exception:
+            logger.debug("模型 token 估算失败，使用字符长度兜底", exc_info=True)
+    # Conservative fallback for CJK-heavy prompts when tokenizer is unavailable.
+    return max(round(len(text) / 2), 1)
+
+
+def _sum_token_usage(usages: list[dict[str, int]]) -> dict[str, int]:
+    input_tokens = sum(item.get("inputTokens", 0) for item in usages)
+    output_tokens = sum(item.get("outputTokens", 0) for item in usages)
+    total_tokens = sum(item.get("totalTokens", 0) for item in usages)
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "totalTokens": total_tokens,
+    }
+
+
+def _read_int(*values: Any) -> int:
+    for value in values:
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            continue
+    return 0

@@ -53,6 +53,12 @@ export interface WorkflowRuntimeEvent {
   data?: Record<string, unknown>
 }
 
+export interface WorkflowTokenUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
 export interface TrialRunTimelineItem {
   id: string
   type: WorkflowRuntimeEventType | 'step'
@@ -73,6 +79,7 @@ export interface TrialRunNodeExecution {
   status: TrialRunNodeState
   error?: string
   degraded?: boolean
+  tokenUsage?: WorkflowTokenUsage
   timeline?: TrialRunTimelineItem[]
   summaryInput?: string
   summaryOutput?: string

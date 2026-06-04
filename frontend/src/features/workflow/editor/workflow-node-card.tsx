@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Copy, GitBranchPlus, MoreHorizontal, Play, Trash2 } from 'lucide-react'
 import {
   WorkflowNodeRenderer,
@@ -182,7 +182,7 @@ function NodeExecutionPanel({
 }: {
   execution: TrialRunNodeExecution
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(() => execution.status === 'running')
   const statusLabel =
     execution.status === 'running'
       ? '运行中'
@@ -194,8 +194,11 @@ function NodeExecutionPanel({
   const isRunning = execution.status === 'running'
   const isError = execution.status === 'error'
   const timeline = execution.timeline ?? []
+  const tokenUsage = execution.tokenUsage
+  const tokenUsageLabel = tokenUsage ? formatTokenUsage(tokenUsage) : ''
   const executionRecord = [
     `状态：${statusLabel}`,
+    tokenUsageLabel ? `Token：${tokenUsageLabel}` : '',
     `日志：${execution.log}`,
     execution.error ? `错误：${execution.error}` : '',
     timeline.length > 0
@@ -204,6 +207,12 @@ function NodeExecutionPanel({
     `输入：\n${execution.input}`,
     !isRunning ? `输出：\n${execution.output}` : '',
   ].filter(Boolean).join('\n\n')
+
+  useEffect(() => {
+    if (execution.status === 'running') {
+      setExpanded(true)
+    }
+  }, [execution.status])
 
   return (
     <div
@@ -230,6 +239,11 @@ function NodeExecutionPanel({
           {!isRunning && (
             <span className="aw-flow-node__execution-duration">{(execution.durationMs / 1000).toFixed(3)}s</span>
           )}
+          {tokenUsage && (
+            <span className="rounded-lg border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700 shadow-sm">
+              Token {tokenUsage.totalTokens}
+            </span>
+          )}
         </div>
         <div className="aw-flow-node__execution-summary-content">
           <p className="aw-flow-node__execution-summary-text">{execution.summaryInput ?? execution.log}</p>
@@ -253,6 +267,16 @@ function NodeExecutionPanel({
             <p className="aw-flow-node__execution-log">{execution.log}</p>
             <CopyTextButton text={executionRecord} label="复制全部" />
           </div>
+          {tokenUsage && (
+            <div className="aw-flow-node__execution-section">
+              <span className="aw-flow-node__execution-label">Token 用量</span>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <TokenUsageStat label="总量" value={tokenUsage.totalTokens} />
+                <TokenUsageStat label="输入" value={tokenUsage.inputTokens} />
+                <TokenUsageStat label="输出" value={tokenUsage.outputTokens} />
+              </div>
+            </div>
+          )}
           {timeline.length > 0 && (
             <div className="aw-flow-node__execution-section">
               <span className="aw-flow-node__execution-label">执行过程</span>
@@ -341,6 +365,19 @@ function CopyTextButton({ text, label = '复制' }: { text: string; label?: stri
       {copied ? '已复制' : label}
     </button>
   )
+}
+
+function TokenUsageStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 shadow-sm">
+      <p className="text-[10px] font-medium text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+    </div>
+  )
+}
+
+function formatTokenUsage(usage: NonNullable<TrialRunNodeExecution['tokenUsage']>) {
+  return `总量 ${usage.totalTokens}，输入 ${usage.inputTokens}，输出 ${usage.outputTokens}`
 }
 
 function NodeMetaRow({ label, value }: { label: string; value: string }) {

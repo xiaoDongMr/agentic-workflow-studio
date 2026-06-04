@@ -37,6 +37,7 @@ import type {
   TrialRunNodeExecution,
   TrialRunTimelineItem,
   WorkflowRuntimeEvent,
+  WorkflowTokenUsage,
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
   createNodeData,
@@ -109,13 +110,43 @@ function eventTitle(event: WorkflowRuntimeEvent) {
   return titles[event.type]
 }
 
+function readTokenUsage(data?: Record<string, unknown>): WorkflowTokenUsage | undefined {
+  const usage = data?.tokenUsage
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
+    return undefined
+  }
+  const inputTokens = readTokenCount((usage as Record<string, unknown>).inputTokens)
+  const outputTokens = readTokenCount((usage as Record<string, unknown>).outputTokens)
+  const totalTokens = readTokenCount((usage as Record<string, unknown>).totalTokens) || inputTokens + outputTokens
+  if (totalTokens <= 0) {
+    return undefined
+  }
+  return { inputTokens, outputTokens, totalTokens }
+}
+
+function readTokenCount(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(Math.trunc(value), 0)
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? Math.max(Math.trunc(parsed), 0) : 0
+  }
+  return 0
+}
+
+function formatTokenUsage(usage: WorkflowTokenUsage) {
+  return `Token ${usage.totalTokens} · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens}`
+}
+
 function timelineItemFromRuntimeEvent(event: WorkflowRuntimeEvent): TrialRunTimelineItem {
+  const tokenUsage = readTokenUsage(event.data)
   return {
     id: event.id,
     type: event.type,
     level: event.level ?? 'info',
     title: eventTitle(event),
-    message: event.token ?? event.message,
+    message: event.token ?? (tokenUsage && event.type === 'llm_completed' ? formatTokenUsage(tokenUsage) : event.message),
     timestamp: event.timestamp,
     data: event.data,
   }
@@ -165,6 +196,7 @@ function executionFromRuntimeEvent(
   const message = event.message || eventTitle(event)
   const strategyHandled = event.type === 'node_log' && ['使用兜底输出', '忽略模型错误'].includes(event.title ?? '')
   const degraded = current?.degraded || strategyHandled
+  const tokenUsage = readTokenUsage(event.data) ?? current?.tokenUsage
   return {
     nodeId: event.nodeId || current?.nodeId || fallbackNode?.id || '',
     nodeTitle,
@@ -175,9 +207,10 @@ function executionFromRuntimeEvent(
     status,
     error: event.error ?? current?.error,
     degraded,
+    tokenUsage,
     timeline: mergeTimelineItem(current?.timeline, timelineItemFromRuntimeEvent(event)),
     summaryInput: current?.summaryInput ?? '执行事件',
-    summaryOutput: event.type === 'llm_token' ? '模型正在输出…' : degraded && event.type === 'node_completed' ? '已按异常策略降级完成' : message,
+    summaryOutput: tokenUsage && event.type === 'llm_completed' ? formatTokenUsage(tokenUsage) : event.type === 'llm_token' ? '模型正在输出…' : degraded && event.type === 'node_completed' ? '已按异常策略降级完成' : message,
   }
 }
 
@@ -741,6 +774,7 @@ export function WorkflowEditor({
               ...execution,
               timeline: [...(prev[nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
               degraded: prev[nodeId]?.degraded || execution.degraded,
+              tokenUsage: execution.tokenUsage ?? prev[nodeId]?.tokenUsage,
             }
             syncNodeTrialRunExecution(nodeId, mergedExecution)
             return { [nodeId]: mergedExecution }
@@ -754,6 +788,7 @@ export function WorkflowEditor({
             ...fallbackExecution,
             timeline: [...(prev[nodeId]?.timeline ?? []), ...(fallbackExecution.timeline ?? [])].slice(-80),
             degraded: prev[nodeId]?.degraded || fallbackExecution.degraded,
+            tokenUsage: fallbackExecution.tokenUsage ?? prev[nodeId]?.tokenUsage,
           }
           syncNodeTrialRunExecution(nodeId, mergedExecution)
           return { [nodeId]: mergedExecution }
@@ -1023,6 +1058,7 @@ export function WorkflowEditor({
               ...execution,
               timeline: [...(prev[execution.nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
               degraded: prev[execution.nodeId]?.degraded || execution.degraded,
+              tokenUsage: execution.tokenUsage ?? prev[execution.nodeId]?.tokenUsage,
             }
             const next = {
               ...prev,

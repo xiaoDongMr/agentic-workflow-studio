@@ -1,4 +1,4 @@
-import { Braces, Check, ChevronDown, Maximize2, X } from 'lucide-react'
+import { Braces, Check, ChevronDown, Maximize2, RotateCcw, Settings2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
@@ -26,14 +26,17 @@ import {
   normalizeValueType,
 } from '@/features/workflow/components/node-config/variable-utils'
 import { cn } from '@/lib/utils'
-import type { WorkflowNode, WorkflowValueType } from '@/types/workflow'
+import type { WorkflowNode, WorkflowReasoningEffort, WorkflowValueType } from '@/types/workflow'
 
 const DEFAULT_MODEL_OPTION: ModelOption = {
   name: '',
   displayName: '默认模型',
   description: '使用后端默认模型配置',
   supportsThinking: false,
+  supportsReasoningEffort: false,
   supportsVision: false,
+  maxTokens: null,
+  timeoutSeconds: null,
 }
 
 const ERROR_STRATEGY_OPTIONS: NonNullable<WorkflowNode['config']['errorStrategy']>[] = [
@@ -47,6 +50,24 @@ const ERROR_STRATEGY_LABEL: Record<NonNullable<WorkflowNode['config']['errorStra
   fallback: '使用兜底输出',
   ignore: '忽略并继续',
 }
+
+type ThinkingLevelOption = {
+  value: 'minimal' | 'thinking' | WorkflowReasoningEffort
+  label: string
+  description: string
+}
+
+const THINKING_TOGGLE_OPTIONS: ThinkingLevelOption[] = [
+  { value: 'minimal', label: '关闭思考', description: '关闭思考，直接回答。' },
+  { value: 'thinking', label: '开启思考', description: '开启模型原生思考能力。' },
+]
+
+const REASONING_EFFORT_OPTIONS: ThinkingLevelOption[] = [
+  { value: 'minimal', label: '关闭思考', description: '关闭思考，直接回答。' },
+  { value: 'low', label: '轻量思考', description: '轻量思考，侧重快速响应。' },
+  { value: 'medium', label: '均衡模式', description: '均衡模式，兼顾速度与深度。' },
+  { value: 'high', label: '深度分析', description: '深度分析，处理复杂问题。' },
+]
 
 const REASONING_OUTPUT_NAME = 'reasoning_content'
 const REASONING_OUTPUT_TYPE: WorkflowValueType = 'String'
@@ -108,7 +129,10 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           displayName: config.model,
           description: '当前草稿中的模型，未在后端配置列表中找到',
           supportsThinking: false,
+          supportsReasoningEffort: false,
           supportsVision: false,
+          maxTokens: null,
+          timeoutSeconds: null,
         },
         ...options,
       ]
@@ -143,15 +167,31 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       .filter((input) => input.name.length > 0),
     [node.inputs],
   )
+  const textPromptVariables = useMemo(
+    () => promptVariables.filter((variable) => !isVisionValueType(variable.type)),
+    [promptVariables],
+  )
   const handleModelChange = useCallback((model: ModelOption) => {
+    const tokenCap = model.maxTokens ?? null
+    const currentMaxTokens = config.maxTokens ?? 0
+    const nextMaxTokens =
+      tokenCap && currentMaxTokens > tokenCap ? tokenCap : currentMaxTokens
+    const timeoutCap = model.timeoutSeconds ?? null
+    const currentTimeout = config.timeoutSeconds ?? 0
+    const nextTimeout =
+      timeoutCap && currentTimeout > timeoutCap ? timeoutCap : currentTimeout
     onUpdateNode({
       config: {
         model: model.name,
+        thinkingEnabled: false,
+        reasoningEffort: 'medium',
+        ...(nextMaxTokens !== currentMaxTokens ? { maxTokens: nextMaxTokens } : {}),
+        ...(nextTimeout !== currentTimeout ? { timeoutSeconds: nextTimeout } : {}),
         ...(model.supportsThinking ? { reasoningKey: REASONING_OUTPUT_NAME } : {}),
       },
       outputs: model.supportsThinking ? ensureReasoningOutput(node.outputs) : removeReasoningOutput(node.outputs),
     })
-  }, [node.outputs, onUpdateNode])
+  }, [config.maxTokens, config.timeoutSeconds, node.outputs, onUpdateNode])
 
   return (
     <ConfigShell node={node} className={className}>
@@ -178,6 +218,18 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           error={modelOptionsState.error}
           onChange={handleModelChange}
         />
+        <ModelParamsPanel
+          temperature={config.temperature ?? 0}
+          maxTokens={config.maxTokens ?? 0}
+          maxTokensCap={selectedModel.maxTokens ?? null}
+          timeoutSeconds={config.timeoutSeconds ?? 180}
+          timeoutCap={selectedModel.timeoutSeconds ?? null}
+          supportsThinking={selectedModel.supportsThinking}
+          supportsReasoningEffort={selectedModel.supportsReasoningEffort}
+          thinkingEnabled={config.thinkingEnabled ?? false}
+          reasoningEffort={config.reasoningEffort ?? 'medium'}
+          onChange={(patch) => onUpdateNode({ config: patch })}
+        />
         {selectedModel.supportsVision && (
           <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
             <p className="text-[11px] font-medium text-slate-300">视觉理解</p>
@@ -198,8 +250,8 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
         <PromptEditor
           label="系统提示词"
           value={config.systemPrompt ?? config.prompt ?? ''}
-          variables={promptVariables}
-          placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
+          variables={textPromptVariables}
+          placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量（图片/视频请在用户提示词中引用）。"
           onChange={(value) => onUpdateNode({ config: { systemPrompt: value, prompt: value } })}
           rows={6}
         />
@@ -226,34 +278,25 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       <ConfigSection title="异常处理">
         <div className="grid gap-3">
           <EditableField
-            label="整体超时（秒）"
+            label="重试次数（失败后额外重试，0-10）"
             type="number"
-            value={String(config.timeoutSeconds ?? 180)}
-            onChange={(value) => onUpdateNode({ config: { timeoutSeconds: Number(value) || 180 } })}
-          />
-          <EditableField
-            label="重试次数"
-            type="number"
-            value={String(config.retryCount ?? 0)}
-            onChange={(value) => onUpdateNode({ config: { retryCount: Number(value) || 0 } })}
+            value={String(config.retryCount ?? 1)}
+            onChange={(value) => {
+              const retryCount = Math.min(Math.max(Number(value) || 0, 0), 10)
+              onUpdateNode({ config: { retryCount } })
+            }}
           />
         </div>
-        <SwitchRow
-          label="首 Token 超时检测"
-          checked={Boolean(config.firstTokenTimeoutEnabled)}
-          onChange={(checked) => onUpdateNode({ config: { firstTokenTimeoutEnabled: checked } })}
-          description="预留给 token 级流式调用。"
-        />
         <SelectField
           label="异常策略"
-          value={ERROR_STRATEGY_LABEL[config.errorStrategy ?? 'interrupt']}
+          value={ERROR_STRATEGY_LABEL[config.errorStrategy ?? 'ignore']}
           options={errorStrategyOptions}
           onChange={(label) => {
-            const strategy = ERROR_STRATEGY_OPTIONS.find((item) => ERROR_STRATEGY_LABEL[item] === label) ?? 'interrupt'
+            const strategy = ERROR_STRATEGY_OPTIONS.find((item) => ERROR_STRATEGY_LABEL[item] === label) ?? 'ignore'
             onUpdateNode({ config: { errorStrategy: strategy } })
           }}
         />
-        {(config.errorStrategy ?? 'interrupt') === 'fallback' && (
+        {(config.errorStrategy ?? 'ignore') === 'fallback' && (
           <EditableArea
             label="兜底输出"
             value={config.fallbackOutput ?? ''}
@@ -264,6 +307,384 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       </ConfigSection>
     </ConfigShell>
   )
+}
+
+type ModelParamsPatch = {
+  temperature?: number
+  maxTokens?: number
+  timeoutSeconds?: number
+  thinkingEnabled?: boolean
+  reasoningEffort?: WorkflowReasoningEffort
+}
+
+const MODEL_PARAM_DEFAULTS = {
+  temperature: 0.7,
+  maxTokens: 4096,
+  timeoutSeconds: 180,
+}
+
+const MAX_TOKENS_FALLBACK_CAP = 8192
+const TIMEOUT_FALLBACK_CAP = 600
+
+function ModelParamsPanel({
+  temperature,
+  maxTokens,
+  maxTokensCap,
+  timeoutSeconds,
+  timeoutCap,
+  supportsThinking,
+  supportsReasoningEffort,
+  thinkingEnabled,
+  reasoningEffort,
+  onChange,
+}: {
+  temperature: number
+  maxTokens: number
+  maxTokensCap: number | null
+  timeoutSeconds: number
+  timeoutCap: number | null
+  supportsThinking: boolean
+  supportsReasoningEffort: boolean
+  thinkingEnabled: boolean
+  reasoningEffort: WorkflowReasoningEffort
+  onChange: (patch: ModelParamsPatch) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  const effectiveMaxTokensCap = maxTokensCap && maxTokensCap > 0 ? maxTokensCap : MAX_TOKENS_FALLBACK_CAP
+  const effectiveMaxTokensDefault = Math.min(MODEL_PARAM_DEFAULTS.maxTokens, effectiveMaxTokensCap)
+  const effectiveTimeoutCap = timeoutCap && timeoutCap > 0 ? timeoutCap : TIMEOUT_FALLBACK_CAP
+  const effectiveTimeoutDefault = Math.min(MODEL_PARAM_DEFAULTS.timeoutSeconds, effectiveTimeoutCap)
+  const normalizedThinkingLevels = useMemo(
+    () => getThinkingOptions(supportsThinking, supportsReasoningEffort),
+    [supportsReasoningEffort, supportsThinking],
+  )
+  const selectedThinkingValue = thinkingEnabled
+    ? supportsReasoningEffort
+      ? reasoningEffort
+      : 'thinking'
+    : 'minimal'
+  const effectiveThinkingOption =
+    normalizedThinkingLevels.find((level) => level.value === selectedThinkingValue) ?? normalizedThinkingLevels[0]
+  const effectiveThinkingLevel = effectiveThinkingOption.value
+
+  const isDirty =
+    temperature !== MODEL_PARAM_DEFAULTS.temperature ||
+    maxTokens !== effectiveMaxTokensDefault ||
+    timeoutSeconds !== effectiveTimeoutDefault ||
+    effectiveThinkingLevel !== 'minimal'
+
+  const handleResetAll = useCallback(() => {
+    onChange({
+      temperature: MODEL_PARAM_DEFAULTS.temperature,
+      maxTokens: effectiveMaxTokensDefault,
+      timeoutSeconds: effectiveTimeoutDefault,
+      thinkingEnabled: false,
+      reasoningEffort: 'medium',
+    })
+  }, [effectiveMaxTokensDefault, effectiveTimeoutDefault, onChange])
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-slate-950/50">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'flex w-full min-w-0 items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition',
+          'hover:bg-white/4',
+          open && 'bg-white/4',
+        )}
+      >
+        <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+          <Settings2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="whitespace-nowrap text-[11px] font-medium text-slate-200">模型参数</span>
+          {isDirty && (
+            <span className="shrink-0 rounded bg-blue-400/15 px-1 py-0.5 text-[9px] leading-3 text-blue-200">已自定义</span>
+          )}
+        </span>
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden text-[10px] text-slate-500">
+          <span className="shrink-0">T {formatTemperature(temperature)}</span>
+          <span className="shrink-0 text-slate-600">·</span>
+          <span className="min-w-0 truncate">
+            Max {maxTokens || '默认'}{maxTokensCap && maxTokensCap > 0 ? `/${maxTokensCap}` : ''}
+          </span>
+          <span className="shrink-0 text-slate-600">·</span>
+          <span className="shrink-0">
+            {timeoutSeconds}s{timeoutCap && timeoutCap > 0 ? `/${timeoutCap}s` : ''}
+          </span>
+          {supportsThinking && (
+            <>
+              <span className="shrink-0 text-slate-600">·</span>
+              <span className="max-w-[4.5rem] shrink truncate rounded-full bg-white/5 px-1.5 py-0.5 text-slate-400">
+                {effectiveThinkingOption.label}
+              </span>
+            </>
+          )}
+          <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition', open && 'rotate-180')} />
+        </span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-3 border-t border-white/8 px-2.5 py-3">
+          {supportsThinking && (
+            <ThinkingEffortSelect
+              value={effectiveThinkingOption}
+              options={normalizedThinkingLevels}
+              onChange={(level) => {
+                if (level.value === 'minimal') {
+                  onChange({ thinkingEnabled: false })
+                  return
+                }
+                onChange({
+                  thinkingEnabled: true,
+                  ...(level.value !== 'thinking' ? { reasoningEffort: level.value } : {}),
+                })
+              }}
+            />
+          )}
+          <SliderField
+            label="Temperature"
+            description="采样随机性，越高越发散；0 表示更稳定"
+            value={temperature}
+            min={0}
+            max={2}
+            step={0.05}
+            decimals={2}
+            defaultValue={MODEL_PARAM_DEFAULTS.temperature}
+            onChange={(value) => onChange({ temperature: value })}
+          />
+          <SliderField
+            label="Max Tokens"
+            description={
+              maxTokensCap && maxTokensCap > 0
+                ? `单次生成的最大 token 数，受当前模型上限 ${maxTokensCap} 限制`
+                : '单次生成的最大 token 数；0 表示使用模型默认'
+            }
+            value={Math.min(maxTokens, effectiveMaxTokensCap)}
+            min={0}
+            max={effectiveMaxTokensCap}
+            step={1}
+            decimals={0}
+            defaultValue={effectiveMaxTokensDefault}
+            onChange={(value) => onChange({ maxTokens: value })}
+          />
+          <SliderField
+            label="Timeout"
+            unit="秒"
+            description={
+              timeoutCap && timeoutCap > 0
+                ? `整体调用超时时间，受当前模型上限 ${timeoutCap} 秒限制`
+                : '整体调用超时时间，超过将中止本次调用'
+            }
+            value={Math.min(timeoutSeconds, effectiveTimeoutCap)}
+            min={10}
+            max={effectiveTimeoutCap}
+            step={5}
+            decimals={0}
+            defaultValue={effectiveTimeoutDefault}
+            onChange={(value) => onChange({ timeoutSeconds: value })}
+          />
+          {isDirty && (
+            <button
+              type="button"
+              onClick={handleResetAll}
+              className="flex items-center justify-end gap-1 self-end text-[10px] text-slate-400 transition hover:text-blue-200"
+            >
+              <RotateCcw className="h-3 w-3" />
+              全部恢复默认
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatTemperature(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2).replace(/\.?0+$/, '') || '0' : '0'
+}
+
+function getThinkingOptions(supportsThinking: boolean, supportsReasoningEffort: boolean): ThinkingLevelOption[] {
+  if (!supportsThinking) {
+    return THINKING_TOGGLE_OPTIONS.slice(0, 1)
+  }
+  return supportsReasoningEffort ? REASONING_EFFORT_OPTIONS : THINKING_TOGGLE_OPTIONS
+}
+
+function ThinkingEffortSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: ThinkingLevelOption
+  options: ThinkingLevelOption[]
+  onChange: (option: ThinkingLevelOption) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useClickOutside(rootRef, open, () => setOpen(false))
+
+  return (
+    <div ref={rootRef} className="relative">
+      <p className="text-[11px] text-slate-400">思考程度</p>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'mt-1.5 flex w-full items-center justify-between gap-3 rounded-xl border px-2.5 py-2 text-left transition',
+          'border-white/10 bg-slate-950/80 shadow-inner shadow-white/[0.03]',
+          'hover:border-blue-300/35 hover:bg-slate-900/85',
+          open && 'border-blue-400/55 bg-blue-950/20 ring-2 ring-blue-400/10',
+        )}
+      >
+        <span className="min-w-0">
+          <span className="block text-[11px] font-medium leading-4 text-slate-100">{value.label}</span>
+          <span className="mt-0.5 block truncate text-[10px] leading-3 text-slate-500">{value.description}</span>
+        </span>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition', open && 'rotate-180 text-blue-200')} />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-30 mt-1.5 overflow-hidden rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-[0_18px_48px_rgba(2,6,23,0.55)] backdrop-blur">
+          {options.map((option) => {
+            const selected = option.value === value.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option)
+                  setOpen(false)
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left transition',
+                  selected ? 'bg-blue-400/12 text-blue-100' : 'text-slate-300 hover:bg-white/6 hover:text-white',
+                )}
+              >
+                <span className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full', selected ? 'bg-blue-300' : 'bg-slate-600')} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-medium leading-4">{option.label}</span>
+                  <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{option.description}</span>
+                </span>
+                {selected && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-200" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SliderField({
+  label,
+  unit,
+  description,
+  value,
+  min,
+  max,
+  step,
+  decimals,
+  defaultValue,
+  onChange,
+}: {
+  label: string
+  unit?: string
+  description?: string
+  value: number
+  min: number
+  max: number
+  step: number
+  decimals: number
+  defaultValue: number
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(() => formatNumber(value, decimals))
+  useEffect(() => {
+    setDraft(formatNumber(value, decimals))
+  }, [value, decimals])
+
+  const clamp = useCallback(
+    (next: number) => {
+      if (Number.isNaN(next)) return value
+      const clamped = Math.min(max, Math.max(min, next))
+      const factor = Math.pow(10, decimals)
+      return Math.round(clamped * factor) / factor
+    },
+    [decimals, max, min, value],
+  )
+
+  const commitDraft = useCallback(() => {
+    const parsed = Number(draft)
+    if (Number.isNaN(parsed)) {
+      setDraft(formatNumber(value, decimals))
+      return
+    }
+    const next = clamp(parsed)
+    onChange(next)
+    setDraft(formatNumber(next, decimals))
+  }, [clamp, decimals, draft, onChange, value])
+
+  const percent = ((value - min) / (max - min)) * 100
+  const isDirty = value !== defaultValue
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-medium text-slate-200">{label}</span>
+          {isDirty && (
+            <button
+              type="button"
+              onClick={() => onChange(defaultValue)}
+              className="flex items-center gap-1 text-[9px] text-slate-500 transition hover:text-blue-200"
+              title="恢复默认值"
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+              默认 {formatNumber(defaultValue, decimals)}
+              {unit ? ` ${unit}` : ''}
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={draft}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur()
+              }
+            }}
+            className="h-6 w-16 rounded-md border border-white/8 bg-slate-950/80 px-1.5 text-right text-[11px] text-slate-100 outline-none transition focus:border-blue-400/60"
+          />
+          {unit && <span className="text-[10px] text-slate-500">{unit}</span>}
+        </div>
+      </div>
+      <input
+        type="range"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(event) => onChange(clamp(Number(event.target.value)))}
+        className="aw-slider"
+        style={{ '--slider-percent': `${percent}%` } as React.CSSProperties}
+      />
+      <div className="flex items-center justify-between text-[9px] text-slate-500">
+        <span>{formatNumber(min, decimals)}</span>
+        {description && <span className="mx-2 flex-1 truncate text-center">{description}</span>}
+        <span>{formatNumber(max, decimals)}</span>
+      </div>
+    </div>
+  )
+}
+
+function formatNumber(value: number, decimals: number) {
+  if (!Number.isFinite(value)) return '0'
+  return decimals > 0 ? value.toFixed(decimals).replace(/\.?0+$/, '') || '0' : String(Math.round(value))
 }
 
 function ModelSelectField({

@@ -35,6 +35,8 @@ import type {
   GlobalDebugFieldValue,
   NodePaletteKey,
   TrialRunNodeExecution,
+  TrialRunTimelineItem,
+  WorkflowRuntimeEvent,
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
   createNodeData,
@@ -83,6 +85,99 @@ function parseArrayFieldValue(value: string) {
     return Array.isArray(parsed) ? parsed : []
   } catch {
     return value.split('\n').map((item) => item.trim()).filter(Boolean)
+  }
+}
+
+function eventTitle(event: WorkflowRuntimeEvent) {
+  if (event.title) {
+    return event.title
+  }
+  const titles: Record<WorkflowRuntimeEvent['type'], string> = {
+    node_started: '节点开始执行',
+    node_completed: '节点执行完成',
+    node_failed: '节点执行失败',
+    node_log: '节点日志',
+    llm_started: '模型调用开始',
+    llm_token: '模型输出片段',
+    llm_completed: '模型调用完成',
+    llm_retry: '模型调用重试',
+    llm_failed: '模型调用失败',
+    tool_started: '工具调用开始',
+    tool_completed: '工具调用完成',
+    tool_failed: '工具调用失败',
+  }
+  return titles[event.type]
+}
+
+function timelineItemFromRuntimeEvent(event: WorkflowRuntimeEvent): TrialRunTimelineItem {
+  return {
+    id: event.id,
+    type: event.type,
+    level: event.level ?? 'info',
+    title: eventTitle(event),
+    message: event.token ?? event.message,
+    timestamp: event.timestamp,
+    data: event.data,
+  }
+}
+
+function mergeTimelineItem(
+  timeline: TrialRunTimelineItem[] | undefined,
+  item: TrialRunTimelineItem,
+): TrialRunTimelineItem[] {
+  const items = timeline ? [...timeline] : []
+  const last = items.at(-1)
+  if (item.type === 'llm_token' && last?.type === 'llm_token') {
+    items[items.length - 1] = {
+      ...last,
+      id: item.id,
+      message: `${last.message}${item.message}`.slice(-600),
+      timestamp: item.timestamp,
+    }
+    return items
+  }
+  if (items.some((existing) => existing.id === item.id)) {
+    return items
+  }
+  return [...items, item].slice(-80)
+}
+
+function statusFromRuntimeEvent(event: WorkflowRuntimeEvent, current?: TrialRunNodeExecution) {
+  if (event.type === 'node_failed') {
+    return 'error' as const
+  }
+  if (event.type === 'node_completed') {
+    return 'success' as const
+  }
+  if (event.type === 'node_started') {
+    return 'running' as const
+  }
+  return current?.status ?? 'running'
+}
+
+function executionFromRuntimeEvent(
+  event: WorkflowRuntimeEvent,
+  current?: TrialRunNodeExecution,
+  fallbackNode?: WorkflowNode,
+): TrialRunNodeExecution {
+  const status = statusFromRuntimeEvent(event, current)
+  const nodeTitle = event.nodeTitle || current?.nodeTitle || fallbackNode?.title || event.nodeId || '节点'
+  const message = event.message || eventTitle(event)
+  const strategyHandled = event.type === 'node_log' && ['使用兜底输出', '忽略模型错误'].includes(event.title ?? '')
+  const degraded = current?.degraded || strategyHandled
+  return {
+    nodeId: event.nodeId || current?.nodeId || fallbackNode?.id || '',
+    nodeTitle,
+    log: message,
+    input: current?.input ?? '{}',
+    output: current?.output ?? '{}',
+    durationMs: event.durationMs ?? current?.durationMs ?? 0,
+    status,
+    error: event.error ?? current?.error,
+    degraded,
+    timeline: mergeTimelineItem(current?.timeline, timelineItemFromRuntimeEvent(event)),
+    summaryInput: current?.summaryInput ?? '执行事件',
+    summaryOutput: event.type === 'llm_token' ? '模型正在输出…' : degraded && event.type === 'node_completed' ? '已按异常策略降级完成' : message,
   }
 }
 
@@ -217,7 +312,6 @@ function cloneWorkflowNode(node: WorkflowNode): WorkflowNode {
     config: {
       ...node.config,
       inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
-      visionInputMappings: node.config.visionInputMappings?.map((item) => ({ ...item })) ?? [],
     },
   }
 }
@@ -237,7 +331,6 @@ function toSingleNodeTestWorkflow(node: WorkflowNode): WorkflowDocument {
         config: {
           ...singleNode.config,
           inputMappings: contextMappings,
-          visionInputMappings: singleNode.config.visionInputMappings?.map(normalizeSingleNodeMapping) ?? [],
         },
       },
     ],
@@ -360,6 +453,26 @@ export function WorkflowEditor({
       )
     },
     [],
+  )
+
+  const applyRuntimeEventToNode = useCallback(
+    (event: WorkflowRuntimeEvent, nodeIdOverride?: string, nodeOverride?: WorkflowNode) => {
+      const nodeId = nodeIdOverride || event.nodeId
+      if (!nodeId) {
+        return
+      }
+      const fallbackNode = nodeOverride ?? nodes.find((item) => item.id === nodeId)
+      setTrialRunExecutions((prev) => {
+        const execution = executionFromRuntimeEvent(event, prev[nodeId], fallbackNode)
+        const next = {
+          ...prev,
+          [nodeId]: execution,
+        }
+        syncNodeTrialRunExecution(nodeId, execution)
+        return next
+      })
+    },
+    [nodes, syncNodeTrialRunExecution],
   )
 
   const clearAllNodeTrialRunExecutions = useCallback(() => {
@@ -619,15 +732,32 @@ export function WorkflowEditor({
       setTrialRunning(true)
       const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode), payload, {
         signal: abortController.signal,
+        onWorkflowEvent: (event) => {
+          applyRuntimeEventToNode(event, nodeId, targetNode)
+        },
         onStep: (execution) => {
-          setTrialRunExecutions({ [nodeId]: execution })
-          syncNodeTrialRunExecution(nodeId, execution)
+          setTrialRunExecutions((prev) => {
+            const mergedExecution = {
+              ...execution,
+              timeline: [...(prev[nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
+              degraded: prev[nodeId]?.degraded || execution.degraded,
+            }
+            syncNodeTrialRunExecution(nodeId, mergedExecution)
+            return { [nodeId]: mergedExecution }
+          })
         },
       })
       const fallbackExecution = executions.at(-1)
       if (fallbackExecution) {
-        setTrialRunExecutions({ [nodeId]: fallbackExecution })
-        syncNodeTrialRunExecution(nodeId, fallbackExecution)
+        setTrialRunExecutions((prev) => {
+          const mergedExecution = {
+            ...fallbackExecution,
+            timeline: [...(prev[nodeId]?.timeline ?? []), ...(fallbackExecution.timeline ?? [])].slice(-80),
+            degraded: prev[nodeId]?.degraded || fallbackExecution.degraded,
+          }
+          syncNodeTrialRunExecution(nodeId, mergedExecution)
+          return { [nodeId]: mergedExecution }
+        })
       }
       if (runAbortControllerRef.current === abortController) {
         runAbortControllerRef.current = null
@@ -642,6 +772,7 @@ export function WorkflowEditor({
         ...runningExecution,
         log: error instanceof Error ? error.message : '单节点测试失败',
         status: 'error',
+        error: error instanceof Error ? error.message : '单节点测试失败',
         summaryOutput: '运行失败',
       }
       setTrialRunning(false)
@@ -650,6 +781,7 @@ export function WorkflowEditor({
     }
   }, [
     abortTrialRunStream,
+    applyRuntimeEventToNode,
     clearAllNodeTrialRunExecutions,
     clearTrialRunTimers,
     globalDebugCombinedJson,
@@ -882,13 +1014,21 @@ export function WorkflowEditor({
       setTrialRunning(true)
       await streamWorkflow(workflow, payload, {
         signal: abortController.signal,
+        onWorkflowEvent: (event) => {
+          applyRuntimeEventToNode(event)
+        },
         onStep: (execution) => {
           setTrialRunExecutions((prev) => {
+            const mergedExecution = {
+              ...execution,
+              timeline: [...(prev[execution.nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
+              degraded: prev[execution.nodeId]?.degraded || execution.degraded,
+            }
             const next = {
               ...prev,
-              [execution.nodeId]: execution,
+              [execution.nodeId]: mergedExecution,
             }
-            syncNodeTrialRunExecution(execution.nodeId, execution)
+            syncNodeTrialRunExecution(execution.nodeId, mergedExecution)
             return next
           })
         },
@@ -910,6 +1050,7 @@ export function WorkflowEditor({
     clearAllNodeTrialRunExecutions,
     clearTrialRunTimers,
     abortTrialRunStream,
+    applyRuntimeEventToNode,
     edges,
     globalDebugCombinedJson,
     globalDebugFields,

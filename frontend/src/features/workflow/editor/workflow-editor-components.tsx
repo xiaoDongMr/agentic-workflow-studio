@@ -266,9 +266,12 @@ export function EditorTrialRunPanel({
             <button
               type="button"
               onClick={onRun}
+              disabled={running}
               className={cn(
-                'inline-flex min-w-[144px] items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-semibold text-white transition-colors',
-                running ? 'bg-emerald-400/85' : 'bg-emerald-500 hover:bg-emerald-400',
+                'inline-flex min-w-[148px] items-center justify-center gap-2 rounded-2xl border px-5 py-3 text-base font-semibold text-white shadow-[0_12px_28px_rgba(16,185,129,0.22)] transition-all',
+                running
+                  ? 'cursor-not-allowed border-emerald-300/20 bg-emerald-400/55 text-white/80'
+                  : 'border-emerald-300/25 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:-translate-y-0.5 hover:from-emerald-400 hover:to-cyan-400 hover:shadow-[0_16px_34px_rgba(34,211,238,0.22)]',
               )}
             >
               <Play className="h-4 w-4 fill-white" />
@@ -313,7 +316,6 @@ export function SingleNodeTrialPanel({
 }) {
   const parsedInput = useMemo(() => parseExecutionJson(execution?.input), [execution?.input])
   const parsedOutput = useMemo(() => parseExecutionJson(execution?.output), [execution?.output])
-  const statusLabel = execution?.status === 'error' ? '运行失败' : execution?.status === 'success' ? '运行成功' : '等待运行'
   const durationLabel = execution ? `${(execution.durationMs / 1000).toFixed(execution.durationMs >= 1000 ? 0 : 3)}s` : ''
 
   if (!open || !node) {
@@ -404,39 +406,11 @@ export function SingleNodeTrialPanel({
           </div>
 
           {execution && (
-            <>
-              <div className="mt-6 space-y-5">
-                <p className="text-base font-semibold text-white">运行结果</p>
-                <ExecutionBlock title="输入" value={formatRecord(parsedInput)} />
-                <ExecutionBlock title="推理内容" value={getRecordValue(parsedOutput, 'reasoning_content')} emptyLabel="无推理内容" />
-                <ExecutionBlock title="技能调用" value="" emptyLabel="无技能调用" />
-                <ExecutionBlock title="输出" value={formatRecord(parsedOutput)} />
-              </div>
-
-              <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'inline-flex h-7 w-7 items-center justify-center rounded-full',
-                        execution.status === 'error' ? 'bg-rose-500/18 text-rose-200' : 'bg-emerald-500/18 text-emerald-200',
-                      )}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                    </span>
-                    <span className="text-base font-semibold text-white">{statusLabel}</span>
-                    {durationLabel && (
-                      <span className="rounded-lg bg-emerald-500/12 px-2 py-1 text-xs font-medium text-emerald-200">
-                        {durationLabel}
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDown className="h-4 w-4 rotate-180 text-slate-400" />
-                </div>
-                <ExecutionBlock title="输入" value={formatRecord(parsedInput)} compact />
-                <ExecutionBlock title="输出" value={formatRecord(parsedOutput)} compact />
-              </div>
-            </>
+            <div className="mt-6 space-y-4 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+              <p className="text-base font-semibold text-white">运行结果</p>
+              <ExecutionBlock title="输入" value={formatJsonValue(parsedInput)} />
+              <ExecutionBlock title="输出" value={formatJsonValue(parsedOutput)} />
+            </div>
           )}
         </div>
 
@@ -446,8 +420,10 @@ export function SingleNodeTrialPanel({
             onClick={onRun}
             disabled={running}
             className={cn(
-              'inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-semibold text-white transition-colors',
-              running ? 'cursor-not-allowed bg-emerald-400/75' : 'bg-emerald-500 hover:bg-emerald-400',
+              'inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-5 py-3 text-base font-semibold text-white shadow-[0_12px_28px_rgba(16,185,129,0.22)] transition-all',
+              running
+                ? 'cursor-not-allowed border-emerald-300/20 bg-emerald-400/55 text-white/80'
+                : 'border-emerald-300/25 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:-translate-y-0.5 hover:from-emerald-400 hover:to-cyan-400 hover:shadow-[0_16px_34px_rgba(34,211,238,0.22)]',
             )}
           >
             <Play className="h-4 w-4 fill-white" />
@@ -791,7 +767,7 @@ function ExecutionBlock({
       </div>
       <pre
         className={cn(
-          'whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2.5 font-sans text-sm leading-6 text-slate-200',
+          'whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2.5 font-mono text-[12px] leading-5 text-slate-200',
           compact ? 'max-h-40 overflow-auto' : 'min-h-[42px]',
         )}
       >
@@ -813,20 +789,18 @@ function parseExecutionJson(value?: string): Record<string, unknown> {
   }
 }
 
-function getRecordValue(record: Record<string, unknown>, key: string) {
-  const value = record[key]
+function formatJsonValue(value: unknown) {
   if (value === undefined || value === null || value === '') {
     return ''
   }
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-}
-
-function formatRecord(record: Record<string, unknown>) {
-  const entries = Object.entries(record)
-  if (entries.length === 0) {
-    return ''
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
   }
-  return entries.map(([key, value]) => `${key} : ${typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value, null, 2)}`).join('\n')
+  return JSON.stringify(value, null, 2)
 }
 
 export function EditorBottomBar({

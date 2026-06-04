@@ -22,6 +22,47 @@ export type FlowgramNodeData = {
 
 export type TrialRunNodeState = 'running' | 'success' | 'error'
 
+export type WorkflowRuntimeEventType =
+  | 'node_started'
+  | 'node_completed'
+  | 'node_failed'
+  | 'node_log'
+  | 'llm_started'
+  | 'llm_token'
+  | 'llm_completed'
+  | 'llm_retry'
+  | 'llm_failed'
+  | 'tool_started'
+  | 'tool_completed'
+  | 'tool_failed'
+
+export type WorkflowRuntimeEventLevel = 'debug' | 'info' | 'warning' | 'error'
+
+export interface WorkflowRuntimeEvent {
+  id: string
+  type: WorkflowRuntimeEventType
+  level: WorkflowRuntimeEventLevel
+  timestamp: number
+  nodeId?: string
+  nodeTitle?: string
+  title?: string
+  message: string
+  token?: string
+  durationMs?: number
+  error?: string
+  data?: Record<string, unknown>
+}
+
+export interface TrialRunTimelineItem {
+  id: string
+  type: WorkflowRuntimeEventType | 'step'
+  level: WorkflowRuntimeEventLevel
+  title: string
+  message: string
+  timestamp: number
+  data?: Record<string, unknown>
+}
+
 export interface TrialRunNodeExecution {
   nodeId: string
   nodeTitle: string
@@ -30,6 +71,9 @@ export interface TrialRunNodeExecution {
   output: string
   durationMs: number
   status: TrialRunNodeState
+  error?: string
+  degraded?: boolean
+  timeline?: TrialRunTimelineItem[]
   summaryInput?: string
   summaryOutput?: string
 }

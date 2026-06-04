@@ -1,6 +1,9 @@
 import { http } from '@/api/http'
 import { postSseStream, type SseStreamEvent } from '@/api/sse'
-import type { TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
+import type {
+  TrialRunNodeExecution,
+  WorkflowRuntimeEvent,
+} from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowDocument } from '@/types/workflow'
 
 interface WorkflowRunStep {
@@ -10,7 +13,8 @@ interface WorkflowRunStep {
   input: Record<string, unknown>
   output: Record<string, unknown>
   durationMs: number
-  status: 'success' | 'error'
+  status: 'running' | 'success' | 'error'
+  error?: string | null
 }
 
 interface WorkflowRunResponse {
@@ -22,11 +26,12 @@ interface WorkflowRunResponse {
 interface WorkflowStreamOptions {
   signal?: AbortSignal
   onStep?: (execution: TrialRunNodeExecution) => void
+  onWorkflowEvent?: (event: WorkflowRuntimeEvent) => void
   onEvent?: (event: WorkflowStreamEvent) => void
 }
 
 interface WorkflowStreamEvent extends SseStreamEvent {
-  event: 'metadata' | 'step' | 'final' | 'error'
+  event: 'metadata' | 'workflow_event' | 'step' | 'final' | 'error'
 }
 
 const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -41,6 +46,13 @@ function summarizeOutput(output: Record<string, unknown>) {
 }
 
 function toTrialRunExecution(step: WorkflowRunStep): TrialRunNodeExecution {
+  const error = step.error ?? undefined
+  const summaryOutput =
+    step.status === 'error'
+      ? error || '运行失败'
+      : step.status === 'running'
+        ? '执行中…'
+        : summarizeOutput(step.output)
   return {
     nodeId: step.nodeId,
     nodeTitle: step.nodeTitle,
@@ -49,8 +61,9 @@ function toTrialRunExecution(step: WorkflowRunStep): TrialRunNodeExecution {
     output: stringify(step.output),
     durationMs: step.durationMs,
     status: step.status,
+    error,
     summaryInput: Object.keys(step.input).join(' / ') || '无输入',
-    summaryOutput: summarizeOutput(step.output),
+    summaryOutput,
   }
 }
 
@@ -63,6 +76,10 @@ function workflowApiUrl(path: string) {
 
 function parseStepEvent(data: unknown): WorkflowRunStep {
   return data as WorkflowRunStep
+}
+
+function parseWorkflowRuntimeEvent(data: unknown): WorkflowRuntimeEvent {
+  return data as WorkflowRuntimeEvent
 }
 
 function normalizeWorkflowStreamEvent(event: SseStreamEvent): WorkflowStreamEvent {
@@ -109,6 +126,8 @@ export async function streamWorkflow(
         const execution = toTrialRunExecution(parseStepEvent(event.data))
         executions.push(execution)
         options.onStep?.(execution)
+      } else if (event.event === 'workflow_event') {
+        options.onWorkflowEvent?.(parseWorkflowRuntimeEvent(event.data))
       }
     },
   })

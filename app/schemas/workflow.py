@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+WorkflowReasoningEffort = Literal["minimal", "low", "medium", "high"]
 
 
 class WorkflowInputMapping(BaseModel):
@@ -26,14 +29,26 @@ class WorkflowNodeConfig(BaseModel):
     outputKey: str = "output"
     reasoningKey: str = "reasoning_content"
     inputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
-    visionInputMappings: list[WorkflowInputMapping] = Field(default_factory=list)
     visionInputAsBase64: bool = False
     supportContinuation: bool = False
+    thinkingEnabled: bool = False
+    reasoningEffort: WorkflowReasoningEffort = "medium"
     timeoutSeconds: int = 180
-    firstTokenTimeoutEnabled: bool = False
-    retryCount: int = 0
-    errorStrategy: Literal["interrupt", "fallback", "ignore"] = "interrupt"
+    retryCount: int = Field(default=1, ge=0, le=10)
+    errorStrategy: Literal["interrupt", "fallback", "ignore"] = "ignore"
     fallbackOutput: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_thinking_level(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "thinkingLevel" not in data:
+            return data
+        legacy = data.get("thinkingLevel")
+        if "thinkingEnabled" not in data:
+            data["thinkingEnabled"] = legacy != "minimal"
+        if legacy in {"minimal", "low", "medium", "high"} and "reasoningEffort" not in data:
+            data["reasoningEffort"] = "medium" if legacy == "minimal" else legacy
+        return data
 
 
 class WorkflowNodeIO(BaseModel):
@@ -81,7 +96,8 @@ class WorkflowRunStep(BaseModel):
     input: dict[str, Any]
     output: dict[str, Any]
     durationMs: int
-    status: Literal["success", "error"] = "success"
+    status: Literal["running", "success", "error"] = "success"
+    error: str | None = None
 
 
 class WorkflowRunResponse(BaseModel):

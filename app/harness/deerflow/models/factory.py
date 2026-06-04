@@ -145,9 +145,14 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
     # usage data.  We default it to True unless explicitly configured.
     if "stream_usage" not in model_settings_from_config and "stream_usage" not in kwargs:
         if "stream_usage" in getattr(model_class, "model_fields", {}):
-            model_settings_from_config["stream_usage"] = True
+                model_settings_from_config["stream_usage"] = True
 
-    model_instance = model_class(**kwargs, **model_settings_from_config)
+    # Caller-provided kwargs take precedence over the YAML model config so callers
+    # can override fields like temperature/max_tokens at runtime. Merging here also
+    # avoids "got multiple values for keyword argument" when both sources set the
+    # same key.
+    model_settings = {**model_settings_from_config, **kwargs}
+    model_instance = model_class(**model_settings)
 
     callbacks = build_tracing_callbacks()
     if callbacks:

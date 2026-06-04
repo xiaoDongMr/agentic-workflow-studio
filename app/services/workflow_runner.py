@@ -76,9 +76,15 @@ class WorkflowRunner:
         }
 
         try:
-            async for state in compiled.astream(initial_state, stream_mode="values"):
-                final_state = state
-                steps = state.get("steps", [])
+            async for item in compiled.astream(initial_state, stream_mode=["values", "custom"]):
+                mode, chunk = item if isinstance(item, tuple) and len(item) == 2 else ("values", item)
+                if mode == "custom":
+                    yield {"type": "workflow_event", "data": chunk}
+                    continue
+                if mode != "values":
+                    continue
+                final_state = chunk
+                steps = chunk.get("steps", [])
                 for step in steps[last_step_count:]:
                     yield {"type": "step", "data": step}
                 last_step_count = len(steps)

@@ -183,10 +183,34 @@ function NodeExecutionPanel({
   execution: TrialRunNodeExecution
 }) {
   const [expanded, setExpanded] = useState(false)
-  const statusLabel = execution.status === 'running' ? '运行中' : execution.status === 'error' ? '运行失败' : '运行完成'
+  const statusLabel =
+    execution.status === 'running'
+      ? '运行中'
+      : execution.status === 'error'
+        ? '运行失败'
+        : execution.degraded
+          ? '降级完成'
+          : '运行完成'
+  const isRunning = execution.status === 'running'
+  const isError = execution.status === 'error'
+  const timeline = execution.timeline ?? []
+  const executionRecord = [
+    `状态：${statusLabel}`,
+    `日志：${execution.log}`,
+    execution.error ? `错误：${execution.error}` : '',
+    timeline.length > 0
+      ? `执行过程：\n${timeline.map((item) => `[${item.title}] ${item.message}`).join('\n')}`
+      : '',
+    `输入：\n${execution.input}`,
+    !isRunning ? `输出：\n${execution.output}` : '',
+  ].filter(Boolean).join('\n\n')
 
   return (
-    <div className="aw-flow-node__execution aw-flow-ignore-deselect">
+    <div
+      className="aw-flow-node__execution aw-flow-ignore-deselect"
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
@@ -196,17 +220,25 @@ function NodeExecutionPanel({
           <span
             className={cn(
               'aw-flow-node__execution-state',
-              execution.status === 'running' && 'aw-flow-node__execution-state--running',
-              execution.status === 'error' && 'aw-flow-node__execution-state--error',
+              isRunning && 'aw-flow-node__execution-state--running',
+              isError && 'aw-flow-node__execution-state--error',
+              execution.degraded && !isError && 'aw-flow-node__execution-state--warning',
             )}
           >
             {statusLabel}
           </span>
-          <span className="aw-flow-node__execution-duration">{(execution.durationMs / 1000).toFixed(3)}s</span>
+          {!isRunning && (
+            <span className="aw-flow-node__execution-duration">{(execution.durationMs / 1000).toFixed(3)}s</span>
+          )}
         </div>
         <div className="aw-flow-node__execution-summary-content">
           <p className="aw-flow-node__execution-summary-text">{execution.summaryInput ?? execution.log}</p>
-          <p className="aw-flow-node__execution-summary-text aw-flow-node__execution-summary-text--muted">
+          <p
+            className={cn(
+              'aw-flow-node__execution-summary-text aw-flow-node__execution-summary-text--muted',
+              isError && 'aw-flow-node__execution-summary-text--error',
+            )}
+          >
             {execution.summaryOutput ?? '点击查看详细执行记录'}
           </p>
         </div>
@@ -219,18 +251,95 @@ function NodeExecutionPanel({
         <>
           <div className="aw-flow-node__execution-header">
             <p className="aw-flow-node__execution-log">{execution.log}</p>
+            <CopyTextButton text={executionRecord} label="复制全部" />
           </div>
+          {timeline.length > 0 && (
+            <div className="aw-flow-node__execution-section">
+              <span className="aw-flow-node__execution-label">执行过程</span>
+              <div className="aw-flow-node__timeline">
+                {timeline.map((item) => (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      'aw-flow-node__timeline-item',
+                      item.level === 'warning' && 'aw-flow-node__timeline-item--warning',
+                      item.level === 'error' && 'aw-flow-node__timeline-item--error',
+                      item.type === 'llm_token' && 'aw-flow-node__timeline-item--token',
+                    )}
+                  >
+                    <span className="aw-flow-node__timeline-dot" />
+                    <div className="aw-flow-node__timeline-body">
+                      <div className="aw-flow-node__timeline-title-row">
+                        <span className="aw-flow-node__timeline-title">{item.title}</span>
+                        <span className="aw-flow-node__timeline-time">
+                          {new Date(item.timestamp * 1000).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="aw-flow-node__timeline-message">{item.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {isError && execution.error && (
+            <div className="aw-flow-node__execution-section">
+              <ExecutionSectionHeader label="错误信息" text={execution.error} danger />
+              <pre className="aw-flow-node__execution-code aw-flow-node__execution-code--error">{execution.error}</pre>
+            </div>
+          )}
           <div className="aw-flow-node__execution-section">
-            <span className="aw-flow-node__execution-label">输入</span>
+            <ExecutionSectionHeader label="输入" text={execution.input} />
             <pre className="aw-flow-node__execution-code">{execution.input}</pre>
           </div>
-          <div className="aw-flow-node__execution-section">
-            <span className="aw-flow-node__execution-label">输出</span>
-            <pre className="aw-flow-node__execution-code">{execution.output}</pre>
-          </div>
+          {!isRunning && (
+            <div className="aw-flow-node__execution-section">
+              <ExecutionSectionHeader label="输出" text={execution.output} />
+              <pre className="aw-flow-node__execution-code">{execution.output}</pre>
+            </div>
+          )}
         </>
       )}
     </div>
+  )
+}
+
+function ExecutionSectionHeader({
+  label,
+  text,
+  danger = false,
+}: {
+  label: string
+  text: string
+  danger?: boolean
+}) {
+  return (
+    <div className="aw-flow-node__execution-section-header">
+      <span className={cn('aw-flow-node__execution-label', danger && 'aw-flow-node__execution-label--error')}>
+        {label}
+      </span>
+      <CopyTextButton text={text} />
+    </div>
+  )
+}
+
+function CopyTextButton({ text, label = '复制' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <button
+      type="button"
+      className="aw-flow-node__copy-button"
+      onClick={async (event) => {
+        event.stopPropagation()
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1200)
+      }}
+    >
+      <Copy className="h-3 w-3" />
+      {copied ? '已复制' : label}
+    </button>
   )
 }
 

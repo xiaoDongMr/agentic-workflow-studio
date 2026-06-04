@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import json
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +14,16 @@ from urllib.request import urlopen
 from deerflow.config.app_config import AppConfig
 
 from app.schemas.workflow import WorkflowNode, WorkflowRunStep
-from app.services.workflow_llm import DeerFlowModelProvider, LlmInvokeRequest, LlmInvokeResult, build_llm_request
+from app.services.workflow_llm import (
+    DeerFlowModelProvider,
+    LlmInvokeRequest,
+    LlmInvokeResult,
+    VisionInput,
+    build_llm_request,
+)
+from app.services.workflow_events import build_workflow_event, emit_workflow_event
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowState(TypedDict, total=False):
@@ -24,7 +34,7 @@ class WorkflowState(TypedDict, total=False):
 
 
 class WorkflowRunEvent(TypedDict):
-    type: Literal["metadata", "step", "final", "error"]
+    type: Literal["metadata", "workflow_event", "step", "final", "error"]
     data: dict[str, Any]
 
 
@@ -195,27 +205,33 @@ def _parse_literal_mapping_value(source: Any, value_type: str) -> Any:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
-def _convert_vision_input_to_base64(value: Any, app_config: AppConfig | None) -> Any:
-    if isinstance(value, dict):
-        return {key: _convert_vision_input_to_base64(item, app_config) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_convert_vision_input_to_base64(item, app_config) for item in value]
-    if isinstance(value, str):
-        return _media_url_to_data_url(value, app_config)
-    return value
-
-
 def _is_vision_value_type(value_type: str) -> bool:
     normalized = value_type.strip().lower()
     return normalized in {"image", "video", "array<image>", "array<video>"}
 
 
-def _build_vision_input_from_node_inputs(node: WorkflowNode, node_input: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for item in node.inputs:
-        if item.name and item.name in node_input and _is_vision_value_type(item.type):
-            result[item.name] = node_input[item.name]
-    return result
+def _vision_kind(value_type: str) -> str:
+    return "video" if "video" in value_type.strip().lower() else "image"
+
+
+def _collect_media_urls(value: Any) -> list[str]:
+    urls: list[str] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                urls.append(text)
+        elif isinstance(item, dict):
+            candidate = item.get("url") or item.get("src")
+            if isinstance(candidate, str) and candidate.strip():
+                urls.append(candidate.strip())
+        elif isinstance(item, list):
+            for sub in item:
+                visit(sub)
+
+    visit(value)
+    return urls
 
 
 def _media_url_to_data_url(url: str, app_config: AppConfig | None) -> str:
@@ -297,6 +313,7 @@ def _append_step(
             output=node_output,
             durationMs=duration_ms,
             status="error" if error else "success",
+            error=error,
         ).model_dump()
     )
     return {**state, "steps": steps}
@@ -349,46 +366,109 @@ class LlmNodeExecutor:
 
     async def run(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> dict[str, Any]:
         request = build_llm_request(
+            node_id=node.id,
+            node_title=node.title,
             model=_model_name(node, self.app_config),
-            system_prompt_template=node.config.systemPrompt or node.config.prompt or "请根据输入生成结果。",
+            system_prompt_template=node.config.systemPrompt or node.config.prompt or "",
             user_prompt_template=node.config.userPrompt or "{{input}}",
-            node_input=self._merge_vision_input(node, node_input, state),
+            node_input=node_input,
             variables=state.get("variables", {}),
             run_input=state.get("input", {}),
             temperature=node.config.temperature,
             max_tokens=node.config.maxTokens,
             timeout_seconds=node.config.timeoutSeconds,
+            thinking_enabled=node.config.thinkingEnabled,
+            reasoning_effort=node.config.reasoningEffort,
+            vision_inputs=self._build_vision_inputs(node, node_input),
         )
         result = await self._invoke_with_policy(node, request)
         return self._format_output(node, result.content, result.reasoning_content)
 
-    def _merge_vision_input(
+    def _build_vision_inputs(
         self,
         node: WorkflowNode,
         node_input: dict[str, Any],
-        state: WorkflowState,
-    ) -> dict[str, Any]:
-        legacy_vision_input = _build_mapped_values(node.config.visionInputMappings, state)
-        input_vision_input = _build_vision_input_from_node_inputs(node, node_input)
-        vision_input = {**legacy_vision_input, **input_vision_input}
-        if not vision_input:
-            return node_input
-        if node.config.visionInputAsBase64:
-            vision_input = _convert_vision_input_to_base64(vision_input, self.app_config)
-        return {**node_input, "vision": vision_input}
+    ) -> list[VisionInput]:
+        vision_inputs: list[VisionInput] = []
+        for item in node.inputs:
+            if not item.name or item.name not in node_input or not _is_vision_value_type(item.type):
+                continue
+            urls = _collect_media_urls(node_input[item.name])
+            if not urls:
+                continue
+            if node.config.visionInputAsBase64:
+                urls = [_media_url_to_data_url(url, self.app_config) for url in urls]
+            vision_inputs.append(
+                VisionInput(
+                    name=item.name,
+                    kind=_vision_kind(item.type),
+                    urls=tuple(urls),
+                )
+            )
+        return vision_inputs
 
     async def _invoke_with_policy(self, node: WorkflowNode, request: LlmInvokeRequest) -> LlmInvokeResult:
-        attempts = max(node.config.retryCount, 0) + 1
+        retry_count = min(max(node.config.retryCount, 0), 10)
+        attempts = retry_count + 1
         last_error: Exception | None = None
-        for _ in range(attempts):
+        for attempt in range(1, attempts + 1):
             try:
                 return await self.model_provider.invoke(request)
             except Exception as exc:
                 last_error = exc
+                if attempt < attempts:
+                    emit_workflow_event(build_workflow_event(
+                        "llm_retry",
+                        node_id=node.id,
+                        node_title=node.title,
+                        level="warning",
+                        title="模型调用重试",
+                        message=f"第 {attempt}/{attempts} 次调用失败，准备重试：{exc}",
+                        error=str(exc),
+                        data={"attempt": attempt, "maxAttempts": attempts},
+                    ))
+                else:
+                    emit_workflow_event(build_workflow_event(
+                        "node_log",
+                        node_id=node.id,
+                        node_title=node.title,
+                        level="warning",
+                        title="重试次数已用尽",
+                        message=f"模型调用在 {attempts} 次尝试后仍然失败：{exc}",
+                        error=str(exc),
+                        data={"attempt": attempt, "maxAttempts": attempts},
+                    ))
+                logger.error(
+                    "节点 %s(%s) 大模型调用失败（第 %d/%d 次）: %s: %s",
+                    node.id,
+                    node.type,
+                    attempt,
+                    attempts,
+                    type(exc).__name__,
+                    exc,
+                )
 
         if node.config.errorStrategy == "fallback":
+            logger.info("节点 %s 调用失败，使用兜底输出", node.id)
+            emit_workflow_event(build_workflow_event(
+                "node_log",
+                node_id=node.id,
+                node_title=node.title,
+                level="warning",
+                title="使用兜底输出",
+                message="模型调用失败，已按策略使用兜底输出",
+            ))
             return LlmInvokeResult(content=node.config.fallbackOutput or "", reasoning_content="")
         if node.config.errorStrategy == "ignore":
+            logger.info("节点 %s 调用失败，按策略忽略", node.id)
+            emit_workflow_event(build_workflow_event(
+                "node_log",
+                node_id=node.id,
+                node_title=node.title,
+                level="warning",
+                title="忽略模型错误",
+                message="模型调用失败，已按策略忽略并返回空输出",
+            ))
             return LlmInvokeResult(content="", reasoning_content="")
         raise last_error or RuntimeError("大模型调用失败")
 
@@ -469,17 +549,46 @@ class WorkflowNodeExecutorRegistry:
         async def execute(state: WorkflowState) -> WorkflowState:
             started_at = time.perf_counter()
             node_input = _build_node_input(node, state)
+            emit_workflow_event(build_workflow_event(
+                "node_started",
+                node_id=node.id,
+                node_title=node.title,
+                title="节点开始执行",
+                message=f"{node.title} 执行中",
+                data={"inputKeys": list(node_input.keys()), "nodeType": node.type},
+            ))
             try:
                 executor = self.get(node.type)
                 node_output = {"skipped": True} if not node.config.enabled else await executor.run(node, node_input, state)
                 node_output = _coerce_by_io_definitions(node_output, node.outputs)
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
                 next_state = _store_node_output(node, state, node_output)
+                emit_workflow_event(build_workflow_event(
+                    "node_completed",
+                    node_id=node.id,
+                    node_title=node.title,
+                    title="节点执行完成",
+                    message=f"{node.title} 执行完成",
+                    duration_ms=duration_ms,
+                    data={"outputKeys": list(node_output.keys()), "nodeType": node.type},
+                ))
                 return _append_step(node, next_state, node_input, node_output, duration_ms)
             except Exception as exc:
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
+                logger.exception("节点执行失败: id=%s type=%s", node.id, node.type)
                 error_output = {"error": str(exc)}
                 next_state = _store_node_output(node, state, error_output)
+                emit_workflow_event(build_workflow_event(
+                    "node_failed",
+                    node_id=node.id,
+                    node_title=node.title,
+                    level="error",
+                    title="节点执行失败",
+                    message=str(exc),
+                    duration_ms=duration_ms,
+                    error=str(exc),
+                    data={"nodeType": node.type},
+                ))
                 return _append_step(node, next_state, node_input, error_output, duration_ms, error=str(exc))
 
         return execute

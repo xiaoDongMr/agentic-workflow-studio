@@ -6,6 +6,8 @@ export type WorkflowNodeType =
   | 'code'
   | 'end'
 
+export type WorkflowReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
+
 export type WorkflowValueType =
   | 'String'
   | 'Integer'
@@ -52,11 +54,11 @@ export interface WorkflowNodeConfig {
   outputKey: string
   reasoningKey?: string
   inputMappings: WorkflowInputMapping[]
-  visionInputMappings?: WorkflowInputMapping[]
   visionInputAsBase64?: boolean
   supportContinuation?: boolean
+  thinkingEnabled?: boolean
+  reasoningEffort?: WorkflowReasoningEffort
   timeoutSeconds?: number
-  firstTokenTimeoutEnabled?: boolean
   retryCount?: number
   errorStrategy?: 'interrupt' | 'fallback' | 'ignore'
   fallbackOutput?: string

@@ -5,7 +5,10 @@ export interface ModelOption {
   displayName?: string | null
   description?: string | null
   supportsThinking: boolean
+  supportsReasoningEffort: boolean
   supportsVision: boolean
+  maxTokens?: number | null
+  timeoutSeconds?: number | null
 }
 
 interface ModelOptionDto {
@@ -13,7 +16,10 @@ interface ModelOptionDto {
   display_name?: string | null
   description?: string | null
   supports_thinking: boolean
+  supports_reasoning_effort?: boolean
   supports_vision: boolean
+  max_tokens?: number | null
+  timeout?: number | null
 }
 
 interface ModelOptionsResponse {
@@ -26,7 +32,10 @@ function toModelOption(model: ModelOptionDto): ModelOption {
     displayName: model.display_name,
     description: model.description,
     supportsThinking: model.supports_thinking,
+    supportsReasoningEffort: model.supports_reasoning_effort ?? false,
     supportsVision: model.supports_vision,
+    maxTokens: model.max_tokens ?? null,
+    timeoutSeconds: model.timeout ?? null,
   }
 }
 

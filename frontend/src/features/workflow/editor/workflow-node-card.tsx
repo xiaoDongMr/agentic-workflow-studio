@@ -5,12 +5,15 @@ import {
   type WorkflowJSON,
   type WorkflowNodeProps,
 } from '@flowgram.ai/free-layout-editor'
+import type { WorkflowPortEntity } from '@flowgram.ai/free-layout-core'
 
 import {
   nodeIcons,
   nodeThemeClass,
 } from '@/features/workflow/editor/workflow-editor.config'
+import { SELECTOR_ELSE_BRANCH } from '@/features/workflow/components/node-config/selector-utils'
 import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
+import { getSelectorBranchPortInfos } from '@/features/workflow/editor/workflow-editor.utils'
 import type { FlowgramNodeData, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
@@ -32,7 +35,7 @@ export function FlowgramNodeCard({
   onSelectNode: (nodeId: string) => void
   selectedNodeId: string
   quickAddOpenNodeId: string
-  onToggleQuickAdd: (nodeId: string) => void
+  onToggleQuickAdd: (nodeId: string, sourcePortID?: string | number) => void
   trialRunExecution?: TrialRunNodeExecution
   onRunNode: (nodeId: string) => void
   onCopyNode: (nodeId: string) => void
@@ -54,6 +57,9 @@ export function FlowgramNodeCard({
   const outputItems = data?.outputs ?? []
   const canDeleteOrCopy = kind !== 'start'
   const isNodeRunning = nodeActionRunning || effectiveExecution?.status === 'running'
+  const selectorBranchCount = data?.config.selectorBranches?.length ?? 1
+  const selectorOutputCount = selectorBranchCount + 1
+  const selectorNodeMinHeight = kind === 'selector' ? Math.max(146, 104 + selectorOutputCount * 34) : undefined
   const closeMenu = useCallback(() => setMenuOpen(false), [])
   useClickOutside(actionsRef, menuOpen, closeMenu)
   const runtimeStatusLabel =
@@ -75,10 +81,20 @@ export function FlowgramNodeCard({
         nodeThemeClass[kind],
         isSelected && 'aw-flow-node--external-selected',
       )}
+      style={selectorNodeMinHeight ? { minHeight: selectorNodeMinHeight } : undefined}
       portClassName="aw-flow-port"
       portPrimaryColor="#7aa2ff"
       portSecondaryColor="#273249"
       portBackgroundColor="#0b1120"
+      onPortClick={(port: WorkflowPortEntity, event) => {
+        if (kind !== 'selector' || port.portType !== 'output' || !port.portID) {
+          return
+        }
+        if ('stopPropagation' in event) {
+          event.stopPropagation()
+        }
+        onToggleQuickAdd(nodeId, port.portID)
+      }}
     >
       <div
         className="aw-flow-node__inner"
@@ -104,8 +120,14 @@ export function FlowgramNodeCard({
         <div className="aw-flow-node__title">{data?.title}</div>
         <div className="aw-flow-node__description">{data?.description}</div>
         <div className="aw-flow-node__io">
-          <NodeIoRow label="输入" items={inputItems} />
-          <NodeIoRow label="输出" items={outputItems} />
+          {kind === 'selector' ? (
+            <SelectorBranchRows data={data} />
+          ) : (
+            <>
+              <NodeIoRow label="输入" items={inputItems} />
+              <NodeIoRow label="输出" items={outputItems} />
+            </>
+          )}
           {kind === 'llm' && <NodeMetaRow label="模型" value={data?.config.model || '默认模型'} />}
         </div>
       </div>
@@ -162,16 +184,24 @@ export function FlowgramNodeCard({
           </div>
         )}
       </div>
-      <div className="aw-flow-node__quick-add aw-flow-ignore-deselect">
-        <button
-          type="button"
-          onClick={() => onToggleQuickAdd(nodeId)}
-          className={cn('aw-flow-node__quick-add-trigger', quickAddOpen && 'aw-flow-node__quick-add-trigger--open')}
-          aria-label="从当前节点添加后续节点"
-        >
-          <GitBranchPlus className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      {kind !== 'selector' && (
+        <div className="aw-flow-node__quick-add aw-flow-ignore-deselect">
+          <button
+            type="button"
+            onClick={() => onToggleQuickAdd(nodeId)}
+            className={cn('aw-flow-node__quick-add-trigger', quickAddOpen && 'aw-flow-node__quick-add-trigger--open')}
+            aria-label="从当前节点添加后续节点"
+          >
+            <GitBranchPlus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+      {kind === 'selector' && (
+        <SelectorPortActions
+          data={data}
+          onAddFromPort={(sourcePortID) => onToggleQuickAdd(nodeId, sourcePortID)}
+        />
+      )}
       {effectiveExecution && <NodeExecutionPanel execution={effectiveExecution} />}
     </WorkflowNodeRenderer>
   )
@@ -385,6 +415,68 @@ function NodeMetaRow({ label, value }: { label: string; value: string }) {
     <div className="aw-flow-node__io-row">
       <span className="aw-flow-node__io-label">{label}</span>
       <span className="aw-flow-node__io-empty">{value}</span>
+    </div>
+  )
+}
+
+function SelectorBranchRows({ data }: { data?: FlowgramNodeData }) {
+  const branches = data?.config.selectorBranches ?? []
+
+  return (
+    <div className="aw-flow-selector-branch-list">
+      {branches.length > 0 ? (
+        branches.map((branch, index) => (
+          <div key={branch.id} className="aw-flow-selector-branch-row">
+            <span className="aw-flow-selector-branch-index">条件{index + 1}</span>
+            <span className="aw-flow-selector-branch-value">{Math.max(branch.conditions.length, 1)} 个条件</span>
+          </div>
+        ))
+      ) : (
+        <div className="aw-flow-selector-branch-row">
+          <span className="aw-flow-selector-branch-index">条件1</span>
+          <span className="aw-flow-selector-branch-value">未配置</span>
+        </div>
+      )}
+      <div className="aw-flow-selector-branch-row aw-flow-selector-branch-row--else">
+        <span className="aw-flow-selector-branch-index">否则</span>
+        <span className="aw-flow-selector-branch-value">{data?.config.selectorElseBranch || SELECTOR_ELSE_BRANCH}</span>
+      </div>
+    </div>
+  )
+}
+
+function SelectorPortActions({
+  data,
+  onAddFromPort,
+}: {
+  data?: FlowgramNodeData
+  onAddFromPort: (sourcePortID: string | number) => void
+}) {
+  const branchCount = data?.config.selectorBranches?.length ?? 1
+  const ports = getSelectorBranchPortInfos(branchCount)
+
+  return (
+    <div className="aw-flow-selector-ports aw-flow-ignore-deselect" onMouseDown={(event) => event.stopPropagation()}>
+      {ports.map((port) => (
+        <button
+          key={port.portID}
+          type="button"
+          className={cn(
+            'aw-flow-selector-port-action',
+            port.kind === 'else' && 'aw-flow-selector-port-action--else',
+          )}
+          style={{ top: `${port.topPercent}%` }}
+          onClick={(event) => {
+            event.stopPropagation()
+            onAddFromPort(port.portID)
+          }}
+          aria-label={`从${port.label}添加后续节点`}
+          title={`从${port.label}添加后续节点`}
+        >
+          <span className="aw-flow-selector-port-action__label">{port.label}</span>
+          <span className="aw-flow-selector-port-action__plus">+</span>
+        </button>
+      ))}
     </div>
   )
 }

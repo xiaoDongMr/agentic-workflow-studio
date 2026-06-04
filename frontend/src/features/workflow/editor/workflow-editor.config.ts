@@ -156,12 +156,12 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
   },
   selector: {
     title: '选择器节点',
-    description: '根据规则选择一个分支标签。',
+    description: '按条件命中一个下游分支，未命中时进入否则分支。',
     status: 'idle',
     inputs: [],
     outputs: [],
     config: {
-      prompt: '查询=>search\n订单=>order\n退款=>refund',
+      prompt: '',
       model: 'Rule Engine',
       temperature: 0,
       maxTokens: 300,
@@ -170,6 +170,21 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
       responseMode: 'json',
       outputKey: 'branch',
       inputMappings: [],
+      selectorBranches: [
+        {
+          id: 'selector_branch_if',
+          label: 'if',
+          conditions: [
+            {
+              id: 'selector_condition_if',
+              operator: 'equals',
+              left: { sourceType: 'reference', source: '', valueType: 'String' },
+              right: { sourceType: 'literal', source: '', valueType: 'String' },
+            },
+          ],
+        },
+      ],
+      selectorElseBranch: 'else',
     },
   },
   loop: {

@@ -1,4 +1,5 @@
 import type { WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
+import type { WorkflowPorts } from '@flowgram.ai/free-layout-core'
 import type { WorkflowJSON } from '@flowgram.ai/free-layout-editor'
 
 import {
@@ -15,6 +16,15 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import { trialRunStepTemplates } from '@/features/workflow/mock-data'
 import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode } from '@/types/workflow'
+
+export const SELECTOR_ELSE_PORT_ID = 'selector-else'
+
+export interface SelectorBranchPortInfo {
+  portID: string
+  label: string
+  topPercent: number
+  kind: 'branch' | 'else'
+}
 
 export function createNodeData(type: WorkflowNode['type']): FlowgramNodeData {
   const base = defaultNodeContent[type]
@@ -91,6 +101,10 @@ export function toFlowgramJSON(nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
           x: node.position.x + CANVAS_OFFSET_X,
           y: node.position.y + CANVAS_OFFSET_Y,
         },
+        defaultPorts: buildWorkflowNodePorts({
+          kind: node.type,
+          config: node.config,
+        }),
       },
       data: {
         title: node.title,
@@ -108,6 +122,8 @@ export function toFlowgramJSON(nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
     edges: edges.map((edge) => ({
       sourceNodeID: edge.source,
       targetNodeID: edge.target,
+      sourcePortID: edge.sourcePortID,
+      targetPortID: edge.targetPortID,
     })),
   }
 }
@@ -138,8 +154,51 @@ export function fromFlowgramJSON(json: WorkflowJSON): [WorkflowNode[], WorkflowE
       id: `${edge.sourceNodeID}-${edge.targetNodeID}-${index + 1}`,
       source: String(edge.sourceNodeID),
       target: String(edge.targetNodeID),
+      sourcePortID: edge.sourcePortID,
+      targetPortID: edge.targetPortID,
     })),
   ]
+}
+
+export function buildWorkflowNodePorts(data: Pick<FlowgramNodeData, 'kind' | 'config'>): WorkflowPorts {
+  if (data.kind === 'start') {
+    return [{ type: 'output' }]
+  }
+  if (data.kind === 'end') {
+    return [{ type: 'input' }]
+  }
+  if (data.kind !== 'selector') {
+    return [{ type: 'input' }, { type: 'output' }]
+  }
+
+  return [
+    { type: 'input' },
+    ...getSelectorBranchPortInfos(data.config.selectorBranches?.length ?? 1).map((port) => ({
+      type: 'output' as const,
+      portID: port.portID,
+      location: 'right' as const,
+      locationConfig: {
+        right: 0,
+        top: `${port.topPercent}%`,
+      },
+    })),
+  ]
+}
+
+export function getSelectorBranchPortInfos(branchCount: number): SelectorBranchPortInfo[] {
+  const outputCount = Math.max(branchCount, 1) + 1
+
+  return Array.from({ length: outputCount }, (_, index) => {
+    const top = outputCount === 1 ? 58 : 40 + (index * 42) / Math.max(outputCount - 1, 1)
+    const isElse = index === outputCount - 1
+
+    return {
+      portID: isElse ? SELECTOR_ELSE_PORT_ID : `selector-branch-${index}`,
+      label: isElse ? '否则' : `条件${index + 1}`,
+      topPercent: top,
+      kind: isElse ? 'else' : 'branch',
+    }
+  })
 }
 
 export function getNodeEntityMeta(node: { id: string | number; toJSON: () => unknown }) {

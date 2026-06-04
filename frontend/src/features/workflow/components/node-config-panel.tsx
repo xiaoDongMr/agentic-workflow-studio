@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 
 import { LlmNodeConfigPanel } from '@/features/workflow/components/node-config/llm-node-config-panel'
+import { SelectorNodeConfigPanel } from '@/features/workflow/components/node-config/selector-node-config-panel'
 import {
   BasicInfoSection,
   ConfigSection,
@@ -22,6 +23,17 @@ export function NodeConfigPanel({
   if (node.type === 'llm') {
     return <LlmNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
+  if (node.type === 'selector') {
+    return (
+      <SelectorNodeConfigPanel
+        node={node}
+        nodes={nodes}
+        edges={edges}
+        onUpdateNode={onUpdateNode}
+        className={className}
+      />
+    )
+  }
   const isStartNode = node.type === 'start'
 
   return (
@@ -36,6 +48,7 @@ export function NodeConfigPanel({
             items={node.inputs}
             sourceOptions={inputSources}
             inputMappings={node.config.inputMappings}
+            allowCustomValue={node.type !== 'end'}
             onChange={(items) => onUpdateNode({ inputs: items })}
             onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
           />

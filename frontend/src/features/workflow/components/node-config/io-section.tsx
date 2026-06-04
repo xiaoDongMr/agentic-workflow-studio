@@ -1,5 +1,5 @@
-import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { Check, ChevronDown, ChevronRight, Link2, PenLine, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 import type { WorkflowInputMapping, WorkflowNode, WorkflowNodeIO, WorkflowValueType } from '@/types/workflow'
@@ -25,6 +25,7 @@ interface IOSectionProps {
   sourceOptions?: WorkflowVariableSource[]
   inputMappings?: WorkflowInputMapping[]
   onInputMappingsChange?: (mappings: WorkflowInputMapping[]) => void
+  allowCustomValue?: boolean
   maxItems?: number
   canRemove?: boolean
   readonlyNames?: string[]
@@ -38,6 +39,7 @@ export function IOSection({
   sourceOptions,
   inputMappings,
   onInputMappingsChange,
+  allowCustomValue = true,
   maxItems,
   canRemove = true,
   readonlyNames = [],
@@ -90,6 +92,17 @@ export function IOSection({
     [items, onChange, sourceOptions, syncMapping],
   )
 
+  const updateMapping = useCallback(
+    (index: number, nextMapping: WorkflowInputMapping) => {
+      syncMapping(index, {
+        ...nextMapping,
+        field: items[index]?.name ?? '',
+        valueType: nextMapping.sourceType === 'literal' ? 'String' : items[index]?.type ?? 'String',
+      })
+    },
+    [items, syncMapping],
+  )
+
   const addItem = useCallback(() => {
     if (!canAddItem) {
       return
@@ -103,13 +116,13 @@ export function IOSection({
         ...inputMappings,
         {
           field: nextItem.name,
-          sourceType: 'node',
+          sourceType: sourceOption ? 'node' : allowCustomValue ? 'literal' : 'node',
           source: sourceOption?.value ?? '',
           valueType: nextItem.type,
         },
       ])
     }
-  }, [canAddItem, inputMappings, items, onChange, onInputMappingsChange, sourceOptions])
+  }, [allowCustomValue, canAddItem, inputMappings, items, onChange, onInputMappingsChange, sourceOptions])
 
   const removeItem = useCallback(
     (index: number) => {
@@ -132,10 +145,10 @@ export function IOSection({
           <button
             type="button"
             onClick={addItem}
-            disabled={!canAddItem || (isInputReferenceMode && sourceOptions?.length === 0)}
+            disabled={!canAddItem || (isInputReferenceMode && !allowCustomValue && sourceOptions?.length === 0)}
             className={cn(
               'aw-variable-add-button inline-flex h-6 items-center gap-1 rounded-md border border-white/8 bg-slate-950/70 px-2 leading-none text-slate-400 transition-colors hover:border-blue-400/25 hover:text-white',
-              !canAddItem && 'cursor-not-allowed opacity-50 hover:border-white/8 hover:text-slate-400',
+              (!canAddItem || (isInputReferenceMode && !allowCustomValue && sourceOptions?.length === 0)) && 'cursor-not-allowed opacity-50 hover:border-white/8 hover:text-slate-400',
             )}
           >
             <Plus className="h-2.5 w-2.5" />
@@ -145,16 +158,25 @@ export function IOSection({
       </div>
 
       <div className="mt-2 space-y-1.5">
-        {items.length > 0 && <IOHeader gridClass={gridClass} isInputReferenceMode={isInputReferenceMode} />}
+        {items.length > 0 && (
+          <IOHeader
+            gridClass={gridClass}
+            isInputReferenceMode={isInputReferenceMode}
+            showModeColumn={isInputReferenceMode && allowCustomValue}
+          />
+        )}
         {items.map((item, index) => (
           <IOEditorRow
             key={`${title}-${index}`}
             item={item}
             gridClass={gridClass}
             sourceOptions={sourceOptions}
-            selectedSource={inputMappings?.[index]?.source ?? ''}
+            mapping={inputMappings?.[index]}
+            selectedSource={inputMappings?.[index]?.sourceType === 'node' ? inputMappings[index].source : ''}
             onChange={(nextItem) => updateItem(index, nextItem)}
             onChangeSource={(source) => updateSource(index, source)}
+            onChangeMapping={(mapping) => updateMapping(index, mapping)}
+            allowCustomValue={allowCustomValue}
             onRemove={() => removeItem(index)}
             canRemove={canRemove && !readonlyNames.includes(item.name)}
             readonly={readonlyNames.includes(item.name)}
@@ -163,7 +185,7 @@ export function IOSection({
         {items.length === 0 && (
           <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/50 px-2.5 py-2.5 text-[11px] text-slate-500">
             {isInputReferenceMode && sourceOptions?.length === 0
-              ? EMPTY_UPSTREAM_MESSAGE
+              ? allowCustomValue ? `${EMPTY_UPSTREAM_MESSAGE} 也可以添加自定义字符串输入。` : EMPTY_UPSTREAM_MESSAGE
               : `暂无${emptyLabel}字段，点击右上角“添加”创建。`}
           </div>
         )}
@@ -175,14 +197,23 @@ export function IOSection({
 function IOHeader({
   gridClass,
   isInputReferenceMode,
+  showModeColumn,
 }: {
   gridClass: string
   isInputReferenceMode: boolean
+  showModeColumn: boolean
 }) {
   return (
     <div className={cn('grid items-center gap-1.5 px-1 text-[10px] text-slate-500', gridClass)}>
       <span>变量名</span>
-      <span>{isInputReferenceMode ? '变量值' : '变量类型'}</span>
+      {isInputReferenceMode ? (
+        <span className="flex items-center gap-1.5">
+          {showModeColumn && <span className="w-[68px] shrink-0" />}
+          <span>变量值</span>
+        </span>
+      ) : (
+        <span>变量类型</span>
+      )}
       <span />
     </div>
   )
@@ -192,9 +223,12 @@ function IOEditorRow({
   item,
   gridClass,
   sourceOptions,
+  mapping,
   selectedSource,
   onChange,
   onChangeSource,
+  onChangeMapping,
+  allowCustomValue,
   onRemove,
   canRemove,
   readonly,
@@ -202,9 +236,12 @@ function IOEditorRow({
   item: WorkflowNodeIO
   gridClass: string
   sourceOptions?: WorkflowVariableSource[]
+  mapping?: WorkflowInputMapping
   selectedSource?: string
   onChange: (item: WorkflowNodeIO) => void
   onChangeSource?: (source: string) => void
+  onChangeMapping?: (mapping: WorkflowInputMapping) => void
+  allowCustomValue: boolean
   onRemove: () => void
   canRemove: boolean
   readonly: boolean
@@ -227,10 +264,15 @@ function IOEditorRow({
         )}
       />
       {sourceOptions ? (
-        <VariableSourceSelect
-          value={selectedSource ?? DESELECT_SOURCE_VALUE}
-          options={sourceOptions}
-          onChange={(value) => onChangeSource?.(value)}
+        <InputValueEditor
+          item={item}
+          mapping={mapping}
+          selectedSource={selectedSource}
+          sourceOptions={sourceOptions}
+          onChangeItem={onChange}
+          onChangeSource={onChangeSource}
+          onChangeMapping={onChangeMapping}
+          allowCustomValue={allowCustomValue}
           disabled={readonly}
         />
       ) : (
@@ -251,6 +293,154 @@ function IOEditorRow({
         </button>
       ) : (
         <span />
+      )}
+    </div>
+  )
+}
+
+function InputValueEditor({
+  item,
+  mapping,
+  selectedSource,
+  sourceOptions,
+  onChangeItem,
+  onChangeSource,
+  onChangeMapping,
+  allowCustomValue,
+  disabled,
+}: {
+  item: WorkflowNodeIO
+  mapping?: WorkflowInputMapping
+  selectedSource?: string
+  sourceOptions: WorkflowVariableSource[]
+  onChangeItem: (item: WorkflowNodeIO) => void
+  onChangeSource?: (source: string) => void
+  onChangeMapping?: (mapping: WorkflowInputMapping) => void
+  allowCustomValue: boolean
+  disabled: boolean
+}) {
+  const mode = allowCustomValue && mapping?.sourceType === 'literal' ? 'literal' : 'node'
+  const literalValue = mode === 'literal' ? mapping?.source ?? '' : ''
+
+  const switchToNode = () => {
+    onChangeMapping?.({
+      field: item.name,
+      sourceType: 'node',
+      source: selectedSource ?? '',
+      valueType: item.type,
+    })
+  }
+
+  const switchToLiteral = () => {
+    onChangeItem({ ...item, type: 'String' })
+    onChangeMapping?.({
+      field: item.name,
+      sourceType: 'literal',
+      source: '',
+      valueType: 'String',
+    })
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      {allowCustomValue && (
+        <InputModeSelect
+          mode={mode}
+          disabled={disabled}
+          onSelect={(next) => (next === 'literal' ? switchToLiteral() : switchToNode())}
+        />
+      )}
+      {mode === 'literal' ? (
+        <input
+          value={literalValue}
+          placeholder="输入字符串值"
+          onChange={(event) => onChangeMapping?.({
+            field: item.name,
+            sourceType: 'literal',
+            source: event.target.value,
+            valueType: 'String',
+          })}
+          disabled={disabled}
+          className={cn(
+            'aw-variable-input h-7 min-w-0 flex-1 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-200 outline-none transition-colors placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50',
+            disabled && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
+          )}
+        />
+      ) : (
+        <div className="min-w-0 flex-1">
+          <VariableSourceSelect
+            value={selectedSource ?? DESELECT_SOURCE_VALUE}
+            options={sourceOptions}
+            onChange={(value) => onChangeSource?.(value)}
+            disabled={disabled}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+const INPUT_MODE_OPTIONS: { value: 'node' | 'literal'; label: string; icon: ReactNode }[] = [
+  { value: 'node', label: '引用', icon: <Link2 className="h-3 w-3" /> },
+  { value: 'literal', label: '自定义', icon: <PenLine className="h-3 w-3" /> },
+]
+
+function InputModeSelect({
+  mode,
+  disabled,
+  onSelect,
+}: {
+  mode: 'node' | 'literal'
+  disabled: boolean
+  onSelect: (mode: 'node' | 'literal') => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const closeMenu = useCallback(() => setOpen(false), [])
+  useClickOutside(rootRef, open, closeMenu)
+  const current = INPUT_MODE_OPTIONS.find((option) => option.value === mode) ?? INPUT_MODE_OPTIONS[0]
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+        title={`变量值来源：${current.label}`}
+        className={cn(
+          'aw-variable-select-trigger inline-flex h-7 w-[68px] items-center justify-between gap-1 rounded-lg border border-white/8 bg-slate-950/80 px-1.5 leading-none text-slate-300 outline-none transition-colors hover:border-white/14 hover:text-white',
+          open && 'border-blue-400/50 text-white',
+          disabled && 'cursor-not-allowed opacity-60 hover:border-white/8 hover:text-slate-300',
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="text-slate-400">{current.icon}</span>
+          <span className="truncate">{current.label}</span>
+        </span>
+        <ChevronDown className={cn('h-2.5 w-2.5 shrink-0 text-slate-500 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-[calc(100%+5px)] z-50 w-24 rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur">
+          {INPUT_MODE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onSelect(option.value)
+                setOpen(false)
+              }}
+              className={cn(
+                'aw-variable-menu-item flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-300 transition-colors hover:bg-white/8 hover:text-white',
+                option.value === mode && 'bg-white/8 text-white',
+              )}
+            >
+              <span className="text-slate-400">{option.icon}</span>
+              <span className="flex-1">{option.label}</span>
+              {option.value === mode && <Check className="h-2.5 w-2.5 text-blue-300" />}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -441,20 +631,6 @@ function VariableSourceSelect({
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+5px)] z-50 max-h-56 w-48 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur">
-          <button
-            type="button"
-            onClick={() => selectSource(DESELECT_SOURCE_VALUE)}
-            className={cn(
-              'aw-variable-menu-item aw-variable-menu-item-muted flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-500 transition-colors hover:bg-white/8 hover:text-slate-200',
-              !value && 'bg-white/8 text-slate-200',
-            )}
-          >
-            <span className="flex h-3 w-3 items-center justify-center">
-              {!value && <Check className="h-3 w-3 text-blue-300" />}
-            </span>
-            <span>不引用变量</span>
-          </button>
-
           {groupedOptions.map((group) => (
             <VariableSourceGroup key={group.title} group={group} value={value} onSelect={selectSource} />
           ))}

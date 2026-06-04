@@ -58,7 +58,7 @@ export const mockWorkflow: WorkflowDocument = {
       inputs: [],
       outputs: [],
       config: {
-        prompt: '查询=>search\n订单=>order\n退款=>refund',
+        prompt: '',
         model: 'Rule Engine',
         temperature: 0,
         maxTokens: 512,
@@ -67,6 +67,21 @@ export const mockWorkflow: WorkflowDocument = {
         responseMode: 'json',
         outputKey: 'branch',
         inputMappings: [],
+        selectorBranches: [
+          {
+            id: 'selector_branch_if',
+            label: 'if',
+            conditions: [
+              {
+                id: 'selector_condition_if',
+                operator: 'equals',
+                left: { sourceType: 'reference', source: '', valueType: 'String' },
+                right: { sourceType: 'literal', source: '', valueType: 'String' },
+              },
+            ],
+          },
+        ],
+        selectorElseBranch: 'else',
       },
     },
     {

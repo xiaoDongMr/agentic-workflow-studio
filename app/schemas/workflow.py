@@ -6,6 +6,16 @@ from pydantic import BaseModel, Field, model_validator
 
 
 WorkflowReasoningEffort = Literal["minimal", "low", "medium", "high"]
+WorkflowSelectorOperator = Literal[
+    "equals",
+    "not_equals",
+    "length_gt",
+    "length_gte",
+    "length_lt",
+    "length_lte",
+    "contains",
+    "not_contains",
+]
 
 
 class WorkflowInputMapping(BaseModel):
@@ -13,6 +23,25 @@ class WorkflowInputMapping(BaseModel):
     sourceType: Literal["node", "context", "literal"]
     source: str
     valueType: str = ""
+
+
+class WorkflowSelectorOperand(BaseModel):
+    sourceType: Literal["reference", "literal"] = "literal"
+    source: str = ""
+    valueType: str = "String"
+
+
+class WorkflowSelectorCondition(BaseModel):
+    id: str = ""
+    operator: WorkflowSelectorOperator = "equals"
+    left: WorkflowSelectorOperand = Field(default_factory=WorkflowSelectorOperand)
+    right: WorkflowSelectorOperand = Field(default_factory=WorkflowSelectorOperand)
+
+
+class WorkflowSelectorBranch(BaseModel):
+    id: str = ""
+    label: str = ""
+    conditions: list[WorkflowSelectorCondition] = Field(default_factory=list)
 
 
 class WorkflowNodeConfig(BaseModel):
@@ -37,6 +66,8 @@ class WorkflowNodeConfig(BaseModel):
     retryCount: int = Field(default=1, ge=0, le=10)
     errorStrategy: Literal["interrupt", "fallback", "ignore"] = "ignore"
     fallbackOutput: str = ""
+    selectorBranches: list[WorkflowSelectorBranch] = Field(default_factory=list)
+    selectorElseBranch: str = "default"
 
     @model_validator(mode="before")
     @classmethod

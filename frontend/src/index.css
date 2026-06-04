@@ -347,6 +347,48 @@ textarea {
   color: #64748b;
 }
 
+.aw-flow-selector-branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aw-flow-selector-branch-row {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 5px 7px;
+}
+
+.aw-flow-selector-branch-row--else {
+  border-style: dashed;
+  border-color: rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.aw-flow-selector-branch-index {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  color: #c7d2fe;
+}
+
+.aw-flow-selector-branch-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1;
+  color: #64748b;
+}
+
 .aw-flow-node__actions {
   position: absolute;
   top: 10px;
@@ -476,6 +518,104 @@ textarea {
 .aw-flow-node__quick-add-trigger:hover,
 .aw-flow-node__quick-add-trigger--open {
   box-shadow: 0 16px 28px rgba(37, 99, 235, 0.3);
+}
+
+.aw-flow-selector-ports {
+  position: absolute;
+  top: 0;
+  right: -46px;
+  bottom: 0;
+  z-index: 6;
+  width: 78px;
+  pointer-events: none;
+}
+
+.aw-flow-selector-port-action {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  background: rgba(15, 23, 42, 0.72);
+  padding: 0 6px;
+  color: rgba(191, 219, 254, 0.78);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  opacity: 0.68;
+  pointer-events: auto;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.aw-flow-selector-port-action::before {
+  position: absolute;
+  top: 50%;
+  right: calc(100% - 1px);
+  width: 10px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(96, 165, 250, 0.38));
+  content: '';
+}
+
+.aw-flow-node:hover .aw-flow-selector-port-action,
+.aw-flow-node--external-selected .aw-flow-selector-port-action {
+  opacity: 0.86;
+}
+
+.aw-flow-selector-port-action:hover {
+  opacity: 1;
+  transform: translateY(-50%) translateX(3px);
+  border-color: rgba(96, 165, 250, 0.52);
+  background: rgba(30, 64, 175, 0.5);
+  color: #eff6ff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.22);
+}
+
+.aw-flow-selector-port-action--else {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: rgba(203, 213, 225, 0.76);
+}
+
+.aw-flow-selector-port-action--else::before {
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.45));
+}
+
+.aw-flow-selector-port-action__label {
+  max-width: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.aw-flow-selector-port-action__icon {
+  height: 9px;
+  width: 9px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.aw-flow-selector-port-action__plus {
+  display: inline-flex;
+  height: 11px;
+  width: 11px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.16);
+  font-size: 10px;
+  line-height: 1;
+  color: rgba(219, 234, 254, 0.82);
 }
 
 .aw-flow-node__execution {

@@ -22,6 +22,7 @@ from app.services.workflow_llm import (
     build_llm_request,
 )
 from app.services.workflow_events import build_workflow_event, emit_workflow_event
+from app.services.selector_engine import selector_engine
 
 logger = logging.getLogger(__name__)
 
@@ -490,13 +491,14 @@ class LlmNodeExecutor:
 
 class SelectorNodeExecutor:
     async def run(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> dict[str, Any]:
-        rules = [line.strip() for line in node.config.prompt.splitlines() if "=>" in line]
-        payload = json.dumps(node_input, ensure_ascii=False)
-        for rule in rules:
-            condition, branch = [part.strip() for part in rule.split("=>", 1)]
-            if condition and condition in payload:
-                return {node.config.outputKey or "branch": branch, "matched": condition}
-        return {node.config.outputKey or "branch": "default", "matched": None}
+        output_key = node.config.outputKey or "branch"
+        result = selector_engine.evaluate(
+            node,
+            node_input,
+            variables=state.get("variables", {}),
+            run_input=state.get("input", {}),
+        )
+        return {output_key: result.branch, "matched": result.matched}
 
 
 class LoopNodeExecutor:

@@ -8,6 +8,16 @@ export type WorkflowNodeType =
 
 export type WorkflowReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
 
+export type WorkflowSelectorOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'length_gt'
+  | 'length_gte'
+  | 'length_lt'
+  | 'length_lte'
+  | 'contains'
+  | 'not_contains'
+
 export type WorkflowValueType =
   | 'String'
   | 'Integer'
@@ -40,6 +50,28 @@ export interface WorkflowInputMapping {
   valueType?: WorkflowValueType | string
 }
 
+export interface WorkflowSelectorOperand {
+  sourceType: 'reference' | 'literal'
+  source: string
+  valueType?: WorkflowValueType | string
+}
+
+export interface WorkflowSelectorCondition {
+  id: string
+  operator: WorkflowSelectorOperator
+  left: WorkflowSelectorOperand
+  right: WorkflowSelectorOperand
+  field?: string
+  value?: string
+  valueType?: WorkflowValueType | string
+}
+
+export interface WorkflowSelectorBranch {
+  id: string
+  label: string
+  conditions: WorkflowSelectorCondition[]
+}
+
 export interface WorkflowNodeConfig {
   prompt: string
   systemPrompt?: string
@@ -62,6 +94,8 @@ export interface WorkflowNodeConfig {
   retryCount?: number
   errorStrategy?: 'interrupt' | 'fallback' | 'ignore'
   fallbackOutput?: string
+  selectorBranches?: WorkflowSelectorBranch[]
+  selectorElseBranch?: string
 }
 
 export interface WorkflowNode {
@@ -83,6 +117,8 @@ export interface WorkflowEdge {
   id: string
   source: string
   target: string
+  sourcePortID?: string | number
+  targetPortID?: string | number
 }
 
 export interface WorkflowDocument {

@@ -9,6 +9,7 @@ import {
   type WorkflowNodeProps,
 } from '@flowgram.ai/free-layout-editor'
 import type { WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
+import { WorkflowNodePortsData } from '@flowgram.ai/free-layout-core'
 import {
   createFreeNodePanelPlugin,
   WorkflowNodePanelService,
@@ -41,6 +42,7 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
   createNodeData,
+  buildWorkflowNodePorts,
   fromFlowgramJSON,
   getNextNodeCanvasPosition,
   getNodeEntityMeta,
@@ -373,13 +375,21 @@ function toSingleNodeTestWorkflow(node: WorkflowNode): WorkflowDocument {
 
 function createSingleNodeContextMappings(node: WorkflowNode): WorkflowInputMapping[] {
   if (node.inputs.length > 0) {
+    const mappingsByField = new Map(node.config.inputMappings.map((mapping) => [mapping.field, mapping]))
     return node.inputs
       .filter((input) => input.name)
-      .map((input) => ({
-        field: input.name,
-        sourceType: 'context',
-        source: input.name,
-      }))
+      .map((input) => {
+        const mapping = mappingsByField.get(input.name)
+        if (mapping?.sourceType === 'literal') {
+          return { ...mapping }
+        }
+        return {
+          field: input.name,
+          sourceType: 'context',
+          source: input.name,
+          valueType: input.type,
+        }
+      })
   }
 
   return node.config.inputMappings.map(normalizeSingleNodeMapping)
@@ -536,6 +546,7 @@ export function WorkflowEditor({
       type: WorkflowNode['type'],
       options?: {
         connectFromNodeId?: string
+        sourcePortID?: string | number
         position?: { x: number; y: number }
         selectCreated?: boolean
       },
@@ -562,12 +573,16 @@ export function WorkflowEditor({
       const nodeId = createUniqueNodeId(type, existingIds)
       const createdNode = ctx.document.createWorkflowNodeByType(type, position, {
         id: nodeId,
+        meta: {
+          defaultPorts: buildWorkflowNodePorts(createNodeData(type)),
+        },
         data: createNodeData(type),
       })
 
       if (fromNode) {
         ctx.document.linesManager.createLine({
           from: String(fromNode.id),
+          fromPort: options?.sourcePortID,
           to: String(createdNode.id),
         })
       }
@@ -589,6 +604,7 @@ export function WorkflowEditor({
   const openNodePanel = useCallback(
     async (options?: {
       connectFromNodeId?: string
+      sourcePortID?: string | number
       position?: { x: number; y: number }
       selectCreated?: boolean
     }) => {
@@ -630,6 +646,7 @@ export function WorkflowEditor({
 
         createNodeByType(result.nodeType as WorkflowNode['type'], {
           connectFromNodeId: fromNodeId,
+          sourcePortID: options?.sourcePortID,
           selectCreated: options?.selectCreated,
         })
       } finally {
@@ -671,6 +688,7 @@ export function WorkflowEditor({
         nextData,
         true,
       )
+      targetNode.getData(WorkflowNodePortsData).updateAllPorts(buildWorkflowNodePorts(nextData))
 
       setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
     },
@@ -926,13 +944,13 @@ export function WorkflowEditor({
             onRunNode={openSingleNodeTrial}
             onCopyNode={copyNode}
             onDeleteNode={deleteNode}
-            onToggleQuickAdd={(nodeId) => {
+            onToggleQuickAdd={(nodeId, sourcePortID) => {
               clearTrialRunTimers()
               setTrialRunning(false)
               setTrialRunOpen(false)
               setSingleNodeTrialOpen(false)
               setTrialRunExecutions({})
-              void openNodePanel({ connectFromNodeId: nodeId })
+              void openNodePanel({ connectFromNodeId: nodeId, sourcePortID })
             }}
           />
         ),

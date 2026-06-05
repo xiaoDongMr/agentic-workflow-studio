@@ -9,20 +9,13 @@ import {
   type WorkflowNodeProps,
 } from '@flowgram.ai/free-layout-editor'
 import type { WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
-import { WorkflowNodePortsData } from '@flowgram.ai/free-layout-core'
-import {
-  createFreeNodePanelPlugin,
-  WorkflowNodePanelService,
-} from '@flowgram.ai/free-node-panel-plugin'
+import { createFreeNodePanelPlugin } from '@flowgram.ai/free-node-panel-plugin'
 import { createFreeSnapPlugin } from '@flowgram.ai/free-snap-plugin'
 import { createMinimapPlugin } from '@flowgram.ai/minimap-plugin'
 import '@flowgram.ai/free-layout-editor/index.css'
 
 import {
-  CANVAS_OFFSET_X,
-  CANVAS_OFFSET_Y,
   defaultRegistries,
-  paletteToNodeType,
 } from '@/features/workflow/editor/workflow-editor.config'
 import {
   EditorBottomBar,
@@ -30,6 +23,17 @@ import {
   FlowgramNodePanel,
   SingleNodeTrialPanel,
 } from '@/features/workflow/editor/workflow-editor-components'
+import {
+  createGlobalDebugFields,
+  createSingleNodeTrialFields,
+  formatInputFieldValue,
+} from '@/features/workflow/editor/debug/debug-fields'
+import {
+  normalizeSelectorLabelsForNode,
+  normalizeWorkflowNodesForRun,
+  toSingleNodeTestWorkflow,
+} from '@/features/workflow/editor/debug/single-node-workflow'
+import { useWorkflowNodeActions } from '@/features/workflow/editor/hooks/use-workflow-node-actions'
 import type {
   AddNodeOptions,
   FlowgramNodeData,
@@ -41,11 +45,7 @@ import type {
   WorkflowTokenUsage,
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
-  createNodeData,
-  buildWorkflowNodePorts,
   fromFlowgramJSON,
-  getNextNodeCanvasPosition,
-  getNodeEntityMeta,
   normalizeNodeData,
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
@@ -54,7 +54,7 @@ import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
-import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode, WorkflowDocument } from '@/types/workflow'
+import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 
 export interface WorkflowCanvasApi {
   addNode: (key: NodePaletteKey, options?: AddNodeOptions) => void
@@ -236,8 +236,6 @@ function buildDebugPayloadFromCombinedJson(value: string) {
   return parsed
 }
 
-const NODE_COPY_OFFSET = 36
-
 interface SingleNodeTrialCache {
   fields: GlobalDebugFieldValue[]
   jsonMode: boolean
@@ -257,156 +255,6 @@ function buildPayloadFromFieldEntries(fields: GlobalDebugFieldValue[]) {
   )
 }
 
-function isStructuredWorkflowType(type: string) {
-  const normalized = type.toLowerCase()
-  return normalized.includes('object') || normalized.includes('array') || normalized.includes('json')
-}
-
-function getDebugFieldInputType(type: string): GlobalDebugFieldValue['type'] {
-  const normalized = type.trim().toLowerCase()
-  if (normalized === 'image') {
-    return 'image'
-  }
-  if (normalized === 'video') {
-    return 'video'
-  }
-  if (normalized === 'array<image>') {
-    return 'image-array'
-  }
-  if (normalized === 'array<video>') {
-    return 'video-array'
-  }
-  return isStructuredWorkflowType(type) ? 'json' : 'string'
-}
-
-function createSingleNodeTrialFields(node: WorkflowNode, fallbackPayload: Record<string, unknown>) {
-  return node.inputs
-    .filter((input) => input.name)
-    .map((input) => {
-      const value = fallbackPayload[input.name]
-      const inputType = getDebugFieldInputType(input.type)
-      const structured = inputType === 'json'
-      return {
-        name: input.name,
-        type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
-        valueType: input.type,
-        value: formatInputFieldValue(value, structured || inputType.endsWith('-array')),
-      } satisfies GlobalDebugFieldValue
-    })
-}
-
-function createGlobalDebugFields(nodes: WorkflowNode[], previousFields: GlobalDebugFieldValue[]) {
-  const startNode = nodes.find((node) => node.type === 'start')
-  const definitions = startNode?.outputs.filter((output) => output.name) ?? []
-  if (definitions.length === 0) {
-    return previousFields
-  }
-  const previousByName = new Map(previousFields.map((field) => [field.name, field]))
-  return definitions.map((definition) => {
-    const previous = previousByName.get(definition.name)
-    const type = getDebugFieldInputType(definition.type)
-    return {
-      name: definition.name,
-      type,
-      valueType: definition.type,
-      value: previous?.value ?? formatInputFieldValue(undefined, type === 'json' || type.endsWith('-array')),
-    } satisfies GlobalDebugFieldValue
-  })
-}
-
-function formatInputFieldValue(value: unknown, structured: boolean) {
-  if (value === undefined) {
-    return structured ? '{}' : ''
-  }
-  if (typeof value === 'string') {
-    return structured ? value : value
-  }
-  return JSON.stringify(value, null, 2)
-}
-
-function createUniqueNodeId(type: WorkflowNode['type'], existingIds: Set<string>) {
-  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const baseId = `${type}-${suffix}`
-  if (!existingIds.has(baseId)) {
-    return baseId
-  }
-
-  let index = 2
-  while (existingIds.has(`${baseId}-${index}`)) {
-    index += 1
-  }
-  return `${baseId}-${index}`
-}
-
-function cloneWorkflowNode(node: WorkflowNode): WorkflowNode {
-  return {
-    ...node,
-    position: { ...node.position },
-    inputs: node.inputs.map((item) => ({ ...item })),
-    outputs: node.outputs.map((item) => ({ ...item })),
-    config: {
-      ...node.config,
-      inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
-    },
-  }
-}
-
-function toSingleNodeTestWorkflow(node: WorkflowNode): WorkflowDocument {
-  const singleNode = cloneWorkflowNode(node)
-  const contextMappings = createSingleNodeContextMappings(singleNode)
-
-  return {
-    id: `single-node-${singleNode.id}`,
-    name: `${singleNode.title} 单节点测试`,
-    description: '仅执行当前节点，用于快速验证节点配置。',
-    version: 'v0.1.0',
-    nodes: [
-      {
-        ...singleNode,
-        config: {
-          ...singleNode.config,
-          inputMappings: contextMappings,
-        },
-      },
-    ],
-    edges: [],
-  }
-}
-
-function createSingleNodeContextMappings(node: WorkflowNode): WorkflowInputMapping[] {
-  if (node.inputs.length > 0) {
-    const mappingsByField = new Map(node.config.inputMappings.map((mapping) => [mapping.field, mapping]))
-    return node.inputs
-      .filter((input) => input.name)
-      .map((input) => {
-        const mapping = mappingsByField.get(input.name)
-        if (mapping?.sourceType === 'literal') {
-          return { ...mapping }
-        }
-        return {
-          field: input.name,
-          sourceType: 'context',
-          source: input.name,
-          valueType: input.type,
-        }
-      })
-  }
-
-  return node.config.inputMappings.map(normalizeSingleNodeMapping)
-}
-
-function normalizeSingleNodeMapping(mapping: WorkflowInputMapping): WorkflowInputMapping {
-  if (mapping.sourceType !== 'node') {
-    return { ...mapping }
-  }
-
-  return {
-    ...mapping,
-    sourceType: 'context',
-    source: mapping.field,
-  }
-}
-
 export function WorkflowEditor({
   nodes,
   edges,
@@ -418,7 +266,6 @@ export function WorkflowEditor({
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null)
   const [initialData] = useState<WorkflowJSON>(() => toFlowgramJSON(nodes, edges))
   const setWorkflowGraph = useWorkflowStore((state) => state.setWorkflowGraph)
-  const [quickAddNodeId, setQuickAddNodeId] = useState('')
   const [trialRunOpen, setTrialRunOpen] = useState(false)
   const [globalDebugFields, setGlobalDebugFields] = useState<GlobalDebugFieldValue[]>([
     {
@@ -449,10 +296,10 @@ export function WorkflowEditor({
   const runAbortControllerRef = useRef<AbortController | null>(null)
   const singleNodeTrialCacheRef = useRef<Record<string, SingleNodeTrialCache>>({})
 
-  const singleNodeTrialNode = useMemo(
-    () => nodes.find((node) => node.id === singleNodeTrialNodeId),
-    [nodes, singleNodeTrialNodeId],
-  )
+  const singleNodeTrialNode = useMemo(() => {
+    const targetNode = nodes.find((node) => node.id === singleNodeTrialNodeId)
+    return targetNode ? normalizeSelectorLabelsForNode(targetNode, nodes) : undefined
+  }, [nodes, singleNodeTrialNodeId])
 
   const clearTrialRunTimers = useCallback(() => {
     runTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId))
@@ -541,160 +388,6 @@ export function WorkflowEditor({
     })
   }, [])
 
-  const createNodeByType = useCallback(
-    (
-      type: WorkflowNode['type'],
-      options?: {
-        connectFromNodeId?: string
-        sourcePortID?: string | number
-        position?: { x: number; y: number }
-        selectCreated?: boolean
-      },
-    ) => {
-      const ctx = ctxRef.current
-      if (!ctx) {
-        return
-      }
-
-      const fromNodeId = options?.connectFromNodeId ?? selectedNodeId
-      const fromNode = fromNodeId
-        ? ctx.document.getAllNodes().find((node) => String(node.id) === fromNodeId)
-        : undefined
-
-      const fromNodeLike = fromNode ? getNodeEntityMeta(fromNode) : undefined
-      const position = options?.position
-        ? {
-            x: options.position.x + CANVAS_OFFSET_X,
-            y: options.position.y + CANVAS_OFFSET_Y,
-          }
-        : getNextNodeCanvasPosition(fromNodeLike, edges)
-
-      const existingIds = new Set(ctx.document.getAllNodes().map((node) => String(node.id)))
-      const nodeId = createUniqueNodeId(type, existingIds)
-      const createdNode = ctx.document.createWorkflowNodeByType(type, position, {
-        id: nodeId,
-        meta: {
-          defaultPorts: buildWorkflowNodePorts(createNodeData(type)),
-        },
-        data: createNodeData(type),
-      })
-
-      if (fromNode) {
-        ctx.document.linesManager.createLine({
-          from: String(fromNode.id),
-          fromPort: options?.sourcePortID,
-          to: String(createdNode.id),
-        })
-      }
-
-      const nextSelectedId = String(createdNode.id)
-      if (options?.selectCreated !== false) {
-        onSelectNode(nextSelectedId)
-      }
-      setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
-      setQuickAddNodeId('')
-    },
-    [edges, onSelectNode, selectedNodeId, setWorkflowGraph],
-  )
-
-  const addNode = useCallback((key: NodePaletteKey, options?: AddNodeOptions) => {
-    createNodeByType(paletteToNodeType[key], options)
-  }, [createNodeByType])
-
-  const openNodePanel = useCallback(
-    async (options?: {
-      connectFromNodeId?: string
-      sourcePortID?: string | number
-      position?: { x: number; y: number }
-      selectCreated?: boolean
-    }) => {
-      const ctx = ctxRef.current
-      if (!ctx) {
-        return
-      }
-
-      const fromNodeId = options?.connectFromNodeId ?? selectedNodeId
-      const fromNode = fromNodeId
-        ? ctx.document.getAllNodes().find((node) => String(node.id) === fromNodeId)
-        : undefined
-      const fromNodeLike = fromNode ? getNodeEntityMeta(fromNode) : undefined
-      const panelPosition = options?.position
-        ? {
-            x: options.position.x + CANVAS_OFFSET_X,
-            y: options.position.y + CANVAS_OFFSET_Y,
-          }
-        : getNextNodeCanvasPosition(fromNodeLike, edges)
-      const sourceTitle = fromNodeId ? nodes.find((node) => node.id === fromNodeId)?.title ?? '' : ''
-
-      if (fromNodeId) {
-        setQuickAddNodeId(fromNodeId)
-      }
-
-      try {
-        const nodePanelService = ctx.get(WorkflowNodePanelService)
-        const result = await nodePanelService.singleSelectNodePanel({
-          position: panelPosition,
-          panelProps: {
-            sourceTitle,
-          },
-          containerNode: fromNode,
-        })
-
-        if (!result?.nodeType) {
-          return
-        }
-
-        createNodeByType(result.nodeType as WorkflowNode['type'], {
-          connectFromNodeId: fromNodeId,
-          sourcePortID: options?.sourcePortID,
-          selectCreated: options?.selectCreated,
-        })
-      } finally {
-        setQuickAddNodeId('')
-      }
-    },
-    [createNodeByType, edges, nodes, selectedNodeId],
-  )
-
-  const updateSelectedNode = useCallback(
-    (
-      partial: Partial<Omit<WorkflowNode, 'config'>> & {
-        config?: Partial<WorkflowNode['config']>
-      },
-    ) => {
-      const ctx = ctxRef.current
-      if (!ctx) {
-        return
-      }
-
-      const targetNode = ctx.document.getAllNodes().find((node) => String(node.id) === selectedNodeId)
-      if (!targetNode) {
-        return
-      }
-
-      const nodeJson = targetNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
-      const currentData = normalizeNodeData(nodeJson.data, nodeJson.type as WorkflowNode['type'])
-      const nextData = {
-        ...currentData,
-        ...partial,
-        kind: currentData.kind,
-        config: {
-          ...currentData.config,
-          ...partial.config,
-        },
-      }
-
-      ;(targetNode as WorkflowNodeJSON & { updateExtInfo?: (data: FlowgramNodeData, fullUpdate?: boolean) => void }).updateExtInfo?.(
-        nextData,
-        true,
-      )
-      targetNode.getData(WorkflowNodePortsData).updateAllPorts(buildWorkflowNodePorts(nextData))
-
-      setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
-    },
-    [selectedNodeId, setWorkflowGraph],
-  )
-
   const handleEditorRef = useCallback((ctx: FreeLayoutPluginContext | null) => {
     ctxRef.current = ctx
   }, [])
@@ -711,7 +404,7 @@ export function WorkflowEditor({
     const fallbackPayload = globalDebugJsonMode
       ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
       : buildPayloadFromFieldEntries(globalDebugFields)
-    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload)
+    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload, latestNodes)
     const combinedJson = cached?.combinedJson ?? JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
 
     clearTrialRunTimers()
@@ -781,7 +474,7 @@ export function WorkflowEditor({
         : buildPayloadFromFieldEntries(globalDebugFields))
 
       setTrialRunning(true)
-      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode), payload, {
+      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode, latestNodes), payload, {
         signal: abortController.signal,
         onWorkflowEvent: (event) => {
           applyRuntimeEventToNode(event, nodeId, targetNode)
@@ -844,70 +537,6 @@ export function WorkflowEditor({
     syncNodeTrialRunExecution,
   ])
 
-  const copyNode = useCallback((nodeId: string) => {
-    const ctx = ctxRef.current
-    if (!ctx) {
-      return
-    }
-
-    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
-    if (!targetNode) {
-      return
-    }
-
-    const nodeJson = targetNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
-    const type = nodeJson.type as WorkflowNode['type']
-    const existingIds = new Set(ctx.document.getAllNodes().map((item) => String(item.id)))
-    const newNodeId = createUniqueNodeId(type, existingIds)
-    const position = (nodeJson.meta as { position?: { x?: number; y?: number } } | undefined)?.position
-    const copiedNode = ctx.document.copyNode(
-      targetNode,
-      newNodeId,
-      (json) => {
-        const data = normalizeNodeData(json.data as Partial<FlowgramNodeData>, type)
-        return {
-          ...json,
-          id: newNodeId,
-          data: {
-            ...data,
-            title: `${data.title} 副本`,
-            trialRunExecution: undefined,
-          },
-        }
-      },
-      {
-        x: (position?.x ?? CANVAS_OFFSET_X) + NODE_COPY_OFFSET,
-        y: (position?.y ?? CANVAS_OFFSET_Y) + NODE_COPY_OFFSET,
-      },
-    )
-    const nextSelectedId = String(copiedNode.id)
-    onSelectNode(nextSelectedId)
-    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
-  }, [onSelectNode, setWorkflowGraph])
-
-  const deleteNode = useCallback((nodeId: string) => {
-    const ctx = ctxRef.current
-    if (!ctx) {
-      return
-    }
-
-    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
-    if (!targetNode || !ctx.document.canRemove(targetNode, true)) {
-      return
-    }
-
-    targetNode.dispose()
-    if (selectedNodeId === nodeId) {
-      onSelectNode('')
-    }
-    setTrialRunExecutions((prev) => {
-      const next = { ...prev }
-      delete next[nodeId]
-      return next
-    })
-    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
-  }, [onSelectNode, selectedNodeId, setWorkflowGraph])
-
   const closeDebugPanels = useCallback(() => {
     clearTrialRunTimers()
     abortTrialRunStream()
@@ -925,6 +554,38 @@ export function WorkflowEditor({
     },
     [closeDebugPanels, onSelectNode],
   )
+
+  const {
+    addNode,
+    closeQuickAddPanel,
+    copyNode,
+    deleteNode,
+    openNodePanel,
+    openQuickAddPanel,
+    quickAddNodeId,
+    updateSelectedNode,
+  } = useWorkflowNodeActions({
+    ctxRef,
+    nodes,
+    edges,
+    selectedNodeId,
+    onSelectNode,
+    setWorkflowGraph,
+    onBeforeQuickAdd: () => {
+      clearTrialRunTimers()
+      setTrialRunning(false)
+      setTrialRunOpen(false)
+      setSingleNodeTrialOpen(false)
+      setTrialRunExecutions({})
+    },
+    onNodeDeleted: (nodeId) => {
+      setTrialRunExecutions((prev) => {
+        const next = { ...prev }
+        delete next[nodeId]
+        return next
+      })
+    },
+  })
 
   const editorProps = useMemo<FreeLayoutProps>(
     () => ({
@@ -944,14 +605,7 @@ export function WorkflowEditor({
             onRunNode={openSingleNodeTrial}
             onCopyNode={copyNode}
             onDeleteNode={deleteNode}
-            onToggleQuickAdd={(nodeId, sourcePortID) => {
-              clearTrialRunTimers()
-              setTrialRunning(false)
-              setTrialRunOpen(false)
-              setSingleNodeTrialOpen(false)
-              setTrialRunExecutions({})
-              void openNodePanel({ connectFromNodeId: nodeId, sourcePortID })
-            }}
+            onToggleQuickAdd={openQuickAddPanel}
           />
         ),
       },
@@ -1059,7 +713,7 @@ export function WorkflowEditor({
         name: '当前画布工作流',
         description: '前端画布提交到后端 LangGraph 执行的工作流。',
         version: 'v0.1.0',
-        nodes,
+        nodes: normalizeWorkflowNodesForRun(nodes),
         edges,
       }
       setGlobalDebugJsonError('')
@@ -1351,7 +1005,7 @@ export function WorkflowEditor({
           }
 
           onSelectNode('')
-          setQuickAddNodeId('')
+          closeQuickAddPanel()
         }}
       >
         <FreeLayoutEditorProvider ref={handleEditorRef} {...editorProps}>
@@ -1390,7 +1044,7 @@ export function WorkflowEditor({
               void openNodePanel()
             }}
             onToggleTrialRun={() => {
-              setQuickAddNodeId('')
+              closeQuickAddPanel()
               setSingleNodeTrialOpen(false)
               setGlobalDebugFields((prev) => {
                 const nextFields = createGlobalDebugFields(nodes, prev)

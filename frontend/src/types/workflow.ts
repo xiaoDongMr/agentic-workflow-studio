@@ -50,9 +50,21 @@ export interface WorkflowInputMapping {
   valueType?: WorkflowValueType | string
 }
 
-export interface WorkflowSelectorOperand {
-  sourceType: 'reference' | 'literal'
-  source: string
+export type WorkflowRuleOperandSourceType = 'literal' | 'context' | 'node'
+
+export interface WorkflowRuleOperand {
+  sourceType: WorkflowRuleOperandSourceType
+  valueType?: WorkflowValueType | string
+  literalValue?: unknown
+  contextPath?: string
+  nodeId?: string
+  fieldPath?: string
+  displayLabel?: string
+  source?: string
+}
+
+export interface WorkflowSelectorOperand extends WorkflowRuleOperand {
+  sourceType: WorkflowRuleOperandSourceType
   valueType?: WorkflowValueType | string
 }
 

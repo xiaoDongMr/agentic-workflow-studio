@@ -8,6 +8,8 @@ import {
   paletteToNodeType,
 } from '@/features/workflow/editor/workflow-editor.config'
 import { uploadMediaFile } from '@/api/storage'
+import { SelectorTrialInputSection } from '@/features/workflow/editor/selector-debug/selector-trial-input-section'
+import { SelectorTrialResult } from '@/features/workflow/editor/selector-debug/selector-trial-result'
 import { cn } from '@/lib/utils'
 import type { GlobalDebugFieldValue, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowNode } from '@/types/workflow'
@@ -317,6 +319,7 @@ export function SingleNodeTrialPanel({
   const parsedInput = useMemo(() => parseExecutionJson(execution?.input), [execution?.input])
   const parsedOutput = useMemo(() => parseExecutionJson(execution?.output), [execution?.output])
   const durationLabel = execution ? `${(execution.durationMs / 1000).toFixed(execution.durationMs >= 1000 ? 0 : 3)}s` : ''
+  const isSelectorNode = node?.type === 'selector'
 
   if (!open || !node) {
     return null
@@ -394,6 +397,8 @@ export function SingleNodeTrialPanel({
                 error={jsonError}
                 onChange={onCombinedJsonChange}
               />
+            ) : isSelectorNode ? (
+              <SelectorTrialInputSection fields={fields} error={jsonError} onChange={onFieldChange} />
             ) : fields.length > 0 ? (
               fields.map((field) => (
                 <FieldInputEditor key={field.name} field={field} error={jsonError} onChange={onFieldChange} />
@@ -411,8 +416,14 @@ export function SingleNodeTrialPanel({
                 <p className="text-base font-semibold text-white">运行结果</p>
                 {execution.tokenUsage && <TrialTokenUsagePill usage={execution.tokenUsage} />}
               </div>
-              <ExecutionBlock title="输入" value={formatJsonValue(parsedInput)} />
-              <ExecutionBlock title="输出" value={formatJsonValue(parsedOutput)} />
+              {isSelectorNode ? (
+                <SelectorTrialResult node={node} input={parsedInput} output={parsedOutput} />
+              ) : (
+                <>
+                  <ExecutionBlock title="输入" value={formatJsonValue(parsedInput)} />
+                  <ExecutionBlock title="输出" value={formatJsonValue(parsedOutput)} />
+                </>
+              )}
             </div>
           )}
         </div>
@@ -438,7 +449,7 @@ export function SingleNodeTrialPanel({
   )
 }
 
-function FieldInputEditor({
+export function FieldInputEditor({
   field,
   error,
   onChange,
@@ -448,12 +459,22 @@ function FieldInputEditor({
   onChange: (fieldName: string, value: string) => void
 }) {
   return (
-    <div>
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-sm font-medium text-slate-200">{field.name}</span>
-        <span className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
-          {field.valueType ?? getDebugFieldTypeLabel(field.type)}
-        </span>
+    <div className="rounded-[14px] border border-white/8 bg-slate-950/35 p-2.5">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-slate-100">{field.label || field.name}</span>
+            <span className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
+              {field.valueType ?? getDebugFieldTypeLabel(field.type)}
+            </span>
+          </div>
+          {field.label && field.name !== field.label && <p className="mt-0.5 text-[10px] text-slate-500">{field.name}</p>}
+        </div>
+        {field.usageHints?.[0] && (
+          <span className="rounded-full border border-cyan-400/14 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-100">
+            {field.usageHints[0]}
+          </span>
+        )}
       </div>
       {field.type === 'json' ? (
         <JsonInputEditor value={field.value} error={error} onChange={(value) => onChange(field.name, value)} />
@@ -464,7 +485,8 @@ function FieldInputEditor({
           type="text"
           value={field.value}
           onChange={(event) => onChange(field.name, event.target.value)}
-          className="w-full rounded-xl border border-white/10 bg-slate-900/90 px-3 py-2.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
+          placeholder="输入调试值"
+          className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400/40"
         />
       )}
     </div>

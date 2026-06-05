@@ -75,8 +75,8 @@ export const mockWorkflow: WorkflowDocument = {
               {
                 id: 'selector_condition_if',
                 operator: 'equals',
-                left: { sourceType: 'reference', source: '', valueType: 'String' },
-                right: { sourceType: 'literal', source: '', valueType: 'String' },
+                left: { sourceType: 'node', source: '', nodeId: '', fieldPath: '', valueType: 'String' },
+                right: { sourceType: 'literal', source: '', literalValue: '', valueType: 'String' },
               },
             ],
           },

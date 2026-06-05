@@ -91,4 +91,10 @@ export interface GlobalDebugFieldValue {
   type: 'json' | 'string' | 'image' | 'video' | 'image-array' | 'video-array'
   valueType?: string
   value: string
+  label?: string
+  description?: string
+  group?: 'node' | 'context' | 'general'
+  groupLabel?: string
+  sourceLabel?: string
+  usageHints?: string[]
 }

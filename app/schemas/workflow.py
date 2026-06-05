@@ -25,10 +25,19 @@ class WorkflowInputMapping(BaseModel):
     valueType: str = ""
 
 
-class WorkflowSelectorOperand(BaseModel):
-    sourceType: Literal["reference", "literal"] = "literal"
+class WorkflowRuleOperand(BaseModel):
+    sourceType: Literal["literal", "context", "node"] = "literal"
     source: str = ""
     valueType: str = "String"
+    literalValue: Any = None
+    contextPath: str = ""
+    nodeId: str = ""
+    fieldPath: str = ""
+    displayLabel: str = ""
+
+
+class WorkflowSelectorOperand(WorkflowRuleOperand):
+    pass
 
 
 class WorkflowSelectorCondition(BaseModel):
@@ -104,6 +113,8 @@ class WorkflowEdge(BaseModel):
     id: str | None = None
     source: str
     target: str
+    sourcePortID: str | int | None = None
+    targetPortID: str | int | None = None
 
 
 class WorkflowDocument(BaseModel):

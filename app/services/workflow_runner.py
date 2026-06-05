@@ -7,7 +7,7 @@ from langgraph.graph import END, StateGraph
 
 from deerflow.config.app_config import AppConfig
 
-from app.schemas.workflow import WorkflowDocument, WorkflowNode
+from app.schemas.workflow import WorkflowDocument, WorkflowEdge, WorkflowNode
 from app.services.workflow_execution import WorkflowNodeExecutorRegistry, WorkflowRunEvent, WorkflowState
 
 
@@ -107,10 +107,10 @@ class WorkflowRunner:
         graph = StateGraph(WorkflowState)
         nodes = _topological_nodes(workflow)
         nodes_by_id = {node.id: node for node in workflow.nodes}
-        outgoing: dict[str, list[str]] = {node.id: [] for node in workflow.nodes}
+        outgoing: dict[str, list[WorkflowEdge]] = {node.id: [] for node in workflow.nodes}
         for edge in workflow.edges:
             if edge.source in nodes_by_id and edge.target in nodes_by_id:
-                outgoing[edge.source].append(edge.target)
+                outgoing[edge.source].append(edge)
 
         for node in nodes:
             graph.add_node(node.id, self.node_executors.make_node_callable(node))
@@ -121,14 +121,14 @@ class WorkflowRunner:
         graph.set_entry_point(nodes[0].id)
         if workflow.edges:
             for node in nodes:
-                targets = outgoing.get(node.id, [])
-                if not targets:
+                target_edges = outgoing.get(node.id, [])
+                if not target_edges:
                     graph.add_edge(node.id, END)
-                elif node.type == "selector" and len(targets) > 1:
-                    graph.add_conditional_edges(node.id, self._make_selector_router(node, targets, nodes_by_id))
+                elif node.type == "selector" and len(target_edges) > 1:
+                    graph.add_conditional_edges(node.id, self._make_selector_router(node, target_edges, nodes_by_id))
                 else:
-                    for target in targets:
-                        graph.add_edge(node.id, target)
+                    for edge in target_edges:
+                        graph.add_edge(node.id, edge.target)
         else:
             for source, target in zip(nodes, nodes[1:]):
                 graph.add_edge(source.id, target.id)
@@ -154,7 +154,7 @@ class WorkflowRunner:
             "steps": final_state.get("steps", []),
         }
 
-    def _make_selector_router(self, node: WorkflowNode, targets: list[str], nodes_by_id: dict[str, WorkflowNode]):
+    def _make_selector_router(self, node: WorkflowNode, edges: list[WorkflowEdge], nodes_by_id: dict[str, WorkflowNode]):
         def route(state: WorkflowState) -> str:
             output_key = node.config.outputKey or "branch"
             node_output = state.get("variables", {}).get(node.id)
@@ -162,12 +162,34 @@ class WorkflowRunner:
             if isinstance(node_output, dict):
                 branch = str(node_output.get(output_key) or node_output.get("branch") or "")
             normalized_branch = branch.strip().lower()
-            for target in targets:
-                target_node = nodes_by_id[target]
-                if normalized_branch in {target.lower(), target_node.title.lower(), target_node.type.lower()}:
-                    return target
+            branch_port = self._selector_branch_port_id(node, normalized_branch)
+            for edge in edges:
+                if branch_port and str(edge.sourcePortID or "").lower() == branch_port:
+                    return edge.target
+            for edge in edges:
+                target_node = nodes_by_id[edge.target]
+                if normalized_branch in {edge.target.lower(), target_node.title.lower(), target_node.type.lower()}:
+                    return edge.target
                 if normalized_branch and normalized_branch in target_node.title.lower():
-                    return target
-            return targets[0]
+                    return edge.target
+            return edges[0].target
 
         return route
+
+    def _selector_branch_port_id(self, node: WorkflowNode, normalized_branch: str) -> str:
+        if not normalized_branch:
+            return ""
+        if normalized_branch in {"else", "否则", (node.config.selectorElseBranch or "").strip().lower()}:
+            return "selector-else"
+        for index, branch in enumerate(node.config.selectorBranches):
+            port_id = f"selector-branch-{index}"
+            labels = {
+                port_id,
+                f"条件 {index + 1}".lower(),
+                f"条件{index + 1}".lower(),
+                (branch.id or "").strip().lower(),
+                (branch.label or "").strip().lower(),
+            }
+            if normalized_branch in labels:
+                return port_id
+        return ""

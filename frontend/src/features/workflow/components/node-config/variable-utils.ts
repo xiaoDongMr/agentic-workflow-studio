@@ -60,6 +60,9 @@ export interface WorkflowVariableSource {
   nodeId: string
   nodeTitle: string
   outputName: string
+  sourceType: 'node'
+  fieldPath: string
+  displayLabel: string
 }
 
 export function normalizeValueType(type: string): WorkflowValueType {
@@ -74,6 +77,10 @@ export function formatValueType(type: string) {
 
 export function getValueTypeName(type: string) {
   return normalizeValueType(type).replace('Array<', '').replace('>', '')
+}
+
+function formatNodeReferenceLabel(node: WorkflowNode, outputName: string) {
+  return `${node.title}.${outputName}`
 }
 
 export function getAvailableInputSources(
@@ -93,14 +100,20 @@ export function getAvailableInputSources(
 
     return node.outputs
       .filter((output) => output.name)
-      .map((output) => ({
-        value: `${node.id}.${output.name}`,
-        label: `${node.title}.${output.name} (${formatValueType(output.type)})`,
-        type: output.type,
-        nodeId: node.id,
-        nodeTitle: node.title,
-        outputName: output.name,
-      }))
+      .map((output) => {
+        const displayLabel = formatNodeReferenceLabel(node, output.name)
+        return {
+          value: `${node.id}.${output.name}`,
+          label: `${displayLabel} (${formatValueType(output.type)})`,
+          type: output.type,
+          nodeId: node.id,
+          nodeTitle: node.title,
+          outputName: output.name,
+          sourceType: 'node' as const,
+          fieldPath: output.name,
+          displayLabel,
+        }
+      })
   })
 }
 

@@ -9,6 +9,7 @@ import {
   NODE_GAP_Y,
   defaultNodeContent,
 } from '@/features/workflow/editor/workflow-editor.config'
+import { normalizeSelectorBranches } from '@/features/workflow/components/node-config/selector-utils'
 import type {
   FlowgramNodeData,
   GlobalDebugFieldValue,
@@ -65,18 +66,23 @@ export function normalizeNodeData(
 }
 
 function normalizeNodeConfig(config: FlowgramNodeData['config'] | undefined): FlowgramNodeData['config'] | undefined {
-  if (!config || !('thinkingLevel' in config)) {
+  if (!config) {
     return config
   }
-  const legacy = (config as { thinkingLevel?: string }).thinkingLevel
   const next = { ...config } as FlowgramNodeData['config']
-  if (next.thinkingEnabled === undefined) {
-    next.thinkingEnabled = legacy !== 'minimal'
+  if (next.selectorBranches) {
+    next.selectorBranches = normalizeSelectorBranches(next.selectorBranches)
   }
-  if (next.reasoningEffort === undefined && (legacy === 'low' || legacy === 'medium' || legacy === 'high')) {
-    next.reasoningEffort = legacy
+  if ('thinkingLevel' in config) {
+    const legacy = (config as { thinkingLevel?: string }).thinkingLevel
+    if (next.thinkingEnabled === undefined) {
+      next.thinkingEnabled = legacy !== 'minimal'
+    }
+    if (next.reasoningEffort === undefined && (legacy === 'low' || legacy === 'medium' || legacy === 'high')) {
+      next.reasoningEffort = legacy
+    }
+    delete (next as { thinkingLevel?: string }).thinkingLevel
   }
-  delete (next as { thinkingLevel?: string }).thinkingLevel
   return next
 }
 
@@ -158,6 +164,13 @@ export function fromFlowgramJSON(json: WorkflowJSON): [WorkflowNode[], WorkflowE
       targetPortID: edge.targetPortID,
     })),
   ]
+}
+
+export function normalizeWorkflowNodeForRun(node: WorkflowNode): WorkflowNode {
+  return {
+    ...node,
+    config: normalizeNodeConfig(node.config) ?? node.config,
+  }
 }
 
 export function buildWorkflowNodePorts(data: Pick<FlowgramNodeData, 'kind' | 'config'>): WorkflowPorts {

@@ -11,6 +11,7 @@ import {
   createSelectorBranch,
   createSelectorCondition,
   createSelectorOperand,
+  createSelectorOperandFromVariable,
   getSelectorBranches,
   SELECTOR_OPERATOR_LABELS,
   SELECTOR_ELSE_BRANCH,
@@ -255,35 +256,36 @@ function OperandEditor({
   placeholder: string
   onChange: (operand: WorkflowSelectorOperand) => void
 }) {
-  const sourceType = operand.sourceType === 'literal' ? 'literal' : 'reference'
+  const sourceType = operand.sourceType === 'literal' ? 'literal' : 'node'
+  const operandSource = operand.source ?? [operand.nodeId, operand.fieldPath].filter(Boolean).join('.')
 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <OperandModeSelect
         value={sourceType}
         onChange={(nextType) => {
-          if (nextType === 'reference') {
+          if (nextType === 'node') {
             const nextSource = variableSources[0]?.value ?? ''
-            const nextValueType = variableSources[0]?.type ?? 'String'
-            onChange(createSelectorOperand('reference', nextSource, nextValueType))
+            const nextVariable = variableSources[0]
+            onChange(nextVariable ? createSelectorOperandFromVariable(nextVariable) : createSelectorOperand('node', nextSource))
             return
           }
           onChange(createSelectorOperand('literal', '', 'String'))
         }}
       />
 
-      {sourceType === 'reference' ? (
+      {sourceType === 'node' ? (
         <VariableSourceSelect
-          value={operand.source}
+          value={operandSource}
           options={variableSources}
           onChange={(value) => {
             const nextSource = variableSources.find((source) => source.value === value)
-            onChange(createSelectorOperand('reference', value, nextSource?.type ?? 'String'))
+            onChange(nextSource ? createSelectorOperandFromVariable(nextSource) : createSelectorOperand('node', value))
           }}
         />
       ) : (
         <input
-          value={operand.source}
+          value={String(operand.literalValue ?? operand.source ?? '')}
           placeholder={placeholder}
           onChange={(event) => onChange(createSelectorOperand('literal', event.target.value))}
           className="h-8 min-w-0 flex-1 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] text-slate-200 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50"
@@ -297,17 +299,17 @@ function OperandModeSelect({
   value,
   onChange,
 }: {
-  value: WorkflowSelectorOperand['sourceType']
-  onChange: (value: WorkflowSelectorOperand['sourceType']) => void
+  value: 'node' | 'literal'
+  onChange: (value: 'node' | 'literal') => void
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   useClickOutside(rootRef, open, () => setOpen(false))
-  const selected = value === 'reference'
-    ? { value: 'reference' as const, label: '引用', icon: <Link2 className="h-3 w-3" /> }
+  const selected = value === 'node'
+    ? { value: 'node' as const, label: '引用', icon: <Link2 className="h-3 w-3" /> }
     : { value: 'literal' as const, label: '自定义', icon: <PenLine className="h-3 w-3" /> }
   const options = [
-    { value: 'reference' as const, label: '引用', icon: <Link2 className="h-2.5 w-2.5" /> },
+    { value: 'node' as const, label: '引用', icon: <Link2 className="h-2.5 w-2.5" /> },
     { value: 'literal' as const, label: '自定义', icon: <PenLine className="h-2.5 w-2.5" /> },
   ]
 

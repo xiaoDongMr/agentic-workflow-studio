@@ -159,6 +159,8 @@ def _extract_message_content(payload: dict[str, Any]) -> str:
 
 def _get_by_path(value: Any, path: str) -> Any:
     current = value
+    if isinstance(current, dict) and path in current:
+        return current.get(path)
     for part in path.split("."):
         if isinstance(current, dict):
             current = current.get(part)

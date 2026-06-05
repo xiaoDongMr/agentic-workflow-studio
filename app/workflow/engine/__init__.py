@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from app.workflow.engine.runner import WorkflowRunner
 
 __all__ = ["WorkflowRunner"]

@@ -8,7 +8,7 @@ import {
   type WorkflowJSON,
   type WorkflowNodeProps,
 } from '@flowgram.ai/free-layout-editor'
-import type { WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
+import type { WorkflowLineEntity, WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
 import { createFreeNodePanelPlugin } from '@flowgram.ai/free-node-panel-plugin'
 import { createFreeSnapPlugin } from '@flowgram.ai/free-snap-plugin'
 import { createMinimapPlugin } from '@flowgram.ai/minimap-plugin'
@@ -49,7 +49,10 @@ import {
   normalizeNodeData,
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
-import { FlowgramNodeCard } from '@/features/workflow/editor/workflow-node-card'
+import {
+  clearNodeExecutionPanelExpansion,
+  FlowgramNodeCard,
+} from '@/features/workflow/editor/workflow-node-card'
 import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -139,6 +142,22 @@ function readTokenCount(value: unknown) {
 
 function formatTokenUsage(usage: WorkflowTokenUsage) {
   return `Token ${usage.totalTokens} · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens}`
+}
+
+function workflowLineKey(line: WorkflowLineEntity) {
+  const fromPort = line.info.fromPort ?? ''
+  const toPort = line.info.toPort ?? ''
+  return `${line.info.from ?? ''}:${String(fromPort)}->${line.info.to ?? ''}:${String(toPort)}`
+}
+
+function updateTrialRunLineStyle(line: WorkflowLineEntity, active: boolean) {
+  line.updateUIState({
+    className: active ? 'aw-trial-run-edge aw-trial-run-edge--active' : undefined,
+    flowing: active,
+    lockedColor: active ? '#38bdf8' : '',
+    strokeWidth: active ? 3 : undefined,
+    strokeWidthSelected: active ? 4 : undefined,
+  })
 }
 
 function timelineItemFromRuntimeEvent(event: WorkflowRuntimeEvent): TrialRunTimelineItem {
@@ -295,6 +314,8 @@ export function WorkflowEditor({
   const runTimerIdsRef = useRef<number[]>([])
   const runAbortControllerRef = useRef<AbortController | null>(null)
   const singleNodeTrialCacheRef = useRef<Record<string, SingleNodeTrialCache>>({})
+  const completedGlobalTrialNodeIdsRef = useRef<Set<string>>(new Set())
+  const activeTrialRunEdgeKeysRef = useRef<Set<string>>(new Set())
 
   const singleNodeTrialNode = useMemo(() => {
     const targetNode = nodes.find((node) => node.id === singleNodeTrialNodeId)
@@ -344,6 +365,60 @@ export function WorkflowEditor({
     },
     [],
   )
+
+  const applyTrialRunEdgeStyles = useCallback(() => {
+    const ctx = ctxRef.current
+    if (!ctx) {
+      return
+    }
+
+    ctx.document.linesManager.getAllLines().forEach((line) => {
+      updateTrialRunLineStyle(line, activeTrialRunEdgeKeysRef.current.has(workflowLineKey(line)))
+    })
+  }, [])
+
+  const clearTrialRunEdgeStyles = useCallback(() => {
+    const ctx = ctxRef.current
+    activeTrialRunEdgeKeysRef.current.clear()
+    completedGlobalTrialNodeIdsRef.current.clear()
+
+    if (!ctx) {
+      return
+    }
+
+    ctx.document.linesManager.getAllLines().forEach((line) => {
+      updateTrialRunLineStyle(line, false)
+    })
+  }, [])
+
+  const markIncomingTrialRunEdges = useCallback((nodeId: string) => {
+    const ctx = ctxRef.current
+    if (!ctx) {
+      return
+    }
+
+    ctx.document.linesManager.getAllLines().forEach((line) => {
+      const sourceNodeId = line.info.from ? String(line.info.from) : ''
+      const targetNodeId = line.info.to ? String(line.info.to) : ''
+      if (targetNodeId === nodeId && completedGlobalTrialNodeIdsRef.current.has(sourceNodeId)) {
+        activeTrialRunEdgeKeysRef.current.add(workflowLineKey(line))
+      }
+    })
+    applyTrialRunEdgeStyles()
+  }, [applyTrialRunEdgeStyles])
+
+  const applyGlobalTrialRunEdgeEvent = useCallback((event: WorkflowRuntimeEvent) => {
+    if (!event.nodeId) {
+      return
+    }
+
+    if (event.type === 'node_started') {
+      markIncomingTrialRunEdges(event.nodeId)
+    }
+    if (event.type === 'node_completed') {
+      completedGlobalTrialNodeIdsRef.current.add(event.nodeId)
+    }
+  }, [markIncomingTrialRunEdges])
 
   const applyRuntimeEventToNode = useCallback(
     (event: WorkflowRuntimeEvent, nodeIdOverride?: string, nodeOverride?: WorkflowNode) => {
@@ -409,6 +484,7 @@ export function WorkflowEditor({
 
     clearTrialRunTimers()
     abortTrialRunStream()
+    clearTrialRunEdgeStyles()
     onSelectNode('')
     setTrialRunOpen(false)
     setSingleNodeTrialNodeId(nodeId)
@@ -424,10 +500,12 @@ export function WorkflowEditor({
       delete next[nodeId]
       return next
     })
+    clearNodeExecutionPanelExpansion(nodeId)
     syncNodeTrialRunExecution(nodeId, undefined)
     setSingleNodeTrialOpen(true)
   }, [
     abortTrialRunStream,
+    clearTrialRunEdgeStyles,
     clearTrialRunTimers,
     globalDebugCombinedJson,
     globalDebugFields,
@@ -442,6 +520,8 @@ export function WorkflowEditor({
     abortTrialRunStream()
     setTrialRunOpen(false)
     setTrialRunExecutions({})
+    clearNodeExecutionPanelExpansion()
+    clearTrialRunEdgeStyles()
     clearAllNodeTrialRunExecutions()
 
     const ctx = ctxRef.current
@@ -529,6 +609,7 @@ export function WorkflowEditor({
     abortTrialRunStream,
     applyRuntimeEventToNode,
     clearAllNodeTrialRunExecutions,
+    clearTrialRunEdgeStyles,
     clearTrialRunTimers,
     globalDebugCombinedJson,
     globalDebugFields,
@@ -540,10 +621,11 @@ export function WorkflowEditor({
   const closeDebugPanels = useCallback(() => {
     clearTrialRunTimers()
     abortTrialRunStream()
+    clearTrialRunEdgeStyles()
     setTrialRunning(false)
     setTrialRunOpen(false)
     setSingleNodeTrialOpen(false)
-  }, [abortTrialRunStream, clearTrialRunTimers])
+  }, [abortTrialRunStream, clearTrialRunEdgeStyles, clearTrialRunTimers])
 
   const selectNodeForConfig = useCallback(
     (nodeId: string) => {
@@ -577,6 +659,8 @@ export function WorkflowEditor({
       setTrialRunOpen(false)
       setSingleNodeTrialOpen(false)
       setTrialRunExecutions({})
+      clearNodeExecutionPanelExpansion()
+      clearTrialRunEdgeStyles()
     },
     onNodeDeleted: (nodeId) => {
       setTrialRunExecutions((prev) => {
@@ -584,6 +668,8 @@ export function WorkflowEditor({
         delete next[nodeId]
         return next
       })
+      clearNodeExecutionPanelExpansion(nodeId)
+      clearTrialRunEdgeStyles()
     },
   })
 
@@ -601,6 +687,7 @@ export function WorkflowEditor({
             selectedNodeId={selectedNodeId}
             quickAddOpenNodeId={quickAddNodeId}
             trialRunExecution={trialRunExecutions[String(props.node.id)]}
+            autoExpandExecutionDetails={singleNodeTrialOpen && singleNodeTrialNodeId === String(props.node.id)}
             nodeActionRunning={trialRunning}
             onRunNode={openSingleNodeTrial}
             onCopyNode={copyNode}
@@ -653,6 +740,15 @@ export function WorkflowEditor({
           renderer: FlowgramNodePanel,
         }),
       ],
+      lineColor: {
+        default: 'rgba(100, 116, 139, 0.42)',
+        hovered: '#60a5fa',
+        selected: '#93c5fd',
+        flowing: '#38bdf8',
+        error: '#fb7185',
+        drawing: '#60a5fa',
+        hidden: 'transparent',
+      },
       onContentChange: (ctx) => {
         setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
       },
@@ -671,6 +767,8 @@ export function WorkflowEditor({
       selectNodeForConfig,
       selectedNodeId,
       setWorkflowGraph,
+      singleNodeTrialNodeId,
+      singleNodeTrialOpen,
       trialRunExecutions,
       trialRunning,
     ],
@@ -691,15 +789,18 @@ export function WorkflowEditor({
     return () => {
       clearTrialRunTimers()
       abortTrialRunStream()
+      clearTrialRunEdgeStyles()
     }
-  }, [abortTrialRunStream, clearTrialRunTimers])
+  }, [abortTrialRunStream, clearTrialRunEdgeStyles, clearTrialRunTimers])
 
   const startTrialRun = useCallback(async () => {
     clearTrialRunTimers()
     abortTrialRunStream()
+    clearTrialRunEdgeStyles()
     setTrialRunOpen(true)
     setSingleNodeTrialOpen(false)
     setTrialRunExecutions({})
+    clearNodeExecutionPanelExpansion()
     clearAllNodeTrialRunExecutions()
 
     try {
@@ -722,6 +823,7 @@ export function WorkflowEditor({
       await streamWorkflow(workflow, payload, {
         signal: abortController.signal,
         onWorkflowEvent: (event) => {
+          applyGlobalTrialRunEdgeEvent(event)
           applyRuntimeEventToNode(event)
         },
         onStep: (execution) => {
@@ -751,13 +853,16 @@ export function WorkflowEditor({
       }
       setTrialRunning(false)
       setTrialRunExecutions({})
+      clearTrialRunEdgeStyles()
       clearAllNodeTrialRunExecutions()
       setGlobalDebugJsonError('运行失败，请检查 JSON、节点配置或后端服务')
     }
   }, [
     clearAllNodeTrialRunExecutions,
     clearTrialRunTimers,
+    clearTrialRunEdgeStyles,
     abortTrialRunStream,
+    applyGlobalTrialRunEdgeEvent,
     applyRuntimeEventToNode,
     edges,
     globalDebugCombinedJson,
@@ -773,8 +878,10 @@ export function WorkflowEditor({
     setTrialRunning(false)
     setTrialRunOpen(false)
     setTrialRunExecutions({})
+    clearNodeExecutionPanelExpansion()
+    clearTrialRunEdgeStyles()
     clearAllNodeTrialRunExecutions()
-  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunTimers])
+  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunEdgeStyles, clearTrialRunTimers])
 
   const updateGlobalDebugField = useCallback((fieldName: string, value: string) => {
     setGlobalDebugFields((prev) =>

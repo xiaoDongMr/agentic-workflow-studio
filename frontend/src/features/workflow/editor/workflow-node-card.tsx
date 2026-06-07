@@ -19,6 +19,16 @@ import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
 import type { WorkflowNode } from '@/types/workflow'
 
+const executionPanelExpandedByNodeId = new Map<string, boolean>()
+
+export function clearNodeExecutionPanelExpansion(nodeId?: string) {
+  if (nodeId) {
+    executionPanelExpandedByNodeId.delete(nodeId)
+    return
+  }
+  executionPanelExpandedByNodeId.clear()
+}
+
 export function FlowgramNodeCard({
   node,
   onSelectNode,
@@ -26,6 +36,7 @@ export function FlowgramNodeCard({
   quickAddOpenNodeId,
   onToggleQuickAdd,
   trialRunExecution,
+  autoExpandExecutionDetails = false,
   onRunNode,
   onCopyNode,
   onDeleteNode,
@@ -37,6 +48,7 @@ export function FlowgramNodeCard({
   quickAddOpenNodeId: string
   onToggleQuickAdd: (nodeId: string, sourcePortID?: string | number) => void
   trialRunExecution?: TrialRunNodeExecution
+  autoExpandExecutionDetails?: boolean
   onRunNode: (nodeId: string) => void
   onCopyNode: (nodeId: string) => void
   onDeleteNode: (nodeId: string) => void
@@ -202,17 +214,26 @@ export function FlowgramNodeCard({
           onAddFromPort={(sourcePortID) => onToggleQuickAdd(nodeId, sourcePortID)}
         />
       )}
-      {effectiveExecution && <NodeExecutionPanel execution={effectiveExecution} />}
+      {effectiveExecution && (
+        <NodeExecutionPanel
+          execution={effectiveExecution}
+          autoExpand={autoExpandExecutionDetails}
+        />
+      )}
     </WorkflowNodeRenderer>
   )
 }
 
 function NodeExecutionPanel({
   execution,
+  autoExpand,
 }: {
   execution: TrialRunNodeExecution
+  autoExpand: boolean
 }) {
-  const [expanded, setExpanded] = useState(() => execution.status === 'running')
+  const [expanded, setExpanded] = useState(
+    () => (autoExpand && execution.status === 'running') || executionPanelExpandedByNodeId.get(execution.nodeId) === true,
+  )
   const statusLabel =
     execution.status === 'running'
       ? '运行中'
@@ -238,11 +259,20 @@ function NodeExecutionPanel({
     !isRunning ? `输出：\n${execution.output}` : '',
   ].filter(Boolean).join('\n\n')
 
-  useEffect(() => {
-    if (execution.status === 'running') {
-      setExpanded(true)
+  const updateExpanded = useCallback((nextExpanded: boolean) => {
+    if (nextExpanded) {
+      executionPanelExpandedByNodeId.set(execution.nodeId, true)
+    } else {
+      executionPanelExpandedByNodeId.delete(execution.nodeId)
     }
-  }, [execution.status])
+    setExpanded(nextExpanded)
+  }, [execution.nodeId])
+
+  useEffect(() => {
+    if (autoExpand && execution.status === 'running' && !expanded) {
+      updateExpanded(true)
+    }
+  }, [autoExpand, execution.status, expanded, updateExpanded])
 
   return (
     <div
@@ -252,7 +282,9 @@ function NodeExecutionPanel({
     >
       <button
         type="button"
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={() => {
+          updateExpanded(!expanded)
+        }}
         className="aw-flow-node__execution-summary"
       >
         <div className="aw-flow-node__execution-summary-main">

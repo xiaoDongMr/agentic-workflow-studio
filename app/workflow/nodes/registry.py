@@ -54,7 +54,7 @@ class WorkflowNodeExecutorRegistry:
                 node_output = {"skipped": True} if not node.config.enabled else await executor.run(node, node_input, state)
                 node_output = coerce_by_io_definitions(node_output, node.outputs)
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
-                next_state = store_node_output(node, state, node_output)
+                output_update = store_node_output(node, node_output)
                 emit_workflow_event(build_workflow_event(
                     "node_completed",
                     node_id=node.id,
@@ -64,12 +64,13 @@ class WorkflowNodeExecutorRegistry:
                     duration_ms=duration_ms,
                     data={"outputKeys": list(node_output.keys()), "nodeType": node.type},
                 ))
-                return append_step(node, next_state, node_input, node_output, duration_ms)
+                step_update = append_step(node, node_input, node_output, duration_ms)
+                return {**output_update, **step_update}
             except Exception as exc:
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
                 logger.exception("节点执行失败: id=%s type=%s", node.id, node.type)
                 error_output = {"error": str(exc)}
-                next_state = store_node_output(node, state, error_output)
+                output_update = store_node_output(node, error_output)
                 emit_workflow_event(build_workflow_event(
                     "node_failed",
                     node_id=node.id,
@@ -81,6 +82,7 @@ class WorkflowNodeExecutorRegistry:
                     error=str(exc),
                     data={"nodeType": node.type},
                 ))
-                return append_step(node, next_state, node_input, error_output, duration_ms, error=str(exc))
+                step_update = append_step(node, node_input, error_output, duration_ms, error=str(exc))
+                return {**output_update, **step_update}
 
         return execute

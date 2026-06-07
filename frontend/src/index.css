@@ -132,6 +132,22 @@ textarea {
   background-color: rgba(79, 124, 255, 0.08);
 }
 
+.aw-flow-editor-shell .aw-trial-run-edge {
+  filter:
+    drop-shadow(0 0 5px rgba(34, 211, 238, 0.75))
+    drop-shadow(0 0 14px rgba(59, 130, 246, 0.38));
+}
+
+.aw-flow-editor-shell .aw-trial-run-edge svg path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.aw-flow-editor-shell .aw-trial-run-edge .flowing-line {
+  stroke-dasharray: 10 7;
+  animation-duration: 0.7s;
+}
+
 .aw-slider {
   appearance: none;
   -webkit-appearance: none;

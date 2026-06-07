@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, TypedDict
+from operator import add
+from typing import Annotated, Any, Literal, Protocol, TypedDict
 
 from app.schemas.workflow import WorkflowNode
 
 
+def merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    return {**left, **right}
+
+
 class WorkflowState(TypedDict, total=False):
     input: dict[str, Any]
-    variables: dict[str, Any]
-    steps: list[dict[str, Any]]
-    output: dict[str, Any]
+    variables: Annotated[dict[str, Any], merge_dicts]
+    steps: Annotated[list[dict[str, Any]], add]
+    output: Annotated[dict[str, Any], merge_dicts]
 
 
 class WorkflowRunEvent(TypedDict):

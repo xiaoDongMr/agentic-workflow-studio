@@ -1,6 +1,6 @@
 import type { WorkflowJSON } from '@flowgram.ai/free-layout-editor'
 
-import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
+import type { WorkflowEdge, WorkflowNode, WorkflowNodeIO, WorkflowValueType } from '@/types/workflow'
 
 export const LOOP_START_NODE_TYPE = 'loop-start'
 export const LOOP_END_NODE_TYPE = 'loop-end'
@@ -17,6 +17,7 @@ const LOOP_CANVAS_CONTENT_PADDING_X = 112
 const LOOP_CANVAS_CONTENT_PADDING_Y = 96
 const LOOP_CANVAS_ROW_START_X = 180
 const LOOP_CANVAS_ROW_GAP_X = 240
+const LOOP_INDEX_OUTPUT_NAME = 'index'
 
 export type LoopBodyNodeLayout = {
   type: string
@@ -44,6 +45,49 @@ export function isLoopInternalNodeType(type: string) {
 
 export function filterLoopEndpointNodes(bodyNodes: WorkflowNode[]): WorkflowNode[] {
   return bodyNodes.filter((node) => !isLoopInternalNodeType(node.type))
+}
+
+export function createLoopEntryOutputs(loopNode: WorkflowNode): WorkflowNodeIO[] {
+  const loopMode = loopNode.config.loopMode ?? 'array'
+  const arrayInput = loopNode.inputs[0]
+  const arrayElementName = arrayInput?.name?.trim() || 'item'
+  const outputs: WorkflowNodeIO[] = loopMode === 'array'
+    ? [{
+        name: arrayElementName,
+        type: getArrayElementType(arrayInput?.type ?? 'Array'),
+        description: `当前元素：数组每一项的值，子图中引用 ${arrayElementName}`,
+      }]
+    : []
+
+  outputs.push({
+    name: LOOP_INDEX_OUTPUT_NAME,
+    type: 'Integer',
+    description: loopMode === 'array' ? 'index 下标：当前元素在数组中的位置，从 0 开始' : 'index 下标：当前循环轮次，从 0 开始',
+  })
+
+  const usedNames = new Set(outputs.map((output) => output.name))
+  for (const variable of loopNode.config.loopIntermediateVariables ?? []) {
+    const name = variable.name.trim()
+    if (!name || usedNames.has(name)) {
+      continue
+    }
+    outputs.push({
+      name,
+      type: variable.type || variable.valueType || 'String',
+      description: `中间变量：跨轮共享状态，子图中引用 shared.${name}`,
+    })
+    usedNames.add(name)
+  }
+
+  return outputs
+}
+
+function getArrayElementType(type: string): WorkflowValueType | string {
+  const matched = type.match(/^Array<(.+)>$/)
+  if (matched?.[1]) {
+    return matched[1]
+  }
+  return type === 'Array' ? 'Object' : type
 }
 
 export function getLoopBodyCanvasSize(
@@ -111,7 +155,9 @@ function getLoopNodeBottom(node: LoopBodyNodeLayout) {
   return node.position.y + (node.size?.height ?? LOOP_NODE_HEIGHT) / 2
 }
 
-export function createLoopCanvasAnchorNode(loopNodeId: string): WorkflowJSON['nodes'][number] {
+export function createLoopCanvasAnchorNode(loopNode: WorkflowNode): WorkflowJSON['nodes'][number] {
+  const loopNodeId = loopNode.id
+
   return {
     id: getLoopCanvasAnchorNodeId(loopNodeId),
     type: LOOP_CANVAS_ANCHOR_NODE_TYPE,
@@ -135,7 +181,7 @@ export function createLoopCanvasAnchorNode(loopNodeId: string): WorkflowJSON['no
         inputMappings: [],
       },
       inputs: [],
-      outputs: [],
+      outputs: createLoopEntryOutputs(loopNode),
     },
   } as WorkflowJSON['nodes'][number]
 }

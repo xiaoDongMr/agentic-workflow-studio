@@ -8,7 +8,7 @@ import { TopToolbar } from '@/features/workflow/components/top-toolbar'
 import { WorkflowCanvas, type WorkflowCanvasApi } from '@/features/workflow/components/workflow-canvas'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
-import type { WorkflowNode } from '@/types/workflow'
+import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 
 function findWorkflowNodeById(nodes: WorkflowNode[], nodeId: string): WorkflowNode | undefined {
   for (const node of nodes) {
@@ -27,6 +27,16 @@ function flattenWorkflowNodes(nodes: WorkflowNode[]): WorkflowNode[] {
   return nodes.flatMap((node) => [node, ...flattenWorkflowNodes(node.config.loopBodyNodes ?? [])])
 }
 
+function flattenWorkflowEdges(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowEdge[] {
+  return [
+    ...edges,
+    ...nodes.flatMap((node) => [
+      ...(node.config.loopBodyEdges ?? []),
+      ...flattenWorkflowEdges(node.config.loopBodyNodes ?? [], []),
+    ]),
+  ]
+}
+
 function App() {
   const workflow = useWorkflowStore((state) => state.workflow)
   const selectedNodeId = useWorkflowStore((state) => state.selectedNodeId)
@@ -43,6 +53,10 @@ function App() {
     [selectedNodeId, workflow],
   )
   const allWorkflowNodes = useMemo(() => flattenWorkflowNodes(workflow.nodes), [workflow.nodes])
+  const allWorkflowEdges = useMemo(
+    () => flattenWorkflowEdges(workflow.nodes, workflow.edges),
+    [workflow.edges, workflow.nodes],
+  )
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#14203d_0%,#090d18_38%,#05070c_100%)] text-slate-100">
@@ -101,7 +115,7 @@ function App() {
                     className="h-full"
                     node={selectedNode}
                     nodes={allWorkflowNodes}
-                    edges={workflow.edges}
+                    edges={allWorkflowEdges}
                     onUpdateNode={(partial) => {
                       if (canvasApi) {
                         canvasApi.updateSelectedNode(partial)

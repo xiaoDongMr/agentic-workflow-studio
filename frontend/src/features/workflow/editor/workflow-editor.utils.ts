@@ -187,7 +187,7 @@ export function workflowNodeToFlowgramNode(node: WorkflowNode, applyCanvasOffset
   return {
     ...baseNode,
     blocks: [
-      createLoopCanvasAnchorNode(node.id),
+      createLoopCanvasAnchorNode(node),
       ...(loopBodyNodes?.map((bodyNode) => workflowNodeToFlowgramNode(bodyNode, false)) ?? []),
     ],
     edges: (loopBodyEdges ?? []).flatMap((edge) => toVisibleLoopBodyEdges(node.id, edge)).map((edge) => ({

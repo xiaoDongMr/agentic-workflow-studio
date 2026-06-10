@@ -154,9 +154,9 @@ export function EditorTrialRunPanel({
   }
 
   return (
-    <div className="aw-flow-ignore-deselect pointer-events-none absolute bottom-[88px] right-4 z-30 flex justify-end">
-      <section className="pointer-events-auto w-[640px] max-w-[calc(100vw-520px)] rounded-[24px] border border-white/10 bg-slate-950/94 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.48)] backdrop-blur">
-        <div className="flex items-start justify-between gap-4 border-b border-white/8 pb-4">
+    <div className="aw-flow-ignore-deselect pointer-events-none absolute inset-y-4 right-4 z-30 flex items-end justify-end">
+      <section className="pointer-events-auto flex max-h-full w-[640px] max-w-[calc(100vw-520px)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/94 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.48)] backdrop-blur">
+        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-white/8 pb-4">
           <div>
             <p className="text-sm font-semibold text-white">全局调试</p>
             <p className="mt-1 text-xs text-slate-400">配置调试入参后运行工作流，节点默认只展示执行摘要，点击摘要可查看详细记录。</p>
@@ -171,8 +171,8 @@ export function EditorTrialRunPanel({
           </button>
         </div>
 
-        <div className="mt-5 rounded-[20px] border border-white/8 bg-white/[0.03]">
-          <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+        <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/8 bg-white/[0.03]">
+          <div className="shrink-0 flex items-center justify-between border-b border-white/8 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-white">全局调试输入</p>
               <p className="mt-1 text-xs text-slate-400">按字段编辑调试入参，JSON 字段运行前会校验结构。</p>
@@ -205,7 +205,7 @@ export function EditorTrialRunPanel({
             </div>
           </div>
 
-          <div className="space-y-4 px-4 py-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {jsonMode ? (
               <div>
                 <div className="mb-2 flex items-center gap-2">
@@ -214,17 +214,12 @@ export function EditorTrialRunPanel({
                     Object
                   </span>
                 </div>
-                <textarea
+                <JsonInputEditor
                   value={combinedJson}
-                  onChange={(event) => onCombinedJsonChange(event.target.value)}
-                  spellCheck={false}
-                  className={cn(
-                    'h-[220px] w-full resize-none rounded-2xl border bg-slate-900/90 px-3 py-3 font-mono text-[12px] leading-6 text-slate-100 outline-none transition-colors placeholder:text-slate-500',
-                    jsonError ? 'border-rose-400/70 focus:border-rose-400/70' : 'border-white/8 focus:border-blue-400/40',
-                  )}
-                  placeholder="JSON"
+                  error={jsonError}
+                  heightClassName="h-[220px]"
+                  onChange={onCombinedJsonChange}
                 />
-                {jsonError && <p className="mt-2 text-xs text-rose-400">{jsonError}</p>}
               </div>
             ) : (
               fields.map((field) => (
@@ -236,21 +231,13 @@ export function EditorTrialRunPanel({
                     </span>
                   </div>
                   {field.type === 'json' ? (
-                    <>
-                      <textarea
-                        value={field.value}
-                        onChange={(event) => onFieldChange(field.name, event.target.value)}
-                        spellCheck={false}
-                        className={cn(
-                          'h-[188px] w-full resize-none rounded-2xl border bg-slate-900/90 px-3 py-3 font-mono text-[12px] leading-6 text-slate-100 outline-none transition-colors placeholder:text-slate-500',
-                          jsonError
-                            ? 'border-rose-400/70 focus:border-rose-400/70'
-                            : 'border-white/8 focus:border-blue-400/40',
-                        )}
-                        placeholder="JSON"
-                      />
-                      {jsonError && <p className="mt-2 text-xs text-rose-400">{jsonError}</p>}
-                    </>
+                    <JsonInputEditor
+                      value={field.value}
+                      error={jsonError}
+                      arrayMode={isArrayJsonField(field)}
+                      heightClassName={isArrayJsonField(field) ? 'h-[220px]' : 'h-[188px]'}
+                      onChange={(value) => onFieldChange(field.name, value)}
+                    />
                   ) : isMediaFieldType(field.type) ? (
                     <MediaInputEditor
                       field={field}
@@ -269,7 +256,7 @@ export function EditorTrialRunPanel({
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t border-white/8 px-4 py-4">
+          <div className="shrink-0 flex items-center justify-between border-t border-white/8 px-4 py-4">
             <p className="text-[11px] leading-5 text-slate-500">点击运行后将开始全局调试，节点下方只展示摘要，点击摘要可以展开详细记录。</p>
             <button
               type="button"
@@ -483,7 +470,12 @@ export function FieldInputEditor({
         )}
       </div>
       {field.type === 'json' ? (
-        <JsonInputEditor value={field.value} error={error} onChange={(value) => onChange(field.name, value)} />
+        <JsonInputEditor
+          value={field.value}
+          error={error}
+          arrayMode={isArrayJsonField(field)}
+          onChange={(value) => onChange(field.name, value)}
+        />
       ) : isMediaFieldType(field.type) ? (
         <MediaInputEditor field={field} onChange={(value) => onChange(field.name, value)} />
       ) : (
@@ -756,27 +748,74 @@ function getDebugFieldTypeLabel(type: GlobalDebugFieldValue['type']) {
 function JsonInputEditor({
   value,
   error,
+  arrayMode = false,
+  heightClassName = 'h-[132px]',
   onChange,
 }: {
   value: string
   error?: string
+  arrayMode?: boolean
+  heightClassName?: string
   onChange: (value: string) => void
 }) {
+  const lineCount = Math.max(value.split('\n').length, 1)
+  const handleFormat = () => {
+    try {
+      onChange(JSON.stringify(JSON.parse(value || (arrayMode ? '[]' : '{}')), null, 2))
+    } catch {
+      // Keep the current draft so the validation message can guide the user.
+    }
+  }
+
   return (
     <div>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        spellCheck={false}
+      <div
         className={cn(
-          'h-[132px] w-full resize-none rounded-xl border bg-slate-900/90 px-3 py-2.5 font-mono text-[12px] leading-5 text-slate-100 outline-none transition-colors placeholder:text-slate-500',
+          'overflow-hidden rounded-xl border bg-slate-900/90 transition-colors',
           error ? 'border-rose-400/70 focus:border-rose-400/70' : 'border-white/10 focus:border-blue-400/40',
         )}
-        placeholder="JSON"
-      />
+      >
+        {arrayMode && (
+          <div className="flex h-10 items-center justify-between border-b border-white/8 bg-slate-950/55 px-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-300">JSON</span>
+              <span className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-500">数组</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleFormat}
+              className="inline-flex items-center gap-1 rounded-lg border border-white/8 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:border-blue-300/30 hover:text-blue-100"
+              title="格式化 JSON"
+            >
+              <LayoutGrid className="h-3 w-3" />
+              格式化
+            </button>
+          </div>
+        )}
+        <div className={cn('flex w-full bg-slate-950/35', heightClassName)}>
+          {arrayMode && (
+            <div className="select-none border-r border-white/8 bg-slate-950/50 px-2.5 py-2.5 text-right font-mono text-[12px] leading-5 text-slate-500">
+              {Array.from({ length: lineCount }).map((_, index) => (
+                <div key={index}>{index + 1}</div>
+              ))}
+            </div>
+          )}
+          <textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            spellCheck={false}
+            className="h-full min-w-0 flex-1 resize-none bg-transparent px-3 py-2.5 font-mono text-[12px] leading-5 text-slate-100 outline-none placeholder:text-slate-500"
+            placeholder={arrayMode ? '[]' : 'JSON'}
+          />
+        </div>
+      </div>
       {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
     </div>
   )
+}
+
+function isArrayJsonField(field: Pick<GlobalDebugFieldValue, 'type' | 'valueType'>) {
+  return field.type === 'json' && field.valueType?.trim().toLowerCase().startsWith('array')
 }
 
 function ExecutionBlock({

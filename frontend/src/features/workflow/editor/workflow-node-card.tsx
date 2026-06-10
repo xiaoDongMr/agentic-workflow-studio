@@ -52,7 +52,10 @@ function WorkflowNodeRenderer({
   portSecondaryColor,
   portErrorColor,
   portBackgroundColor,
-}: WorkflowNodeProps) {
+  onManualDragStart,
+}: WorkflowNodeProps & {
+  onManualDragStart?: (event: ReactMouseEvent<HTMLDivElement>) => void
+}) {
   const nodeJson = node.toJSON() as WorkflowJSON['nodes'][number]
   const nodeId = String(nodeJson.id)
   const isLoopNode = String(nodeJson.type) === 'loop'
@@ -84,11 +87,12 @@ function WorkflowNodeRenderer({
 
   const handleMouseDownCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (isLoopNode && isLoopManualDragTarget(event.target)) {
+      onManualDragStart?.(event)
       startDrag(event)
       event.preventDefault()
       event.stopPropagation()
     }
-  }, [isLoopNode, startDrag])
+  }, [isLoopNode, onManualDragStart, startDrag])
 
   const handleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.stopPropagation()
@@ -302,8 +306,8 @@ export function FlowgramNodeCard({
   const Icon = kind === LOOP_CANVAS_ANCHOR_NODE_TYPE ? Home : nodeIcons[kind]
   const isSelected = selectedNodeId === nodeId
   const isLoopEndpoint = kind === 'loop-start' || kind === 'loop-end'
-  const inputItems = data?.inputs ?? []
-  const outputItems = data?.outputs ?? []
+  const inputItems: WorkflowNode['inputs'] = data?.inputs ?? []
+  const outputItems: WorkflowNode['outputs'] = data?.outputs ?? []
   const canDeleteOrCopy = kind !== 'start' && !isLoopEndpoint
   const canRunNode = !isLoopEndpoint
   const canAddFromOutputPort = kind !== 'selector' && kind !== 'end' && kind !== 'loop-end'
@@ -398,6 +402,7 @@ export function FlowgramNodeCard({
       portPrimaryColor="#7aa2ff"
       portSecondaryColor="#273249"
       portBackgroundColor="#0b1120"
+      onManualDragStart={kind === 'loop' ? handleNodeBodyMouseDown : undefined}
       onPortClick={(port: WorkflowPortEntity, event) => {
         if ('stopPropagation' in event) {
           event.stopPropagation()

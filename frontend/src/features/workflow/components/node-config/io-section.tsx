@@ -596,6 +596,7 @@ function VariableSourceSelect({
   const rootRef = useRef<HTMLDivElement>(null)
   const selectedOption = useMemo(() => options.find((option) => option.value === value), [options, value])
   const groupedOptions = useMemo(() => groupVariableSources(options), [options])
+  const selectedLoopEntry = selectedOption?.nodeTitle === '循环入口'
   const closeMenu = useCallback(() => setOpen(false), [])
   useClickOutside(rootRef, open, closeMenu)
 
@@ -614,13 +615,21 @@ function VariableSourceSelect({
         onClick={() => setOpen((current) => !current)}
         disabled={disabled}
         className={cn(
-          'aw-variable-select-trigger flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50',
+          'aw-variable-select-trigger flex w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-left text-slate-200 outline-none transition-colors hover:border-white/14 focus:border-blue-400/50',
+          selectedLoopEntry ? 'min-h-9 py-1.5' : 'h-7',
           disabled && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
         )}
       >
         {selectedOption ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="truncate">{selectedOption.outputName || selectedOption.value}</span>
+            <span className="min-w-0 flex-1">
+              {selectedLoopEntry && (
+                <span className="block truncate text-[9px] leading-3 text-blue-200/75">
+                  {getLoopEntryOptionMeta(selectedOption).title}
+                </span>
+              )}
+              <span className="block truncate">{selectedOption.outputName || selectedOption.value}</span>
+            </span>
             <TypeBadge type={selectedOption.type} />
           </span>
         ) : (
@@ -630,7 +639,7 @@ function VariableSourceSelect({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+5px)] z-50 max-h-56 w-48 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur">
+        <div className="absolute right-0 top-[calc(100%+5px)] z-50 max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/98 p-1.5 shadow-2xl shadow-slate-950/70 backdrop-blur">
           {groupedOptions.map((group) => (
             <VariableSourceGroup key={group.title} group={group} value={value} onSelect={selectSource} />
           ))}
@@ -649,28 +658,106 @@ function VariableSourceGroup({
   value: string
   onSelect: (value: string) => void
 }) {
+  const isLoopEntryGroup = group.title === '循环入口'
+
   return (
     <div className="mt-1 border-t border-white/6 pt-1 first:mt-0 first:border-t-0 first:pt-0">
-      <p className="px-2 py-0.5 text-[8px] font-medium uppercase tracking-wide text-slate-500">{group.title}</p>
+      <div className={cn('px-2 py-1', isLoopEntryGroup && 'rounded-lg bg-blue-400/8')}>
+        <p className={cn('text-[8px] font-medium uppercase tracking-wide text-slate-500', isLoopEntryGroup && 'text-blue-100/80')}>
+          {group.title}
+        </p>
+        {isLoopEntryGroup && (
+          <p className="mt-0.5 text-[9px] leading-3 text-slate-500">
+            循环体内可直接引用当前元素、index 和中间变量
+          </p>
+        )}
+      </div>
       {group.options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onSelect(option.value)}
-          className={cn(
-            'aw-variable-menu-item flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-300 transition-colors hover:bg-white/8 hover:text-white',
-            value === option.value && 'bg-white/8 text-white',
-          )}
-        >
-          <span className="flex h-3 w-3 items-center justify-center">
-            {value === option.value && <Check className="h-3 w-3 text-blue-300" />}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{option.outputName || option.value}</span>
-          <TypeBadge type={option.type} muted />
-        </button>
+        isLoopEntryGroup ? (
+          <LoopEntryMenuItem
+            key={option.value}
+            option={option}
+            selected={value === option.value}
+            onSelect={() => onSelect(option.value)}
+          />
+        ) : (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onSelect(option.value)}
+            className={cn(
+              'aw-variable-menu-item flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-300 transition-colors hover:bg-white/8 hover:text-white',
+              value === option.value && 'bg-white/8 text-white',
+            )}
+          >
+            <span className="flex h-3 w-3 items-center justify-center">
+              {value === option.value && <Check className="h-3 w-3 text-blue-300" />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{option.outputName || option.value}</span>
+            <TypeBadge type={option.type} muted />
+          </button>
+        )
       ))}
     </div>
   )
+}
+
+function LoopEntryMenuItem({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: WorkflowVariableSource
+  selected: boolean
+  onSelect: () => void
+}) {
+  const meta = getLoopEntryOptionMeta(option)
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={`${meta.title}：${option.outputName}。${meta.description}`}
+      className={cn(
+        'aw-variable-menu-item mt-1 flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition-colors',
+        selected ? 'bg-blue-400/14 text-blue-50' : 'text-slate-300 hover:bg-white/8 hover:text-white',
+      )}
+    >
+      <span className={cn('mt-0.5 flex h-5 min-w-12 items-center justify-center rounded-full border px-1.5 text-[9px] leading-none', meta.badgeClass)}>
+        {meta.title}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[11px] font-semibold leading-4">{option.outputName}</span>
+          {selected && <Check className="h-3 w-3 shrink-0 text-blue-200" />}
+        </span>
+        <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-500">{meta.description}</span>
+      </span>
+      <TypeBadge type={option.type} muted />
+    </button>
+  )
+}
+
+function getLoopEntryOptionMeta(option: WorkflowVariableSource) {
+  if (option.outputName === 'index' || option.description?.startsWith('index 下标')) {
+    return {
+      title: '下标',
+      description: '当前元素在数组中的位置，从 0 开始',
+      badgeClass: 'border-amber-300/18 bg-amber-400/10 text-amber-100',
+    }
+  }
+  if (option.description?.startsWith('中间变量')) {
+    return {
+      title: '共享',
+      description: '跨轮共享状态，可通过 shared.变量名 读取或更新',
+      badgeClass: 'border-blue-300/18 bg-blue-400/10 text-blue-100',
+    }
+  }
+  return {
+    title: '元素',
+    description: '数组当前项的值，每轮循环自动切换',
+    badgeClass: 'border-cyan-300/18 bg-cyan-400/10 text-cyan-100',
+  }
 }
 
 function TypeBadge({ type, muted = false }: { type: string; muted?: boolean }) {

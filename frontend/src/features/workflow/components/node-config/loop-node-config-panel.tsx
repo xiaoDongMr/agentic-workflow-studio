@@ -1,13 +1,13 @@
-import { Boxes, ChevronDown, Clock3, Link2, Plus, Trash2, Waypoints } from 'lucide-react'
-import { useMemo } from 'react'
+import { Boxes, Check, ChevronDown, Clock3, Link2, PenLine, Plus, Trash2, Waypoints } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 
 import {
   BasicInfoSection,
   ConfigSection,
   ConfigShell,
-  EditableField,
   type NodeConfigPanelProps,
 } from '@/features/workflow/components/node-config/config-fields'
+import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
 import {
   ARRAY_VALUE_TYPES,
   formatValueType,
@@ -78,14 +78,16 @@ export function LoopNodeConfigPanel({
   }
 
   const updateLoopOutputs = (nextOutputs: WorkflowLoopOutputRef[]) => {
-    updateLoopConfig({ loopOutputs: nextOutputs })
+    const validOutputKeys = new Set(bodyOutputSources.map((source) => source.value))
+    const validOutputs = nextOutputs.filter((output) => validOutputKeys.has(`${output.nodeId}.${output.fieldPath}`))
+    updateLoopConfig({ loopOutputs: validOutputs })
     onUpdateNode({
-      outputs: nextOutputs.map((output) => ({
+      outputs: validOutputs.map((output) => ({
         name: output.name,
         type: toArrayValueType(output.type),
         description: `循环完成后聚合 ${output.nodeId}.${output.fieldPath} 的每轮结果`,
       })),
-      config: { loopOutputs: nextOutputs },
+      config: { loopOutputs: validOutputs },
     })
   }
 
@@ -124,18 +126,16 @@ export function LoopNodeConfigPanel({
             )}
           </div>
         ) : (
-          <EditableField
-            label="循环次数"
-            type="number"
-            value={String(node.config.loopCount ?? 3)}
-            onChange={(value) => updateLoopConfig({ loopCount: Math.max(Number(value) || 0, 0) })}
+          <LoopCountField
+            value={node.config.loopCount ?? 3}
+            onChange={(value) => updateLoopConfig({ loopCount: value })}
           />
         )}
       </ConfigSection>
 
       <ConfigSection title="中间变量" icon={<Link2 className="h-4 w-4 text-blue-300" />}>
         <p className="rounded-xl border border-blue-300/12 bg-blue-400/7 px-2.5 py-2 text-[10px] leading-4 text-blue-100/80">
-          中间变量在多次循环之间共享。循环体节点可通过上下文 `shared.变量名` 或代码节点的 `variables.shared` 读取，并可在输出中返回同名字段更新它。
+          中间变量会出现在循环入口中，作为跨轮共享状态；循环体读取 shared.变量名，返回同名字段即可更新。
         </p>
         <div className="space-y-2">
           {intermediateVariables.map((variable) => (
@@ -163,7 +163,7 @@ export function LoopNodeConfigPanel({
 
       <ConfigSection title="输出变量" icon={<Boxes className="h-4 w-4 text-emerald-300" />}>
         <p className="rounded-xl border border-emerald-300/12 bg-emerald-400/7 px-2.5 py-2 text-[10px] leading-4 text-emerald-100/80">
-          输出变量引用循环体节点的输出。由于会收集每轮循环结果，节点输出类型会自动转换为数组类型。
+          仅可选择循环子图中节点的输出变量；每轮结果会自动聚合为数组输出。
         </p>
         <div className="space-y-2">
           {loopOutputs.map((output) => (
@@ -175,7 +175,7 @@ export function LoopNodeConfigPanel({
               onRemove={() => updateLoopOutputs(loopOutputs.filter((item) => item.id !== output.id))}
             />
           ))}
-          {loopOutputs.length === 0 && <EmptyHint text="暂无输出变量，可引用循环体中任一节点的输出。" />}
+          {loopOutputs.length === 0 && <EmptyHint text="暂无输出变量，请先选择循环子图中节点的输出。" />}
         </div>
         <button
           type="button"
@@ -237,18 +237,20 @@ function ArrayLoopInputRow({
   onChange: (patch: { name?: string; type?: string; source?: string }) => void
 }) {
   const selectedSource = arraySources.find((item) => item.value === source)
+  const fieldGridClass = 'grid-cols-[minmax(118px,0.95fr)_minmax(0,1.35fr)]'
+
   return (
     <div>
-      <div className="grid grid-cols-[0.75fr_1.55fr] gap-1.5 px-1 text-[10px] text-slate-500">
-        <span>变量名</span>
-        <span>变量值</span>
+      <div className={cn('grid gap-1.5 text-[10px] font-medium text-slate-500', fieldGridClass)}>
+        <span>当前元素变量名</span>
+        <span>循环数组来源</span>
       </div>
-      <div className="mt-1.5 grid grid-cols-[0.75fr_1.55fr] gap-1.5 rounded-2xl border border-white/8 bg-slate-950/58 p-1.5">
+      <div className={cn('mt-1.5 grid gap-1.5 rounded-2xl border border-white/8 bg-slate-950/58 p-1.5', fieldGridClass)}>
         <input
           value={name}
           placeholder="items"
           onChange={(event) => onChange({ name: event.target.value })}
-          className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-cyan-300/50"
+          className="h-9 min-w-0 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] font-medium text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/10"
         />
         <PrettySelect
           value={source}
@@ -269,8 +271,97 @@ function ArrayLoopInputRow({
           }))}
         />
       </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <LoopEntryHintCard label="当前元素" value={name || 'item'} description="数组每一项的值" />
+        <LoopEntryHintCard label="index 下标" value="index" description="从 0 开始递增" />
+      </div>
     </div>
   )
+}
+
+function LoopEntryHintCard({
+  label,
+  value,
+  description,
+}: {
+  label: string
+  value: string
+  description: string
+}) {
+  return (
+    <div className="rounded-xl border border-cyan-300/12 bg-cyan-400/7 px-2.5 py-2">
+      <p className="text-[9px] font-medium text-cyan-100/70">{label}</p>
+      <p className="mt-0.5 truncate text-[11px] font-semibold text-cyan-50">{value}</p>
+      <p className="mt-0.5 truncate text-[9px] text-slate-500">{description}</p>
+    </div>
+  )
+}
+
+function LoopCountField({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  const currentValue = clampLoopCount(value)
+
+  return (
+    <div className="rounded-2xl border border-cyan-300/14 bg-slate-950/58 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold text-slate-100">循环次数</p>
+          <p className="mt-0.5 text-[10px] leading-4 text-slate-500">请输入 1-100 之间的整数，避免单次任务执行过久。</p>
+        </div>
+        <span className="rounded-full border border-cyan-300/18 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-medium text-cyan-100">
+          最大 100
+        </span>
+      </div>
+      <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 py-2 focus-within:border-cyan-300/50 focus-within:ring-2 focus-within:ring-cyan-300/12">
+        <input
+          type="number"
+          min={1}
+          max={100}
+          step={1}
+          value={currentValue}
+          onChange={(event) => onChange(clampLoopCount(event.target.value))}
+          onBlur={(event) => {
+            const nextValue = clampLoopCount(event.target.value)
+            if (nextValue !== currentValue) {
+              onChange(nextValue)
+            }
+          }}
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-50 outline-none [appearance:textfield] placeholder:text-slate-600 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onChange(clampLoopCount(currentValue - 1))}
+            className="grid h-6 w-6 place-items-center rounded-lg border border-white/8 bg-white/5 text-xs text-slate-300 transition hover:border-cyan-300/30 hover:bg-cyan-400/10 hover:text-cyan-100"
+            aria-label="减少循环次数"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(clampLoopCount(currentValue + 1))}
+            className="grid h-6 w-6 place-items-center rounded-lg border border-white/8 bg-white/5 text-xs text-slate-300 transition hover:border-cyan-300/30 hover:bg-cyan-400/10 hover:text-cyan-100"
+            aria-label="增加循环次数"
+          >
+            +
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function clampLoopCount(value: string | number) {
+  const count = Math.trunc(Number(value))
+  if (!Number.isFinite(count)) {
+    return 1
+  }
+  return Math.min(Math.max(count, 1), 100)
 }
 
 function PrettySelect({
@@ -284,39 +375,107 @@ function PrettySelect({
   value: string
   placeholder: string
   selectedMeta?: string
-  options: Array<{ value: string; label: string; meta?: string }>
+  options: Array<{ value: string; label: string; meta?: string; description?: string }>
   accent: 'cyan' | 'blue' | 'emerald'
   onChange: (value: string) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const selectedOption = options.find((option) => option.value === value)
   const accentClass = {
-    cyan: 'focus-within:border-cyan-300/55 focus-within:ring-cyan-300/15',
-    blue: 'focus-within:border-blue-300/55 focus-within:ring-blue-300/15',
-    emerald: 'focus-within:border-emerald-300/55 focus-within:ring-emerald-300/15',
+    cyan: 'focus-within:border-cyan-300/55 focus-within:ring-cyan-300/15 hover:border-cyan-300/28',
+    blue: 'focus-within:border-blue-300/55 focus-within:ring-blue-300/15 hover:border-blue-300/28',
+    emerald: 'focus-within:border-emerald-300/55 focus-within:ring-emerald-300/15 hover:border-emerald-300/28',
+  }[accent]
+  const accentBadgeClass = {
+    cyan: 'border-cyan-300/18 bg-cyan-400/10 text-cyan-100',
+    blue: 'border-blue-300/18 bg-blue-400/10 text-blue-100',
+    emerald: 'border-emerald-300/18 bg-emerald-400/10 text-emerald-100',
   }[accent]
 
+  useClickOutside(containerRef, open, () => setOpen(false))
+
   return (
-    <div className={cn(
-      'relative h-8 rounded-xl border border-white/8 bg-slate-950/85 ring-2 ring-transparent transition',
-      accentClass,
-    )}>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-full w-full appearance-none rounded-xl bg-transparent px-2.5 pr-16 text-[11px] text-slate-100 outline-none"
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        title={selectedOption ? [selectedOption.description, selectedOption.label].filter(Boolean).join(' / ') : placeholder}
+        className={cn(
+          'flex min-h-9 w-full items-center gap-2 rounded-xl border border-white/8 bg-slate-950/85 px-2.5 py-1.5 text-left ring-2 ring-transparent transition shadow-inner shadow-white/[0.03]',
+          accentClass,
+          open && 'border-white/18 bg-slate-900/95 ring-white/5',
+        )}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}{option.meta ? ` · ${option.meta}` : ''}
-          </option>
-        ))}
-      </select>
-      {selectedMeta && (
-        <span className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 rounded-full border border-white/8 bg-white/6 px-1.5 py-0.5 text-[9px] text-slate-300">
-          {selectedMeta}
+        <span className="min-w-0 flex-1">
+          <span className={cn('block truncate text-[11px] leading-4', selectedOption ? 'font-medium text-slate-100' : 'text-slate-500')}>
+            {selectedOption?.label ?? placeholder}
+          </span>
+          {selectedOption?.description && (
+            <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-500">
+              {selectedOption.description}
+            </span>
+          )}
         </span>
+        {(selectedOption?.meta || selectedMeta) && (
+          <span className={cn('shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] leading-3', accentBadgeClass)}>
+            {selectedOption?.meta ?? selectedMeta}
+          </span>
+        )}
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition', open && 'rotate-180 text-slate-200')} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-60 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 p-1.5 shadow-[0_18px_48px_rgba(2,6,23,0.65)] backdrop-blur-xl"
+        >
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {options.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-white/10 bg-white/4 px-2.5 py-2 text-[11px] text-slate-500">
+                暂无可选变量
+              </div>
+            ) : options.map((option) => {
+              const selected = option.value === value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(option.value)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    'flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left transition',
+                    selected ? 'bg-blue-400/14 text-blue-100' : 'text-slate-300 hover:bg-white/6 hover:text-slate-100',
+                  )}
+                  title={[option.description, option.label].filter(Boolean).join(' / ')}
+                >
+                  <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    {selected && <Check className="h-3.5 w-3.5 text-blue-200" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[11px] font-medium leading-4">{option.label}</span>
+                    {option.description && (
+                      <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-500">
+                        {option.description}
+                      </span>
+                    )}
+                  </span>
+                  {option.meta && (
+                    <span className={cn('mt-0.5 shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] leading-3', accentBadgeClass)}>
+                      {option.meta}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
     </div>
   )
 }
@@ -332,24 +491,27 @@ function IntermediateVariableRow({
   onChange: (variable: WorkflowLoopIntermediateVariable) => void
   onRemove: () => void
 }) {
+  const selectedType = formatValueType(variable.type || variable.valueType || 'String')
+  const fieldGridClass = 'grid-cols-[minmax(118px,0.95fr)_minmax(0,1.35fr)_28px]'
+
   return (
-    <div className="rounded-2xl border border-white/8 bg-slate-950/58 p-2.5">
-      <div className="grid grid-cols-[0.8fr_1.2fr_28px] gap-1.5 px-1 pb-1 text-[10px] text-slate-500">
-        <span>变量名</span>
-        <span>变量值</span>
+    <div className="rounded-2xl border border-white/8 bg-slate-950/58 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors hover:border-blue-300/18">
+      <div className={cn('grid gap-1.5 pb-1 text-[10px] font-medium text-slate-500', fieldGridClass)}>
+        <span>中间变量名</span>
+        <span>初始值来源</span>
         <span />
       </div>
-      <div className="grid grid-cols-[0.8fr_1.2fr_28px] gap-1.5">
+      <div className={cn('grid gap-1.5', fieldGridClass)}>
         <input
           value={variable.name}
-          placeholder="变量名"
+          placeholder="如 state"
           onChange={(event) => onChange({ ...variable, name: event.target.value })}
-          className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-blue-300/50"
+          className="h-9 min-w-0 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] font-medium text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-300/50 focus:ring-2 focus:ring-blue-300/10"
         />
         {variable.sourceType === 'node' ? (
           <PrettySelect
             value={variable.source}
-            placeholder="选择引用变量"
+            placeholder="选择上游变量作为初始值"
             selectedMeta={formatValueType(variable.type)}
             accent="blue"
             onChange={(nextSource) => {
@@ -368,28 +530,102 @@ function IntermediateVariableRow({
             }))}
           />
         ) : (
-          <input
+          <textarea
             value={variable.source}
-            placeholder="初始值，支持 JSON 文本"
+            placeholder="填写初始值，支持字符串或 JSON"
             onChange={(event) => onChange({ ...variable, source: event.target.value, type: guessLiteralValueType(event.target.value) })}
-            className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-blue-300/50"
+            rows={2}
+            className="min-h-9 resize-y rounded-xl border border-white/8 bg-slate-950/80 px-2.5 py-2 text-[11px] leading-4 text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-300/50 focus:ring-2 focus:ring-blue-300/10"
           />
         )}
         <IconButton label="删除中间变量" onClick={onRemove} />
       </div>
-      <div className="mt-1.5 grid grid-cols-[82px_1fr] gap-1.5">
-        <select
+      <div className="mt-2 grid grid-cols-[104px_1fr] gap-1.5">
+        <IntermediateSourceTypeSelect
           value={variable.sourceType}
-          onChange={(event) => onChange({ ...variable, sourceType: event.target.value as 'literal' | 'node', source: '' })}
-          className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-blue-300/50"
-        >
-          <option value="literal">自定义</option>
-          <option value="node">引用</option>
-        </select>
-        <div className="flex h-8 items-center rounded-xl border border-white/8 bg-slate-950/55 px-2 text-[10px] text-slate-400">
-          当前类型：{formatValueType(variable.type || variable.valueType || 'String')}
+          onChange={(sourceType) => onChange({ ...variable, sourceType, source: '' })}
+        />
+        <div className="flex min-h-9 items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/55 px-2.5 text-[10px] text-slate-400">
+          <span>当前类型</span>
+          <span className="truncate rounded-full border border-blue-300/14 bg-blue-400/8 px-2 py-0.5 text-blue-100/80">
+            {selectedType}
+          </span>
         </div>
       </div>
+    </div>
+  )
+}
+
+function IntermediateSourceTypeSelect({
+  value,
+  onChange,
+}: {
+  value: 'literal' | 'node'
+  onChange: (value: 'literal' | 'node') => void
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const options = [
+    { value: 'literal' as const, label: '自定义', description: '直接填写初始值', icon: <PenLine className="h-3 w-3" /> },
+    { value: 'node' as const, label: '引用', description: '引用上游变量', icon: <Link2 className="h-3 w-3" /> },
+  ]
+  const selected = options.find((option) => option.value === value) ?? options[0]
+
+  useClickOutside(containerRef, open, () => setOpen(false))
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'flex min-h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-left outline-none ring-2 ring-transparent transition',
+          'hover:border-blue-300/28 hover:bg-slate-900/85 focus:border-blue-300/55 focus:ring-blue-300/15',
+          open && 'border-blue-300/50 bg-blue-950/18 ring-blue-300/10',
+        )}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="text-blue-200/80">{selected.icon}</span>
+          <span className="truncate text-[11px] font-medium text-slate-100">{selected.label}</span>
+        </span>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-slate-500 transition', open && 'rotate-180 text-blue-200')} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 top-[calc(100%+6px)] z-50 w-40 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 p-1.5 shadow-[0_18px_48px_rgba(2,6,23,0.6)] backdrop-blur-xl"
+        >
+          {options.map((option) => {
+            const selectedOption = option.value === value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                onClick={() => {
+                  onChange(option.value)
+                  setOpen(false)
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left transition',
+                  selectedOption ? 'bg-blue-400/14 text-blue-100' : 'text-slate-300 hover:bg-white/7 hover:text-white',
+                )}
+              >
+                <span className="mt-0.5 text-slate-400">{option.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-medium leading-4">{option.label}</span>
+                  <span className="block truncate text-[9px] leading-3 text-slate-500">{option.description}</span>
+                </span>
+                {selectedOption && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-200" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -406,36 +642,49 @@ function LoopOutputRow({
   onRemove: () => void
 }) {
   const selectedValue = `${output.nodeId}.${output.fieldPath}`
+  const fieldGridClass = 'grid-cols-[minmax(118px,0.95fr)_minmax(0,1.35fr)_28px]'
+
   return (
-    <div className="grid grid-cols-[0.8fr_1.2fr_28px] gap-1.5 rounded-2xl border border-white/8 bg-slate-950/58 p-2">
-      <input
-        value={output.name}
-        placeholder="输出变量名"
-        onChange={(event) => onChange({ ...output, name: event.target.value })}
-        className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-emerald-300/50"
-      />
-      <select
-        value={selectedValue}
-        onChange={(event) => {
-          const source = bodyOutputSources.find((item) => item.value === event.target.value)
-          if (!source) {
-            return
-          }
-          onChange({
-            ...output,
-            nodeId: source.nodeId,
-            fieldPath: source.outputName,
-            type: source.type,
-            name: output.name || `${source.outputName}_list`,
-          })
-        }}
-        className="h-8 rounded-xl border border-white/8 bg-slate-950/80 px-2 text-[11px] text-slate-100 outline-none focus:border-emerald-300/50"
-      >
-        {bodyOutputSources.map((source) => (
-          <option key={source.value} value={source.value}>{source.label}</option>
-        ))}
-      </select>
-      <IconButton label="删除输出变量" onClick={onRemove} />
+    <div className="rounded-2xl border border-white/8 bg-slate-950/58 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors hover:border-emerald-300/18">
+      <div className={cn('grid gap-1.5 pb-1 text-[10px] font-medium text-slate-500', fieldGridClass)}>
+        <span>变量名</span>
+        <span>子图输出变量</span>
+        <span />
+      </div>
+      <div className={cn('grid gap-1.5', fieldGridClass)}>
+        <input
+          value={output.name}
+          placeholder="输出变量名"
+          onChange={(event) => onChange({ ...output, name: event.target.value })}
+          className="h-9 min-w-0 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] font-medium text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-emerald-300/50 focus:ring-2 focus:ring-emerald-300/10"
+        />
+        <PrettySelect
+          value={selectedValue}
+          placeholder="选择子图节点输出"
+          selectedMeta={formatValueType(output.type)}
+          accent="emerald"
+          onChange={(nextSource) => {
+            const source = bodyOutputSources.find((item) => item.value === nextSource)
+            if (!source) {
+              return
+            }
+            onChange({
+              ...output,
+              nodeId: source.nodeId,
+              fieldPath: source.outputName,
+              type: source.type,
+              name: output.name || `${source.outputName}_list`,
+            })
+          }}
+          options={bodyOutputSources.map((source) => ({
+            value: source.value,
+            label: source.label,
+            description: source.nodeTitle,
+            meta: formatValueType(source.type),
+          }))}
+        />
+        <IconButton label="删除输出变量" onClick={onRemove} />
+      </div>
     </div>
   )
 }
@@ -503,6 +752,7 @@ function guessLiteralValueType(value: string): WorkflowValueType | string {
 interface BodyOutputSource {
   value: string
   label: string
+  nodeTitle: string
   nodeId: string
   outputName: string
   type: string
@@ -512,13 +762,16 @@ function createBodyOutputSources(nodes: WorkflowNode[]): BodyOutputSource[] {
   return nodes
     .filter((node) => node.type !== 'loop-start' && node.type !== 'loop-end')
     .flatMap((node) =>
-      (node.outputs.length ? node.outputs : [{ name: node.config.outputKey || 'output', type: 'String', description: '' }]).map((output) => ({
-        value: `${node.id}.${output.name}`,
-        label: `${node.title}.${output.name} (${formatValueType(output.type)})`,
-        nodeId: node.id,
-        outputName: output.name,
-        type: output.type,
-      })),
+      node.outputs
+        .filter((output) => output.name.trim().length > 0)
+        .map((output) => ({
+          value: `${node.id}.${output.name}`,
+          label: output.name,
+          nodeTitle: node.title,
+          nodeId: node.id,
+          outputName: output.name,
+          type: output.type,
+        })),
     )
 }
 

@@ -16,11 +16,12 @@ export function createSingleNodeTrialFields(
       const value = fallbackPayload[input.name]
       const inputType = getDebugFieldInputType(input.type)
       const structured = inputType === 'json'
+      const arrayStructured = isArrayWorkflowType(input.type) && inputType === 'json'
       return {
         name: input.name,
         type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
         valueType: input.type,
-        value: formatInputFieldValue(value, structured || inputType.endsWith('-array')),
+        value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
       } satisfies GlobalDebugFieldValue
     })
 }
@@ -39,14 +40,18 @@ export function createGlobalDebugFields(nodes: WorkflowNode[], previousFields: G
       name: definition.name,
       type,
       valueType: definition.type,
-      value: previous?.value ?? formatInputFieldValue(undefined, type === 'json' || type.endsWith('-array')),
+      value: previous?.value ?? formatInputFieldValue(
+        undefined,
+        type === 'json' || type.endsWith('-array'),
+        isArrayWorkflowType(definition.type) && type === 'json',
+      ),
     } satisfies GlobalDebugFieldValue
   })
 }
 
-export function formatInputFieldValue(value: unknown, structured: boolean) {
+export function formatInputFieldValue(value: unknown, structured: boolean, arrayStructured = false) {
   if (value === undefined) {
-    return structured ? '{}' : ''
+    return structured ? (arrayStructured ? '[]' : '{}') : ''
   }
   if (typeof value === 'string') {
     return structured ? value : value
@@ -64,6 +69,7 @@ function createSelectorTrialFields(
     const value = fallbackPayload[reference.name]
     const inputType = getDebugFieldInputType(reference.valueType)
     const structured = inputType === 'json'
+    const arrayStructured = isArrayWorkflowType(reference.valueType) && inputType === 'json'
     return {
       name: reference.name,
       label: reference.label,
@@ -74,7 +80,7 @@ function createSelectorTrialFields(
       usageHints: reference.usageHints,
       type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
       valueType: reference.valueType,
-      value: formatInputFieldValue(value, structured || inputType.endsWith('-array')),
+      value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
     } satisfies GlobalDebugFieldValue
   })
 }
@@ -99,4 +105,8 @@ function getDebugFieldInputType(type: string): GlobalDebugFieldValue['type'] {
 function isStructuredWorkflowType(type: string) {
   const normalized = type.toLowerCase()
   return normalized.includes('object') || normalized.includes('array') || normalized.includes('json')
+}
+
+function isArrayWorkflowType(type?: string) {
+  return Boolean(type?.trim().toLowerCase().startsWith('array'))
 }

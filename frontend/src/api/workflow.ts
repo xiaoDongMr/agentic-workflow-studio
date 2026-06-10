@@ -35,6 +35,7 @@ interface WorkflowStreamEvent extends SseStreamEvent {
 }
 
 const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
+const MAX_WORKFLOW_LOOP_CANVAS_WIDTH = 1200
 
 function stringify(value: unknown) {
   return JSON.stringify(value, null, 2)
@@ -89,12 +90,40 @@ function normalizeWorkflowStreamEvent(event: SseStreamEvent): WorkflowStreamEven
   }
 }
 
+function sanitizeLoopCanvasWidth(width?: number) {
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return width
+  }
+  return Math.min(Math.max(Math.round(width), 0), MAX_WORKFLOW_LOOP_CANVAS_WIDTH)
+}
+
+function sanitizeWorkflowDocument(workflow: WorkflowDocument): WorkflowDocument {
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map(sanitizeWorkflowNode),
+  }
+}
+
+function sanitizeWorkflowNode(node: WorkflowDocument['nodes'][number]): WorkflowDocument['nodes'][number] {
+  const loopBodyNodes = node.config.loopBodyNodes?.map(sanitizeWorkflowNode)
+
+  return {
+    ...node,
+    config: {
+      ...node.config,
+      loopCanvasWidth: sanitizeLoopCanvasWidth(node.config.loopCanvasWidth),
+      loopBodyNodes,
+    },
+  }
+}
+
 export async function runWorkflow(
   workflow: WorkflowDocument,
   input: Record<string, unknown>,
 ): Promise<TrialRunNodeExecution[]> {
+  const normalizedWorkflow = sanitizeWorkflowDocument(workflow)
   const { data } = await http.post<WorkflowRunResponse>('/workflows/run', {
-    workflow,
+    workflow: normalizedWorkflow,
     input,
   })
 
@@ -107,11 +136,12 @@ export async function streamWorkflow(
   options: WorkflowStreamOptions = {},
 ): Promise<TrialRunNodeExecution[]> {
   const executions: TrialRunNodeExecution[] = []
+  const normalizedWorkflow = sanitizeWorkflowDocument(workflow)
 
   await postSseStream({
     url: workflowApiUrl('/workflows/stream'),
     body: {
-      workflow,
+      workflow: normalizedWorkflow,
       input,
     },
     signal: options.signal,

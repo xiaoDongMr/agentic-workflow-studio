@@ -1,4 +1,5 @@
 import type { WorkflowNode, WorkflowValueType } from '@/types/workflow'
+import { createLoopEntryOutputs } from '@/features/workflow/editor/loop-node.utils'
 
 export const WORKFLOW_VALUE_TYPES: WorkflowValueType[] = [
   'String',
@@ -57,6 +58,7 @@ export interface WorkflowVariableSource {
   value: string
   label: string
   type: string
+  description?: string
   nodeId: string
   nodeTitle: string
   outputName: string
@@ -89,6 +91,7 @@ export function getAvailableInputSources(
   edges: { source: string; target: string }[] = [],
 ): WorkflowVariableSource[] {
   const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  const parentLoopNode = findParentLoopNode(nodes, currentNode.id)
   const incoming = groupIncomingEdges(edges)
   const ancestorIds = collectAncestorIds(currentNode.id, incoming)
 
@@ -96,6 +99,24 @@ export function getAvailableInputSources(
     const node = nodesById.get(nodeId)
     if (!node) {
       return []
+    }
+
+    if (parentLoopNode && node.id === parentLoopNode.id) {
+      return createLoopEntryOutputs(parentLoopNode).map((output) => {
+        const displayLabel = `循环入口.${output.name}`
+        return {
+          value: `${parentLoopNode.id}.${output.name}`,
+          label: `${displayLabel} (${formatValueType(output.type)})`,
+          type: output.type,
+          description: output.description,
+          nodeId: parentLoopNode.id,
+          nodeTitle: '循环入口',
+          outputName: output.name,
+          sourceType: 'node' as const,
+          fieldPath: output.name,
+          displayLabel,
+        }
+      })
     }
 
     return node.outputs
@@ -106,6 +127,7 @@ export function getAvailableInputSources(
           value: `${node.id}.${output.name}`,
           label: `${displayLabel} (${formatValueType(output.type)})`,
           type: output.type,
+          description: output.description,
           nodeId: node.id,
           nodeTitle: node.title,
           outputName: output.name,
@@ -129,6 +151,20 @@ export function groupVariableSources(options: WorkflowVariableSource[]) {
   }
 
   return [...groups.values()]
+}
+
+function findParentLoopNode(nodes: WorkflowNode[], nodeId: string): WorkflowNode | undefined {
+  for (const node of nodes) {
+    if ((node.config.loopBodyNodes ?? []).some((bodyNode) => bodyNode.id === nodeId)) {
+      return node
+    }
+
+    const nested = findParentLoopNode(node.config.loopBodyNodes ?? [], nodeId)
+    if (nested) {
+      return nested
+    }
+  }
+  return undefined
 }
 
 function groupIncomingEdges(edges: { source: string; target: string }[]) {

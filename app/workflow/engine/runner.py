@@ -16,6 +16,10 @@ class WorkflowRunner:
         self.app_config = app_config
         self.node_executors = WorkflowNodeExecutorRegistry(app_config)
         self.graph_compiler = WorkflowGraphCompiler(self.node_executors)
+        self.node_executors.configure_loop_subgraph_runtime(
+            compile_workflow=self.graph_compiler.compile,
+            run_compiled_from_state=self.run_compiled_from_state,
+        )
 
     async def run(self, workflow: WorkflowDocument, run_input: dict[str, Any]) -> dict[str, Any]:
         final_result: dict[str, Any] | None = None
@@ -69,6 +73,9 @@ class WorkflowRunner:
             "type": "final",
             "data": result_from_state(final_state or initial_state),
         }
+
+    async def run_compiled_from_state(self, compiled_graph: Any, initial_state: WorkflowState) -> WorkflowState:
+        return await compiled_graph.ainvoke(initial_state)
 
 
 def initial_workflow_state(run_input: dict[str, Any]) -> WorkflowState:

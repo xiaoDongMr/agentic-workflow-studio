@@ -12,7 +12,7 @@ class WorkflowGraphCompiler:
     def __init__(self, node_executors: WorkflowNodeExecutorRegistry):
         self.node_executors = node_executors
 
-    def compile(self, workflow: WorkflowDocument):
+    def compile(self, workflow: WorkflowDocument, *, entry_node_id: str | None = None):
         ensure_unique_node_ids(workflow)
         graph = StateGraph(WorkflowState)
         nodes = topological_nodes(workflow)
@@ -25,7 +25,12 @@ class WorkflowGraphCompiler:
         if not nodes:
             raise ValueError("工作流没有可执行节点")
 
-        graph.set_entry_point(nodes[0].id)
+        if entry_node_id:
+            if entry_node_id not in nodes_by_id:
+                raise ValueError(f"工作流入口节点不存在: {entry_node_id}")
+            graph.set_entry_point(entry_node_id)
+        else:
+            graph.set_entry_point(nodes[0].id)
         if workflow.edges:
             self._connect_explicit_edges(graph, nodes, outgoing, nodes_by_id)
         else:

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from deerflow.config.app_config import AppConfig
 
 from app.schemas.workflow import WorkflowNode
 from app.services.workflow_events import build_workflow_event, emit_workflow_event
+from app.workflow.engine.subworkflow import LoopSubgraphRuntime
 from app.workflow.nodes.code import CodeNodeExecutor
 from app.workflow.nodes.end import EndNodeExecutor
 from app.workflow.nodes.fallback import FallbackNodeExecutor
@@ -36,6 +39,20 @@ class WorkflowNodeExecutorRegistry:
 
     def get(self, node_type: str) -> WorkflowNodeExecutor:
         return self._executors.get(node_type, self._fallback)
+
+    def configure_loop_subgraph_runtime(
+        self,
+        *,
+        compile_workflow: Callable[..., Any],
+        run_compiled_from_state: Callable[[Any, WorkflowState], Awaitable[WorkflowState]],
+    ) -> None:
+        loop_executor = self._executors.get("loop")
+        if isinstance(loop_executor, LoopNodeExecutor):
+            runtime = LoopSubgraphRuntime(
+                compile_workflow=compile_workflow,
+                run_compiled_from_state=run_compiled_from_state,
+            )
+            loop_executor.configure_subgraph_runtime(runtime)
 
     def make_node_callable(self, node: WorkflowNode):
         async def execute(state: WorkflowState) -> WorkflowState:

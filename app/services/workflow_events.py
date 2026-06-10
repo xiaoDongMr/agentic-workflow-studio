@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
@@ -22,6 +25,7 @@ WorkflowEventType = Literal[
     "tool_failed",
 ]
 WorkflowEventLevel = Literal["debug", "info", "warning", "error"]
+_event_context: ContextVar[dict[str, Any]] = ContextVar("workflow_event_context", default={})
 
 
 class WorkflowRuntimeEvent(TypedDict, total=False):
@@ -81,5 +85,23 @@ def emit_workflow_event(event: WorkflowRuntimeEvent) -> None:
         writer = get_stream_writer()
     except RuntimeError:
         return
+    context = _event_context.get()
+    if context:
+        event = {
+            **event,
+            "data": {
+                **context,
+                **event.get("data", {}),
+            },
+        }
     writer(event)
 
+
+@contextmanager
+def workflow_event_context(context: dict[str, Any]) -> Iterator[None]:
+    current = _event_context.get()
+    token = _event_context.set({**current, **context})
+    try:
+        yield
+    finally:
+        _event_context.reset(token)

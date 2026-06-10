@@ -6,11 +6,16 @@ import {
   FileCode2,
   Flag,
   GitBranch,
+  Home,
   Sparkles,
   Waypoints,
 } from 'lucide-react'
 import type { WorkflowNodeRegistry } from '@flowgram.ai/free-layout-editor'
 
+import {
+  DEFAULT_LOOP_CANVAS_HEIGHT,
+  DEFAULT_LOOP_CANVAS_WIDTH,
+} from '@/features/workflow/editor/loop-node.utils'
 import type { WorkflowNode } from '@/types/workflow'
 
 export const CANVAS_OFFSET_X = 420
@@ -44,6 +49,8 @@ export const nodeIcons = {
   llm: Sparkles,
   selector: GitBranch,
   loop: Waypoints,
+  'loop-start': Home,
+  'loop-end': Flag,
   code: Braces,
   end: CheckCircle2,
 } as const
@@ -53,6 +60,8 @@ export const nodeThemeClass = {
   llm: 'aw-flow-node--intent',
   selector: 'aw-flow-node--condition',
   loop: 'aw-flow-node--http',
+  'loop-start': 'aw-flow-node--loop-start',
+  'loop-end': 'aw-flow-node--loop-end',
   code: 'aw-flow-node--skill',
   end: 'aw-flow-node--response',
 } as const
@@ -85,8 +94,22 @@ export const defaultRegistries: WorkflowNodeRegistry[] = [
   {
     type: 'loop',
     meta: {
-      size: { width: 320, height: 154 },
+      isContainer: true,
+      size: { width: DEFAULT_LOOP_CANVAS_WIDTH + 32, height: DEFAULT_LOOP_CANVAS_HEIGHT + 142 },
+      padding: () => ({
+        top: 142,
+        bottom: 48,
+        left: 32,
+        right: 32,
+      }),
       defaultPorts: [{ type: 'input' }, { type: 'output' }],
+    },
+  },
+  {
+    type: 'loop-canvas-anchor',
+    meta: {
+      size: { width: 58, height: 58 },
+      defaultPorts: [{ type: 'output' }],
     },
   },
   {
@@ -189,19 +212,64 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
   },
   loop: {
     title: '循环节点',
-    description: '遍历数组输入并输出处理摘要。',
+    description: '按数组或指定次数执行循环体子图，并聚合每轮结果。',
     status: 'idle',
     inputs: [],
     outputs: [],
     config: {
-      prompt: '遍历输入数组并返回每一项的处理结果。',
+      prompt: '按循环配置执行子图。',
       model: 'Loop Engine',
       temperature: 0,
       maxTokens: 600,
       enabled: true,
       fallbackToHuman: false,
       responseMode: 'json',
-      outputKey: 'loop_items',
+      outputKey: 'loop_results',
+      inputMappings: [],
+      loopMode: 'array',
+      loopArraySource: '',
+      loopCount: 3,
+      loopIntermediateVariables: [],
+      loopBodyNodes: [],
+      loopBodyEdges: [],
+      loopOutputs: [],
+      loopCanvasWidth: DEFAULT_LOOP_CANVAS_WIDTH,
+      loopCanvasHeight: DEFAULT_LOOP_CANVAS_HEIGHT,
+    },
+  },
+  'loop-start': {
+    title: '循环开始',
+    description: '当前轮循环体的开始端点，可连接到第一个子节点。',
+    status: 'idle',
+    inputs: [],
+    outputs: [{ name: 'start', type: 'Object', description: '循环开始信号' }],
+    config: {
+      prompt: '循环体开始端点。',
+      model: 'Loop Engine',
+      temperature: 0,
+      maxTokens: 0,
+      enabled: true,
+      fallbackToHuman: false,
+      responseMode: 'json',
+      outputKey: 'start',
+      inputMappings: [],
+    },
+  },
+  'loop-end': {
+    title: '循环结束',
+    description: '当前轮循环体的结束端点，可由最后一个子节点连接进入。',
+    status: 'idle',
+    inputs: [{ name: 'done', type: 'Object', description: '循环结束信号' }],
+    outputs: [],
+    config: {
+      prompt: '循环体结束端点。',
+      model: 'Loop Engine',
+      temperature: 0,
+      maxTokens: 0,
+      enabled: true,
+      fallbackToHuman: false,
+      responseMode: 'json',
+      outputKey: 'done',
       inputMappings: [],
     },
   },

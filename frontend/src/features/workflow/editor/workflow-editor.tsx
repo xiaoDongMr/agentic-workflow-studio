@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Cable } from 'lucide-react'
 import {
   EditorRenderer,
@@ -8,15 +8,21 @@ import {
   type WorkflowJSON,
   type WorkflowNodeProps,
 } from '@flowgram.ai/free-layout-editor'
-import type { WorkflowLineEntity, WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
+import {
+  WorkflowDragService,
+  WorkflowOperationBaseService,
+  WorkflowSelectService,
+  type WorkflowLineEntity,
+  type WorkflowNodeEntity,
+  type WorkflowNodeJSON,
+} from '@flowgram.ai/free-layout-core'
+import { createContainerNodePlugin } from '@flowgram.ai/free-container-plugin'
 import { createFreeNodePanelPlugin } from '@flowgram.ai/free-node-panel-plugin'
 import { createFreeSnapPlugin } from '@flowgram.ai/free-snap-plugin'
 import { createMinimapPlugin } from '@flowgram.ai/minimap-plugin'
 import '@flowgram.ai/free-layout-editor/index.css'
 
-import {
-  defaultRegistries,
-} from '@/features/workflow/editor/workflow-editor.config'
+import { defaultRegistries } from '@/features/workflow/editor/workflow-editor.config'
 import {
   EditorBottomBar,
   EditorTrialRunPanel,
@@ -50,9 +56,13 @@ import {
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
 import {
-  clearNodeExecutionPanelExpansion,
-  FlowgramNodeCard,
-} from '@/features/workflow/editor/workflow-node-card'
+  DEFAULT_LOOP_CANVAS_HEIGHT,
+  DEFAULT_LOOP_CANVAS_WIDTH,
+  getAutoLoopBodyCanvasSize,
+  LOOP_CANVAS_ANCHOR_NODE_TYPE,
+} from '@/features/workflow/editor/loop-node.utils'
+import { clearNodeExecutionPanelExpansion } from '@/features/workflow/editor/node-execution-panel-state'
+import { FlowgramNodeCard } from '@/features/workflow/editor/workflow-node-card'
 import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -75,6 +85,11 @@ interface WorkflowEditorProps {
   onSelectNode: (nodeId: string) => void
   onReady?: (api: WorkflowCanvasApi) => void
   className?: string
+}
+
+type PlaygroundConfigWithPosition = {
+  getPosFromMouseEvent?: (event: MouseEvent | ReactMouseEvent) => { x: number; y: number }
+  toFixedPos?: (position: { x: number; y: number }) => { x: number; y: number }
 }
 
 function safeParseJsonField(value: string) {
@@ -274,6 +289,382 @@ function buildPayloadFromFieldEntries(fields: GlobalDebugFieldValue[]) {
   )
 }
 
+function findWorkflowNodeById(nodes: WorkflowNode[], nodeId: string): WorkflowNode | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) {
+      return node
+    }
+    const bodyNode = findWorkflowNodeById(node.config.loopBodyNodes ?? [], nodeId)
+    if (bodyNode) {
+      return bodyNode
+    }
+  }
+  return undefined
+}
+
+function flattenWorkflowNodes(nodes: WorkflowNode[]): WorkflowNode[] {
+  return nodes.flatMap((node) => [node, ...flattenWorkflowNodes(node.config.loopBodyNodes ?? [])])
+}
+
+function patchLoopChildDragIsolation(ctx: FreeLayoutPluginContext) {
+  const dragService = ctx.get(WorkflowDragService) as unknown as {
+    __awLoopChildDragPatched?: boolean
+    __awLoopChildDragStartPatched?: boolean
+    resetContainerInternalPosition?: (nodes: WorkflowNodeEntity[]) => void
+    startDragSelectedNodes?: (event: MouseEvent | React.MouseEvent) => Promise<boolean>
+    onNodesDrag?: (listener: (event: LoopDragEvent) => void) => { dispose?: () => void }
+  }
+  const selectService = ctx.get(WorkflowSelectService) as unknown as {
+    selectNode?: (node: WorkflowNodeEntity) => void
+  }
+  if (!dragService.__awLoopChildDragStartPatched && typeof dragService.startDragSelectedNodes === 'function') {
+    const startDragSelectedNodes = dragService.startDragSelectedNodes.bind(dragService)
+    dragService.startDragSelectedNodes = (event: MouseEvent | React.MouseEvent) => {
+      const targetNode = getDragTargetWorkflowNode(ctx, event.target)
+      if (targetNode && getWorkflowNodeType(targetNode) === LOOP_CANVAS_ANCHOR_NODE_TYPE) {
+        const loopParent = getLoopContainerForNode(targetNode)
+        if (loopParent) {
+          selectService.selectNode?.(loopParent)
+        }
+      } else if (targetNode && isNodeInsideLoopContainer(targetNode)) {
+        selectService.selectNode?.(targetNode)
+      }
+      return startDragSelectedNodes(event)
+    }
+    dragService.__awLoopChildDragStartPatched = true
+  }
+
+  if (!dragService.__awLoopChildDragPatched && typeof dragService.resetContainerInternalPosition === 'function') {
+    const resetContainerInternalPosition = dragService.resetContainerInternalPosition.bind(dragService)
+    dragService.resetContainerInternalPosition = (nodes: WorkflowNodeEntity[]) => {
+      const draggedLoopIds = getDraggedLoopNodeIds(nodes)
+      const hasStandaloneLoopChild = nodes.some((node) => {
+        if (getWorkflowNodeType(node) === LOOP_CANVAS_ANCHOR_NODE_TYPE) {
+          return false
+        }
+        const loopParent = getLoopContainerForNode(node)
+        return loopParent && !draggedLoopIds.has(String(loopParent.id))
+      })
+      if (hasStandaloneLoopChild) {
+        return
+      }
+      resetContainerInternalPosition(nodes)
+    }
+    dragService.__awLoopChildDragPatched = true
+  }
+
+  const layout = ctx.document.layout as unknown as {
+    __awLoopChildTransformPatched?: boolean
+    updateAffectedTransform?: (node: WorkflowNodeEntity) => void
+    fireChange?: (node: WorkflowNodeEntity) => void
+  }
+  installLoopParentPositionGuard(ctx, dragService)
+  if (layout.__awLoopChildTransformPatched || typeof layout.updateAffectedTransform !== 'function') {
+    return
+  }
+
+  const updateAffectedTransform = layout.updateAffectedTransform.bind(layout)
+  layout.updateAffectedTransform = (node: WorkflowNodeEntity) => {
+    if (isNodeInsideLoopContainer(node)) {
+      layout.fireChange?.(node)
+      return
+    }
+    updateAffectedTransform(node)
+  }
+  layout.__awLoopChildTransformPatched = true
+}
+
+function isNodeInsideLoopContainer(node: WorkflowNodeEntity) {
+  let parent = node.parent
+  while (parent) {
+    const parentJson = parent.toJSON?.() as WorkflowNodeJSON | undefined
+    const parentType = String(parentJson?.type ?? parent.flowNodeType ?? '')
+    if (parentType === 'loop') {
+      return true
+    }
+    parent = parent.parent
+  }
+  return false
+}
+
+function installLoopParentPositionGuard(
+  ctx: FreeLayoutPluginContext,
+  dragService: {
+    __awLoopParentPositionGuardInstalled?: boolean
+    onNodesDrag?: (listener: (event: LoopDragEvent) => void) => { dispose?: () => void }
+  },
+) {
+  if (dragService.__awLoopParentPositionGuardInstalled || typeof dragService.onNodesDrag !== 'function') {
+    return
+  }
+
+  const lockedLoopPositions = new Map<string, {
+    node: WorkflowNodeEntity
+    position: { x: number; y: number }
+  }>()
+  const operationService = ctx.get(WorkflowOperationBaseService) as WorkflowNodePositionService
+
+  dragService.onNodesDrag((event) => {
+    const eventNodes = event.nodes.filter(isWorkflowNodeEntity)
+    const draggedLoopIds = getDraggedLoopNodeIds(eventNodes)
+    const loopParents = eventNodes
+      .filter((node) => getWorkflowNodeType(node) !== LOOP_CANVAS_ANCHOR_NODE_TYPE)
+      .map(getLoopContainerForNode)
+      .filter((node): node is WorkflowNodeEntity => {
+        return Boolean(node) && !draggedLoopIds.has(String(node?.id))
+      })
+
+    if (event.type === 'onDragStart') {
+      lockedLoopPositions.clear()
+      loopParents.forEach((loopNode) => {
+        lockedLoopPositions.set(String(loopNode.id), {
+          node: loopNode,
+          position: {
+            x: loopNode.transform.position.x,
+            y: loopNode.transform.position.y,
+          },
+        })
+      })
+      loopParents.forEach((loopNode) => lockLoopChildPositions(ctx, loopNode, operationService))
+      return
+    }
+
+    if (lockedLoopPositions.size === 0) {
+      return
+    }
+
+    lockedLoopPositions.forEach(({ node, position }) => {
+      const fixedLoopPosition = position
+      if (node.transform.position.x === fixedLoopPosition.x && node.transform.position.y === fixedLoopPosition.y) {
+        lockLoopChildPositions(ctx, node, operationService)
+      } else {
+        node.transform.transform.update({ position: fixedLoopPosition })
+        ctx.document.layout.updateAffectedTransform(node)
+        lockLoopChildPositions(ctx, node, operationService)
+      }
+    })
+
+    if (event.type === 'onDragEnd') {
+      lockedLoopPositions.forEach(({ node }) => lockLoopChildPositions(ctx, node, operationService))
+      lockedLoopPositions.clear()
+    }
+  })
+
+  dragService.__awLoopParentPositionGuardInstalled = true
+}
+
+function lockAllLoopChildPositions(ctx: FreeLayoutPluginContext) {
+  const operationService = ctx.get(WorkflowOperationBaseService) as WorkflowNodePositionService
+  ctx.document.getAllNodes()
+    .filter((node) => getWorkflowNodeType(node) === 'loop')
+    .forEach((loopNode) => lockLoopChildPositions(ctx, loopNode, operationService))
+}
+
+type WorkflowNodePositionService = {
+  updateNodePosition: (nodeOrId: WorkflowNodeEntity | string, position: { x: number; y: number }) => void
+}
+
+function lockLoopChildPositions(
+  ctx: FreeLayoutPluginContext,
+  loopNode: WorkflowNodeEntity,
+  operationService: WorkflowNodePositionService,
+) {
+  loopNode.blocks?.forEach((block) => {
+    if (getWorkflowNodeType(block) === LOOP_CANVAS_ANCHOR_NODE_TYPE) {
+      return
+    }
+    const fixedPosition = clampLoopChildPosition(block)
+    if (
+      Math.round(block.transform.position.x) === fixedPosition.x
+      && Math.round(block.transform.position.y) === fixedPosition.y
+    ) {
+      return
+    }
+    operationService.updateNodePosition(block, fixedPosition)
+    ;(ctx.document.layout as unknown as { updateAffectedTransform?: (node: WorkflowNodeEntity) => void })
+      .updateAffectedTransform?.(block)
+  })
+  expandLoopCanvasForChildren(ctx, loopNode)
+}
+
+function expandLoopCanvasForChildren(ctx: FreeLayoutPluginContext, loopNode: WorkflowNodeEntity) {
+  const loopJson = loopNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
+  const currentData = normalizeNodeData(loopJson.data, 'loop')
+  const bodyNodes = loopNode.blocks?.map((block) => {
+    const bounds = block.transform.bounds
+
+    return {
+      type: getWorkflowNodeType(block),
+      position: {
+        x: Math.round(block.transform.position.x),
+        y: Math.round(block.transform.position.y),
+      },
+      size: {
+        width: bounds?.width,
+        height: bounds?.height,
+      },
+    }
+  }) ?? []
+  const nextSize = getAutoLoopBodyCanvasSize(bodyNodes)
+  if (
+    nextSize.width === (currentData.config.loopCanvasWidth ?? DEFAULT_LOOP_CANVAS_WIDTH)
+    && nextSize.height === (currentData.config.loopCanvasHeight ?? DEFAULT_LOOP_CANVAS_HEIGHT)
+  ) {
+    return
+  }
+
+  ;(loopNode as unknown as { updateExtInfo?: (data: FlowgramNodeData, fullUpdate?: boolean) => void }).updateExtInfo?.(
+    {
+      ...currentData,
+      config: {
+        ...currentData.config,
+        loopCanvasWidth: nextSize.width,
+        loopCanvasHeight: nextSize.height,
+      },
+    },
+    true,
+  )
+  ctx.document.layout.updateAffectedTransform(loopNode)
+}
+
+function clampLoopChildPosition(node: WorkflowNodeEntity) {
+  const limits = getLoopChildPositionLimits(node)
+
+  return {
+    x: Math.max(Math.round(node.transform.position.x), limits.minX),
+    y: Math.max(Math.round(node.transform.position.y), limits.minY),
+  }
+}
+
+function getLoopChildPositionLimits(node: WorkflowNodeEntity) {
+  const bounds = node.transform.bounds
+  const halfWidth = Math.max((bounds?.width ?? 320) / 2, 80)
+  const margin = 24
+  const leftReserved = 220
+  const topReserved = 172
+
+  return {
+    minX: Math.max(halfWidth + margin, leftReserved),
+    minY: topReserved,
+  }
+}
+
+function getLoopContainerForNode(node: WorkflowNodeEntity) {
+  let parent = node.parent
+  while (parent) {
+    if (getWorkflowNodeType(parent) === 'loop') {
+      return parent
+    }
+    parent = parent.parent
+  }
+  return undefined
+}
+
+function getDraggedLoopNodeIds(nodes: WorkflowNodeEntity[]) {
+  return new Set(
+    nodes
+      .filter((node) => getWorkflowNodeType(node) === 'loop')
+      .map((node) => String(node.id)),
+  )
+}
+
+function getDragTargetWorkflowNode(ctx: FreeLayoutPluginContext, target: EventTarget | null | undefined) {
+  if (!(target instanceof HTMLElement)) {
+    return undefined
+  }
+  const nodeId = target.getAttribute('data-node-id') ?? target.closest('[data-node-id]')?.getAttribute('data-node-id')
+  if (!nodeId) {
+    return undefined
+  }
+  return getAllWorkflowNodes(ctx).find((node) => String(node.id) === nodeId)
+}
+
+interface LoopDragEvent {
+  type: string
+  nodes: unknown[]
+  startPositions?: Array<{ x: number; y: number }>
+  positions?: Array<{ x: number; y: number }>
+  dragEvent?: {
+    offset?: { x: number; y: number }
+  }
+  triggerEvent?: {
+    target?: EventTarget | null
+  }
+}
+
+function isWorkflowNodeEntity(node: unknown): node is WorkflowNodeEntity {
+  return Boolean(node && typeof node === 'object' && 'id' in node && 'transform' in node)
+}
+
+function getAllWorkflowNodes(ctx: FreeLayoutPluginContext) {
+  const documentWithNodes = ctx.document as unknown as {
+    getAllNodes?: () => WorkflowNodeEntity[]
+  }
+  return documentWithNodes.getAllNodes?.() ?? []
+}
+
+function getWorkflowJSONWithLivePositions(ctx: FreeLayoutPluginContext): WorkflowJSON {
+  const entitiesById = new Map(getAllWorkflowNodes(ctx).map((node) => [String(node.id), node]))
+  const patchNodePosition = (node: WorkflowJSON['nodes'][number]): WorkflowJSON['nodes'][number] => {
+    const entity = entitiesById.get(String(node.id))
+    const livePosition = entity?.transform?.position
+    const meta = (node.meta ?? {}) as NonNullable<WorkflowJSON['nodes'][number]['meta']>
+
+    return {
+      ...node,
+      meta: {
+        ...meta,
+        ...(livePosition
+          ? {
+            position: {
+              x: Math.round(livePosition.x),
+              y: Math.round(livePosition.y),
+            },
+          }
+          : {}),
+      },
+      blocks: node.blocks?.map(patchNodePosition),
+    }
+  }
+  const json = ctx.document.toJSON()
+
+  return {
+    ...json,
+    nodes: json.nodes.map(patchNodePosition),
+  }
+}
+
+function installNodeDragEndPersistence(
+  ctx: FreeLayoutPluginContext,
+  setWorkflowGraph: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void,
+) {
+  const dragService = ctx.get(WorkflowDragService) as unknown as {
+    __awNodeDragEndPersistenceInstalled?: boolean
+    onNodesDrag?: (listener: (event: LoopDragEvent) => void) => { dispose?: () => void }
+  }
+  if (dragService.__awNodeDragEndPersistenceInstalled || typeof dragService.onNodesDrag !== 'function') {
+    return
+  }
+
+  dragService.onNodesDrag((event) => {
+    if (event.type !== 'onDragEnd') {
+      return
+    }
+    window.setTimeout(() => {
+      lockAllLoopChildPositions(ctx)
+      const liveJson = getWorkflowJSONWithLivePositions(ctx)
+      const nextGraph = fromFlowgramJSON(liveJson)
+      setWorkflowGraph(...nextGraph)
+    }, 0)
+  })
+  dragService.__awNodeDragEndPersistenceInstalled = true
+}
+
+function getWorkflowNodeType(node: WorkflowNodeEntity) {
+  const json = node.toJSON?.() as WorkflowNodeJSON | undefined
+  return String(json?.type ?? node.flowNodeType ?? '')
+}
+
 export function WorkflowEditor({
   nodes,
   edges,
@@ -318,8 +709,8 @@ export function WorkflowEditor({
   const activeTrialRunEdgeKeysRef = useRef<Set<string>>(new Set())
 
   const singleNodeTrialNode = useMemo(() => {
-    const targetNode = nodes.find((node) => node.id === singleNodeTrialNodeId)
-    return targetNode ? normalizeSelectorLabelsForNode(targetNode, nodes) : undefined
+    const targetNode = findWorkflowNodeById(nodes, singleNodeTrialNodeId)
+    return targetNode ? normalizeSelectorLabelsForNode(targetNode, flattenWorkflowNodes(nodes)) : undefined
   }, [nodes, singleNodeTrialNodeId])
 
   const clearTrialRunTimers = useCallback(() => {
@@ -470,7 +861,8 @@ export function WorkflowEditor({
   const openSingleNodeTrial = useCallback((nodeId: string) => {
     const ctx = ctxRef.current
     const [latestNodes] = ctx ? fromFlowgramJSON(ctx.document.toJSON()) : [nodes]
-    const targetNode = latestNodes.find((item) => item.id === nodeId)
+    const allKnownNodes = flattenWorkflowNodes(latestNodes)
+    const targetNode = findWorkflowNodeById(latestNodes, nodeId)
     if (!targetNode) {
       return
     }
@@ -479,7 +871,7 @@ export function WorkflowEditor({
     const fallbackPayload = globalDebugJsonMode
       ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
       : buildPayloadFromFieldEntries(globalDebugFields)
-    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload, latestNodes)
+    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload, allKnownNodes)
     const combinedJson = cached?.combinedJson ?? JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
 
     clearTrialRunTimers()
@@ -526,7 +918,8 @@ export function WorkflowEditor({
 
     const ctx = ctxRef.current
     const [latestNodes] = ctx ? fromFlowgramJSON(ctx.document.toJSON()) : [nodes]
-    const targetNode = latestNodes.find((item) => item.id === nodeId)
+    const allKnownNodes = flattenWorkflowNodes(latestNodes)
+    const targetNode = findWorkflowNodeById(latestNodes, nodeId)
     if (!targetNode) {
       return
     }
@@ -554,7 +947,7 @@ export function WorkflowEditor({
         : buildPayloadFromFieldEntries(globalDebugFields))
 
       setTrialRunning(true)
-      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode, latestNodes), payload, {
+      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode, allKnownNodes), payload, {
         signal: abortController.signal,
         onWorkflowEvent: (event) => {
           applyRuntimeEventToNode(event, nodeId, targetNode)
@@ -639,12 +1032,11 @@ export function WorkflowEditor({
 
   const {
     addNode,
-    closeQuickAddPanel,
     copyNode,
     deleteNode,
     openNodePanel,
     openQuickAddPanel,
-    quickAddNodeId,
+    updateNodeConfigById,
     updateSelectedNode,
   } = useWorkflowNodeActions({
     ctxRef,
@@ -673,6 +1065,44 @@ export function WorkflowEditor({
     },
   })
 
+  const getPlaygroundPositionConfig = useCallback(() => (
+    ctxRef.current?.playground as { config?: PlaygroundConfigWithPosition } | undefined
+  )?.config, [])
+
+  const resetLineFromMouse = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const ctx = ctxRef.current
+    if (!ctx || event.button !== 0) {
+      return false
+    }
+
+    const target = event.target as HTMLElement
+    if (
+      target.closest('.aw-flow-node') ||
+      target.closest('.aw-flow-ignore-deselect') ||
+      target.closest('.gedit-minimap-layer')
+    ) {
+      return false
+    }
+
+    const playgroundConfig = getPlaygroundPositionConfig()
+    const getPosFromMouseEvent = playgroundConfig?.getPosFromMouseEvent?.bind(playgroundConfig)
+    if (!getPosFromMouseEvent) {
+      return false
+    }
+
+    const position = getPosFromMouseEvent(event.nativeEvent)
+    const line = ctx.document.linesManager.getCloseInLineFromMousePos(position, 14)
+    if (!line || !line.from || !line.to || line.isDrawing || line.isHidden || line.disabled) {
+      return false
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    ctx.get(WorkflowSelectService).select(line)
+    void ctx.get(WorkflowDragService).resetLine(line, event.nativeEvent)
+    return true
+  }, [getPlaygroundPositionConfig])
+
   const editorProps = useMemo<FreeLayoutProps>(
     () => ({
       background: false,
@@ -685,7 +1115,6 @@ export function WorkflowEditor({
             node={props.node}
             onSelectNode={selectNodeForConfig}
             selectedNodeId={selectedNodeId}
-            quickAddOpenNodeId={quickAddNodeId}
             trialRunExecution={trialRunExecutions[String(props.node.id)]}
             autoExpandExecutionDetails={singleNodeTrialOpen && singleNodeTrialNodeId === String(props.node.id)}
             nodeActionRunning={trialRunning}
@@ -693,6 +1122,13 @@ export function WorkflowEditor({
             onCopyNode={copyNode}
             onDeleteNode={deleteNode}
             onToggleQuickAdd={openQuickAddPanel}
+            onAddLoopChild={(loopNodeId) => {
+              void openNodePanel({
+                parentNodeId: loopNodeId,
+                loopSourceNodeId: loopNodeId,
+                selectCreated: true,
+              })
+            }}
           />
         ),
       },
@@ -701,6 +1137,7 @@ export function WorkflowEditor({
         enableChangeNode: true,
       },
       plugins: () => [
+        createContainerNodePlugin({}),
         createFreeSnapPlugin({
           edgeColor: '#3458c5',
           alignColor: '#4f7cff',
@@ -740,6 +1177,19 @@ export function WorkflowEditor({
           renderer: FlowgramNodePanel,
         }),
       ],
+      canDropToNode: (_ctx, params) => {
+        if (!params.dropNode) {
+          return false
+        }
+        const dropJson = params.dropNode.toJSON() as WorkflowNodeJSON
+        if (String(dropJson.type) !== 'loop') {
+          return false
+        }
+        const dragType = params.dragNode
+          ? String((params.dragNode.toJSON() as WorkflowNodeJSON).type)
+          : String(params.dragNodeType ?? params.dropNodeType ?? '')
+        return dragType !== 'loop' && dragType !== 'start' && dragType !== 'loop-start' && dragType !== 'loop-end'
+      },
       lineColor: {
         default: 'rgba(100, 116, 139, 0.42)',
         hovered: '#60a5fa',
@@ -750,9 +1200,23 @@ export function WorkflowEditor({
         hidden: 'transparent',
       },
       onContentChange: (ctx) => {
-        setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+        lockAllLoopChildPositions(ctx)
+        const liveJson = getWorkflowJSONWithLivePositions(ctx)
+        const nextGraph = fromFlowgramJSON(liveJson)
+        setWorkflowGraph(...nextGraph)
+      },
+      onDragLineEnd: async () => {
+        const ctx = ctxRef.current
+        if (ctx) {
+          lockAllLoopChildPositions(ctx)
+          const liveJson = getWorkflowJSONWithLivePositions(ctx)
+          const nextGraph = fromFlowgramJSON(liveJson)
+          setWorkflowGraph(...nextGraph)
+        }
       },
       onAllLayersRendered: (ctx) => {
+        patchLoopChildDragIsolation(ctx)
+        installNodeDragEndPersistence(ctx, setWorkflowGraph)
         ctx.tools.fitView(false)
       },
     }),
@@ -761,9 +1225,10 @@ export function WorkflowEditor({
       copyNode,
       deleteNode,
       initialData,
+      nodes,
       openNodePanel,
+      openQuickAddPanel,
       openSingleNodeTrial,
-      quickAddNodeId,
       selectNodeForConfig,
       selectedNodeId,
       setWorkflowGraph,
@@ -771,6 +1236,7 @@ export function WorkflowEditor({
       singleNodeTrialOpen,
       trialRunExecutions,
       trialRunning,
+      updateNodeConfigById,
     ],
   )
 
@@ -1102,6 +1568,9 @@ export function WorkflowEditor({
       <div
         className="aw-flow-editor-shell relative h-[calc(100%-61px)] min-h-[680px]"
         onMouseDownCapture={(event) => {
+          if (resetLineFromMouse(event)) {
+            return
+          }
           const target = event.target as HTMLElement
           if (
             target.closest('.aw-flow-node') ||
@@ -1112,7 +1581,6 @@ export function WorkflowEditor({
           }
 
           onSelectNode('')
-          closeQuickAddPanel()
         }}
       >
         <FreeLayoutEditorProvider ref={handleEditorRef} {...editorProps}>
@@ -1151,7 +1619,6 @@ export function WorkflowEditor({
               void openNodePanel()
             }}
             onToggleTrialRun={() => {
-              closeQuickAddPanel()
               setSingleNodeTrialOpen(false)
               setGlobalDebugFields((prev) => {
                 const nextFields = createGlobalDebugFields(nodes, prev)

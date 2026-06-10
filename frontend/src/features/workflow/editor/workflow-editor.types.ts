@@ -5,7 +5,10 @@ export type NodePaletteKey = (typeof nodePalette)[number]['key']
 
 export interface AddNodeOptions {
   connectFromNodeId?: string
+  parentNodeId?: string
+  loopSourceNodeId?: string
   sourcePortID?: string | number
+  panelPosition?: { x: number; y: number }
   position?: { x: number; y: number }
   selectCreated?: boolean
 }

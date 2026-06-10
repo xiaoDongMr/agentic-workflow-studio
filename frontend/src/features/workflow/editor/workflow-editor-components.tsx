@@ -22,16 +22,22 @@ export function FlowgramNodePanel({
 }: NodePanelRenderProps) {
   const [keyword, setKeyword] = useState('')
   const sourceTitle = typeof panelProps?.sourceTitle === 'string' ? panelProps.sourceTitle : ''
+  const disallowNodeTypes = Array.isArray(panelProps?.disallowNodeTypes)
+    ? new Set(panelProps.disallowNodeTypes.map(String))
+    : new Set<string>()
 
   const filteredSections = useMemo(
     () =>
       bottomLibrarySections
         .map((section) => ({
           ...section,
-          items: section.items.filter((item) => item.title.toLowerCase().includes(keyword.toLowerCase())),
+          items: section.items.filter((item) => {
+            const nodeType = paletteToNodeType[item.nodeKey]
+            return !disallowNodeTypes.has(nodeType) && item.title.toLowerCase().includes(keyword.toLowerCase())
+          }),
         }))
         .filter((section) => section.items.length > 0),
-    [keyword],
+    [disallowNodeTypes, keyword],
   )
 
   return (
@@ -48,7 +54,7 @@ export function FlowgramNodePanel({
           <div>
             <p className="text-sm font-semibold text-white">添加节点</p>
             <p className="mt-1 text-[11px] text-slate-400">
-              {sourceTitle ? `从“${sourceTitle}”后继续扩展流程` : '选择一个节点类型加入当前画布'}
+              {sourceTitle ? `添加到“${sourceTitle}”` : '选择一个节点类型加入当前画布'}
             </p>
           </div>
           <button

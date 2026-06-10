@@ -45,9 +45,24 @@ def build_mapped_values(mappings: list[Any], state: WorkflowState) -> dict[str, 
 
 
 def parse_literal_mapping_value(source: Any, value_type: str) -> Any:
-    if not isinstance(source, str) or not value_type.startswith("Array<"):
+    if not isinstance(source, str):
         return source
     text = source.strip()
+    if value_type in {"Integer", "Number"}:
+        try:
+            return int(text) if value_type == "Integer" else float(text)
+        except ValueError:
+            return 0 if value_type == "Integer" else 0.0
+    if value_type == "Boolean":
+        return text.lower() in {"true", "1", "yes", "是"}
+    if value_type == "Object":
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    if not value_type.startswith("Array"):
+        return source
     if not text:
         return []
     try:

@@ -10,8 +10,10 @@ interface WorkflowStore {
   workflow: typeof mockWorkflow
   selectedNodeId: string
   activeTab: 'visual' | 'code' | 'logs'
+  draftHydrated: boolean
   setSelectedNodeId: (nodeId: string) => void
   setActiveTab: (tab: WorkflowStore['activeTab']) => void
+  setDraftHydrated: (draftHydrated: boolean) => void
   setWorkflowGraph: (
     nodes: typeof mockWorkflow.nodes,
     edges: typeof mockWorkflow.edges,
@@ -23,40 +25,65 @@ interface WorkflowStore {
   ) => void
 }
 
+function updateWorkflowNodeTree(
+  nodes: WorkflowNode[],
+  selectedNodeId: string,
+  partial: Partial<Omit<WorkflowNode, 'config'>> & {
+    config?: Partial<WorkflowNode['config']>
+  },
+): WorkflowNode[] {
+  return nodes.map((node) => {
+    if (node.id === selectedNodeId) {
+      return {
+        ...node,
+        ...partial,
+        config: partial.config
+          ? {
+              ...node.config,
+              ...partial.config,
+            }
+          : node.config,
+      }
+    }
+
+    const loopBodyNodes = node.config.loopBodyNodes ?? []
+    if (loopBodyNodes.length === 0) {
+      return node
+    }
+
+    return {
+      ...node,
+      config: {
+        ...node.config,
+        loopBodyNodes: updateWorkflowNodeTree(loopBodyNodes, selectedNodeId, partial),
+      },
+    }
+  })
+}
+
 export const useWorkflowStore = create<WorkflowStore>()(
   persist(
     (set) => ({
       workflow: mockWorkflow,
       selectedNodeId: '',
       activeTab: 'visual',
+      draftHydrated: false,
       setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
       setActiveTab: (activeTab) => set({ activeTab }),
+      setDraftHydrated: (draftHydrated) => set({ draftHydrated }),
       setWorkflowGraph: (nodes, edges) =>
         set((state) => ({
-          workflow: {
-            ...state.workflow,
-            nodes,
-            edges,
-          },
-        })),
+            workflow: {
+              ...state.workflow,
+              nodes,
+              edges,
+            },
+          })),
       updateSelectedNode: (partial) =>
         set((state) => ({
           workflow: {
             ...state.workflow,
-            nodes: state.workflow.nodes.map((node) =>
-              node.id === state.selectedNodeId
-                ? {
-                    ...node,
-                    ...partial,
-                    config: partial.config
-                      ? {
-                          ...node.config,
-                          ...partial.config,
-                        }
-                      : node.config,
-                  }
-                : node,
-            ),
+            nodes: updateWorkflowNodeTree(state.workflow.nodes, state.selectedNodeId, partial),
           },
         })),
     }),
@@ -67,6 +94,9 @@ export const useWorkflowStore = create<WorkflowStore>()(
         workflow: state.workflow,
         activeTab: state.activeTab,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setDraftHydrated(true)
+      },
     },
   ),
 )

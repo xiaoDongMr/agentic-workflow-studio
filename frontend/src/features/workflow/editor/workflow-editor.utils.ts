@@ -15,10 +15,22 @@ import type {
   GlobalDebugFieldValue,
   TrialRunNodeExecution,
 } from '@/features/workflow/editor/workflow-editor.types'
+import {
+  createLoopCanvasAnchorNode,
+  filterLoopEndpointNodes,
+  isLoopInternalNodeType,
+  loopEdgeFromFlowgramEdge,
+  LOOP_CANVAS_ANCHOR_NODE_TYPE,
+  LOOP_END_NODE_TYPE,
+  LOOP_START_NODE_TYPE,
+  normalizeLoopBodyEdges,
+  toVisibleLoopBodyEdges,
+} from '@/features/workflow/editor/loop-node.utils'
 import { trialRunStepTemplates } from '@/features/workflow/mock-data'
 import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode } from '@/types/workflow'
 
 export const SELECTOR_ELSE_PORT_ID = 'selector-else'
+const DEFAULT_PORT_HIT_SIZE = { width: 34, height: 34 }
 
 export interface SelectorBranchPortInfo {
   portID: string
@@ -27,14 +39,35 @@ export interface SelectorBranchPortInfo {
   kind: 'branch' | 'else'
 }
 
-export function createNodeData(type: WorkflowNode['type']): FlowgramNodeData {
+export function createNodeData(type: WorkflowNode['type'] | typeof LOOP_CANVAS_ANCHOR_NODE_TYPE): FlowgramNodeData {
+  if (type === LOOP_CANVAS_ANCHOR_NODE_TYPE) {
+    return {
+      title: '',
+      description: '',
+      status: 'idle',
+      kind: LOOP_CANVAS_ANCHOR_NODE_TYPE as WorkflowNode['type'],
+      config: {
+        prompt: '',
+        model: '',
+        temperature: 0,
+        maxTokens: 0,
+        enabled: false,
+        fallbackToHuman: false,
+        responseMode: 'json',
+        outputKey: '',
+        inputMappings: [],
+      },
+      inputs: [],
+      outputs: [],
+    }
+  }
   const base = defaultNodeContent[type]
 
   return {
     title: base.title,
     description: base.description,
     status: base.status,
-    kind: type,
+    kind: type as WorkflowNode['type'],
     config: {
       ...base.config,
       inputMappings: base.config.inputMappings.map((mapping) => ({ ...mapping })),
@@ -46,7 +79,7 @@ export function createNodeData(type: WorkflowNode['type']): FlowgramNodeData {
 
 export function normalizeNodeData(
   data: Partial<FlowgramNodeData> | undefined,
-  type: WorkflowNode['type'],
+  type: WorkflowNode['type'] | typeof LOOP_CANVAS_ANCHOR_NODE_TYPE,
 ): FlowgramNodeData {
   const base = createNodeData(type)
   const config = normalizeNodeConfig(data?.config)
@@ -54,7 +87,7 @@ export function normalizeNodeData(
   return {
     ...base,
     ...data,
-    kind: type,
+    kind: type as WorkflowNode['type'],
     config: {
       ...base.config,
       ...config,
@@ -99,33 +132,65 @@ export function mergeInputMappings(
 
 export function toFlowgramJSON(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowJSON {
   return {
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      meta: {
-        position: {
-          x: node.position.x + CANVAS_OFFSET_X,
-          y: node.position.y + CANVAS_OFFSET_Y,
-        },
-        defaultPorts: buildWorkflowNodePorts({
-          kind: node.type,
-          config: node.config,
-        }),
-      },
-      data: {
-        title: node.title,
-        description: node.description,
-        status: node.status,
-        kind: node.type,
-        config: {
-          ...node.config,
-          inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
-        },
-        inputs: node.inputs,
-        outputs: node.outputs,
-      },
-    })),
+    nodes: nodes.map((node) => workflowNodeToFlowgramNode(node, true)),
     edges: edges.map((edge) => ({
+      sourceNodeID: edge.source,
+      targetNodeID: edge.target,
+      sourcePortID: edge.sourcePortID,
+      targetPortID: edge.targetPortID,
+    })),
+  }
+}
+
+export function workflowNodeToFlowgramNode(node: WorkflowNode, applyCanvasOffset: boolean): WorkflowJSON['nodes'][number] {
+  const loopBodyNodes = node.type === 'loop'
+    ? filterLoopEndpointNodes(node.config.loopBodyNodes ?? [])
+    : undefined
+  const loopBodyEdges = node.type === 'loop'
+    ? normalizeLoopBodyEdges(node.id, node.config.loopBodyEdges ?? [])
+    : undefined
+  const offsetX = applyCanvasOffset ? CANVAS_OFFSET_X : 0
+  const offsetY = applyCanvasOffset ? CANVAS_OFFSET_Y : 0
+  const baseNode = {
+    id: node.id,
+    type: node.type,
+    meta: {
+      position: {
+        x: node.position.x + offsetX,
+        y: node.position.y + offsetY,
+      },
+      defaultPorts: buildWorkflowNodePorts({
+        kind: node.type,
+        config: node.config,
+      }),
+    },
+    data: {
+      title: node.title,
+      description: node.description,
+      status: node.status,
+      kind: node.type,
+      config: {
+        ...node.config,
+        inputMappings: node.config.inputMappings.map((item) => ({ ...item })),
+        ...(loopBodyNodes ? { loopBodyNodes } : {}),
+        ...(loopBodyEdges ? { loopBodyEdges } : {}),
+      },
+      inputs: node.inputs,
+      outputs: node.outputs,
+    },
+  } satisfies WorkflowJSON['nodes'][number]
+
+  if (node.type !== 'loop') {
+    return baseNode
+  }
+
+  return {
+    ...baseNode,
+    blocks: [
+      createLoopCanvasAnchorNode(node.id),
+      ...(loopBodyNodes?.map((bodyNode) => workflowNodeToFlowgramNode(bodyNode, false)) ?? []),
+    ],
+    edges: (loopBodyEdges ?? []).flatMap((edge) => toVisibleLoopBodyEdges(node.id, edge)).map((edge) => ({
       sourceNodeID: edge.source,
       targetNodeID: edge.target,
       sourcePortID: edge.sourcePortID,
@@ -137,24 +202,7 @@ export function toFlowgramJSON(nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
 export function fromFlowgramJSON(json: WorkflowJSON): [WorkflowNode[], WorkflowEdge[]] {
   return [
     json.nodes.map((node, index) => {
-      const type = String(node.type) as WorkflowNode['type']
-      const data = normalizeNodeData(node.data as Partial<FlowgramNodeData>, type)
-      const position = (node.meta as { position?: { x?: number; y?: number } } | undefined)?.position
-
-      return {
-        id: String(node.id ?? `${type}-${index + 1}`),
-        title: data.title,
-        type,
-        description: data.description,
-        position: {
-          x: Math.max((position?.x ?? CANVAS_OFFSET_X) - CANVAS_OFFSET_X, 0),
-          y: Math.max((position?.y ?? CANVAS_OFFSET_Y) - CANVAS_OFFSET_Y, 0),
-        },
-        status: data.status,
-        inputs: data.inputs,
-        outputs: data.outputs,
-        config: data.config,
-      }
+      return flowgramNodeToWorkflowNode(node, index, true)
     }),
     json.edges.map((edge, index) => ({
       id: `${edge.sourceNodeID}-${edge.targetNodeID}-${index + 1}`,
@@ -166,6 +214,60 @@ export function fromFlowgramJSON(json: WorkflowJSON): [WorkflowNode[], WorkflowE
   ]
 }
 
+function flowgramNodeToWorkflowNode(
+  node: WorkflowJSON['nodes'][number],
+  index: number,
+  applyCanvasOffset: boolean,
+): WorkflowNode {
+  const type = String(node.type) as WorkflowNode['type']
+  const data = normalizeNodeData(node.data as Partial<FlowgramNodeData>, type)
+  const position = (node.meta as { position?: { x?: number; y?: number } } | undefined)?.position
+  const offsetX = applyCanvasOffset ? CANVAS_OFFSET_X : 0
+  const offsetY = applyCanvasOffset ? CANVAS_OFFSET_Y : 0
+  const rawLoopBodyNodes = type === 'loop' && Array.isArray(node.blocks)
+    ? node.blocks
+      .filter((block) => !isLoopInternalNodeType(String(block.type)))
+      .map((block, blockIndex) => flowgramNodeToWorkflowNode(block, blockIndex, false))
+    : data.config.loopBodyNodes
+  const loopBodyNodes = type === 'loop'
+    ? filterLoopEndpointNodes(rawLoopBodyNodes ?? [])
+    : data.config.loopBodyNodes
+  const rawLoopBodyEdges = type === 'loop'
+    ? Array.isArray(node.edges)
+      ? [
+        ...(data.config.loopBodyEdges ?? []),
+        ...node.edges.map((edge, edgeIndex) => loopEdgeFromFlowgramEdge(
+          String(node.id ?? `${type}-${index + 1}`),
+          edge,
+          edgeIndex,
+        )),
+      ]
+      : data.config.loopBodyEdges
+    : data.config.loopBodyEdges
+  const loopBodyEdges = type === 'loop'
+    ? normalizeLoopBodyEdges(String(node.id ?? `${type}-${index + 1}`), rawLoopBodyEdges ?? [])
+    : data.config.loopBodyEdges
+
+  return {
+    id: String(node.id ?? `${type}-${index + 1}`),
+    title: data.title,
+    type,
+    description: data.description,
+    position: {
+      x: (position?.x ?? offsetX) - offsetX,
+      y: (position?.y ?? offsetY) - offsetY,
+    },
+    status: data.status,
+    inputs: data.inputs,
+    outputs: data.outputs,
+    config: {
+      ...data.config,
+      loopBodyNodes,
+      loopBodyEdges,
+    },
+  }
+}
+
 export function normalizeWorkflowNodeForRun(node: WorkflowNode): WorkflowNode {
   return {
     ...node,
@@ -174,21 +276,28 @@ export function normalizeWorkflowNodeForRun(node: WorkflowNode): WorkflowNode {
 }
 
 export function buildWorkflowNodePorts(data: Pick<FlowgramNodeData, 'kind' | 'config'>): WorkflowPorts {
-  if (data.kind === 'start') {
-    return [{ type: 'output' }]
+  if (data.kind === 'start' || data.kind === LOOP_START_NODE_TYPE) {
+    return [{ type: 'output', size: DEFAULT_PORT_HIT_SIZE }]
   }
-  if (data.kind === 'end') {
-    return [{ type: 'input' }]
+  if (String(data.kind) === LOOP_CANVAS_ANCHOR_NODE_TYPE) {
+    return [{ type: 'output', size: DEFAULT_PORT_HIT_SIZE }]
+  }
+  if (data.kind === 'end' || data.kind === LOOP_END_NODE_TYPE) {
+    return [{ type: 'input', size: DEFAULT_PORT_HIT_SIZE }]
   }
   if (data.kind !== 'selector') {
-    return [{ type: 'input' }, { type: 'output' }]
+    return [
+      { type: 'input', size: DEFAULT_PORT_HIT_SIZE },
+      { type: 'output', size: DEFAULT_PORT_HIT_SIZE },
+    ]
   }
 
   return [
-    { type: 'input' },
+    { type: 'input', size: DEFAULT_PORT_HIT_SIZE },
     ...getSelectorBranchPortInfos(data.config.selectorBranches?.length ?? 1).map((port) => ({
       type: 'output' as const,
       portID: port.portID,
+      size: DEFAULT_PORT_HIT_SIZE,
       location: 'right' as const,
       locationConfig: {
         right: 0,
@@ -221,8 +330,8 @@ export function getNodeEntityMeta(node: { id: string | number; toJSON: () => unk
   return {
     id: String(node.id),
     position: {
-      x: Math.max((position?.x ?? CANVAS_OFFSET_X) - CANVAS_OFFSET_X, 0),
-      y: Math.max((position?.y ?? CANVAS_OFFSET_Y) - CANVAS_OFFSET_Y, 0),
+      x: (position?.x ?? CANVAS_OFFSET_X) - CANVAS_OFFSET_X,
+      y: (position?.y ?? CANVAS_OFFSET_Y) - CANVAS_OFFSET_Y,
     },
   }
 }

@@ -77,6 +77,15 @@ class WorkflowNodeConfig(BaseModel):
     fallbackOutput: str = ""
     selectorBranches: list[WorkflowSelectorBranch] = Field(default_factory=list)
     selectorElseBranch: str = "default"
+    loopMode: Literal["array", "count"] = "array"
+    loopArraySource: str = ""
+    loopCount: int = Field(default=3, ge=0, le=1000)
+    loopIntermediateVariables: list[dict[str, Any]] = Field(default_factory=list)
+    loopBodyNodes: list[dict[str, Any]] = Field(default_factory=list)
+    loopBodyEdges: list[dict[str, Any]] = Field(default_factory=list)
+    loopOutputs: list[dict[str, Any]] = Field(default_factory=list)
+    loopCanvasWidth: int = Field(default=640, ge=420, le=1200)
+    loopCanvasHeight: int = Field(default=440, ge=320, le=900)
 
     @model_validator(mode="before")
     @classmethod
@@ -100,7 +109,7 @@ class WorkflowNodeIO(BaseModel):
 class WorkflowNode(BaseModel):
     id: str
     title: str
-    type: Literal["start", "llm", "selector", "loop", "code", "end"]
+    type: Literal["start", "llm", "selector", "loop", "loop-start", "loop-end", "code", "end"]
     description: str = ""
     position: dict[str, float] = Field(default_factory=dict)
     status: str = "idle"

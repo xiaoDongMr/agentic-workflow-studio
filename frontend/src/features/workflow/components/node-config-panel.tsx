@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 
 import { LlmNodeConfigPanel } from '@/features/workflow/components/node-config/llm-node-config-panel'
+import { LoopNodeConfigPanel } from '@/features/workflow/components/node-config/loop-node-config-panel'
 import { SelectorNodeConfigPanel } from '@/features/workflow/components/node-config/selector-node-config-panel'
 import {
   BasicInfoSection,
@@ -33,6 +34,9 @@ export function NodeConfigPanel({
         className={className}
       />
     )
+  }
+  if (node.type === 'loop') {
+    return <LoopNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
   const isStartNode = node.type === 'start'
 

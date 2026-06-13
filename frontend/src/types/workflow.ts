@@ -54,15 +54,6 @@ export interface WorkflowInputMapping {
 
 export type WorkflowLoopMode = 'array' | 'count'
 
-export interface WorkflowLoopIntermediateVariable {
-  id: string
-  name: string
-  type: WorkflowValueType | string
-  sourceType: 'literal' | 'node'
-  source: string
-  valueType?: WorkflowValueType | string
-}
-
 export interface WorkflowLoopOutputRef {
   id: string
   name: string
@@ -130,9 +121,7 @@ export interface WorkflowNodeConfig {
   selectorBranches?: WorkflowSelectorBranch[]
   selectorElseBranch?: string
   loopMode?: WorkflowLoopMode
-  loopArraySource?: string
   loopCount?: number
-  loopIntermediateVariables?: WorkflowLoopIntermediateVariable[]
   loopBodyNodes?: WorkflowNode[]
   loopBodyEdges?: WorkflowEdge[]
   loopOutputs?: WorkflowLoopOutputRef[]

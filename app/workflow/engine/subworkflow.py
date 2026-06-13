@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.schemas.workflow import WorkflowDocument, WorkflowEdge, WorkflowNode
-from app.services.workflow_events import workflow_event_context
+from app.services.workflow_events import build_workflow_event, emit_workflow_event, workflow_event_context
 from app.workflow.state import WorkflowState
 
 LOOP_BODY_CONTROL_NODE_TYPES = {"loop-start", "loop-end"}
@@ -62,7 +62,9 @@ class LoopSubgraphRuntime:
         if not compiled_body.graph:
             return state
         with workflow_event_context(event_context or {}):
-            return await self._run_compiled_from_state(compiled_body.graph, state)
+            final_state = await self._run_compiled_from_state(compiled_body.graph, state)
+            emit_loop_iteration_steps(final_state, event_context or {})
+            return final_state
 
 
 def build_loop_body_workflow(loop_node: WorkflowNode) -> LoopBodyWorkflow:
@@ -131,3 +133,33 @@ def find_loop_body_entry(
 def ensure_no_forbidden_loop_body_nodes(nodes: list[WorkflowNode]) -> None:
     if any(node.type in FORBIDDEN_LOOP_BODY_NODE_TYPES for node in nodes):
         raise ValueError("循环体内不能再添加循环节点")
+
+
+def emit_loop_iteration_steps(state: WorkflowState, event_context: dict[str, Any]) -> None:
+    for step in state.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        node_id = str(step.get("nodeId") or "")
+        node_title = str(step.get("nodeTitle") or node_id or "循环体节点")
+        emit_workflow_event(build_workflow_event(
+            "node_log",
+            node_id=node_id,
+            node_title=node_title,
+            title="循环体节点记录",
+            message=str(step.get("log") or f"{node_title} 执行完成"),
+            error=str(step.get("error") or "") or None,
+            duration_ms=read_step_duration(step),
+            data={
+                **event_context,
+                "loopStep": step,
+            },
+        ))
+
+
+def read_step_duration(step: dict[str, Any]) -> int | None:
+    duration = step.get("durationMs")
+    if isinstance(duration, int):
+        return duration
+    if isinstance(duration, float):
+        return round(duration)
+    return None

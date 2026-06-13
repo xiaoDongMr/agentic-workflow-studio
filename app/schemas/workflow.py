@@ -25,6 +25,21 @@ class WorkflowInputMapping(BaseModel):
     valueType: str = ""
 
 
+class WorkflowLoopOutputRef(BaseModel):
+    id: str = ""
+    name: str
+    nodeId: str = ""
+    fieldPath: str = ""
+    type: str = "String"
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "WorkflowLoopOutputRef":
+        self.name = self.name.strip()
+        self.nodeId = self.nodeId.strip()
+        self.fieldPath = self.fieldPath.strip()
+        return self
+
+
 class WorkflowRuleOperand(BaseModel):
     sourceType: Literal["literal", "context", "node"] = "literal"
     source: str = ""
@@ -78,12 +93,10 @@ class WorkflowNodeConfig(BaseModel):
     selectorBranches: list[WorkflowSelectorBranch] = Field(default_factory=list)
     selectorElseBranch: str = "default"
     loopMode: Literal["array", "count"] = "array"
-    loopArraySource: str = ""
-    loopCount: int = Field(default=3, ge=0, le=1000)
-    loopIntermediateVariables: list[dict[str, Any]] = Field(default_factory=list)
-    loopBodyNodes: list[dict[str, Any]] = Field(default_factory=list)
-    loopBodyEdges: list[dict[str, Any]] = Field(default_factory=list)
-    loopOutputs: list[dict[str, Any]] = Field(default_factory=list)
+    loopCount: int = Field(default=3, ge=1, le=100)
+    loopBodyNodes: list["WorkflowNode"] = Field(default_factory=list)
+    loopBodyEdges: list["WorkflowEdge"] = Field(default_factory=list)
+    loopOutputs: list[WorkflowLoopOutputRef] = Field(default_factory=list)
     loopCanvasWidth: int = Field(default=640, ge=420, le=1200)
     loopCanvasHeight: int = Field(default=440, ge=320, le=900)
 
@@ -98,6 +111,33 @@ class WorkflowNodeConfig(BaseModel):
         if legacy in {"minimal", "low", "medium", "high"} and "reasoningEffort" not in data:
             data["reasoningEffort"] = "medium" if legacy == "minimal" else legacy
         return data
+
+    @model_validator(mode="after")
+    def validate_loop_config(self) -> "WorkflowNodeConfig":
+        self._validate_loop_outputs()
+        return self
+
+    def _validate_loop_outputs(self) -> None:
+        output_names: set[str] = set()
+        body_nodes_by_id = {node.id: node for node in self.loopBodyNodes}
+
+        for output in self.loopOutputs:
+            if not output.name:
+                raise ValueError("循环输出变量名不能为空")
+            if output.name in output_names:
+                raise ValueError(f"循环输出变量名重复：{output.name}")
+            output_names.add(output.name)
+
+            if not output.nodeId:
+                raise ValueError(f"循环输出 {output.name} 缺少子图节点")
+            if output.nodeId not in body_nodes_by_id:
+                raise ValueError(f"循环输出 {output.name} 引用了不存在的子图节点")
+            if not output.fieldPath:
+                raise ValueError(f"循环输出 {output.name} 缺少子图输出变量")
+
+            body_node = body_nodes_by_id[output.nodeId]
+            if output.fieldPath not in {item.name for item in body_node.outputs}:
+                raise ValueError(f"循环输出 {output.name} 引用了不存在的子图输出变量")
 
 
 class WorkflowNodeIO(BaseModel):
@@ -133,6 +173,10 @@ class WorkflowDocument(BaseModel):
     version: str = "v0.1.0"
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
+
+
+WorkflowNodeConfig.model_rebuild()
+WorkflowNode.model_rebuild()
 
 
 class WorkflowRunRequest(BaseModel):

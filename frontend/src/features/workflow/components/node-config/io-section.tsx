@@ -668,7 +668,7 @@ function VariableSourceGroup({
         </p>
         {isLoopEntryGroup && (
           <p className="mt-0.5 text-[9px] leading-3 text-slate-500">
-            循环体内可直接引用当前元素、index 和中间变量
+            循环体内可直接引用当前元素和 index
           </p>
         )}
       </div>
@@ -744,13 +744,6 @@ function getLoopEntryOptionMeta(option: WorkflowVariableSource) {
       title: '下标',
       description: '当前元素在数组中的位置，从 0 开始',
       badgeClass: 'border-amber-300/18 bg-amber-400/10 text-amber-100',
-    }
-  }
-  if (option.description?.startsWith('中间变量')) {
-    return {
-      title: '共享',
-      description: '跨轮共享状态，可通过 shared.变量名 读取或更新',
-      badgeClass: 'border-blue-300/18 bg-blue-400/10 text-blue-100',
     }
   }
   return {

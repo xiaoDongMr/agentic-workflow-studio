@@ -34,8 +34,21 @@ import {
   isNodeExecutionPanelExpanded,
   setNodeExecutionPanelExpanded,
 } from '@/features/workflow/editor/node-execution-panel-state'
+import {
+  getNodeTrialRunExecution,
+  setSelectedLoopIteration,
+  useSelectedLoopIteration,
+  useNodeTrialRunExecution,
+  useTrialRunExecutionVersion,
+} from '@/features/workflow/editor/node-trial-run-store'
+import { getLoopExecutionIterations } from '@/features/workflow/editor/runtime-execution-adapter'
 import { getSelectorBranchPortInfos } from '@/features/workflow/editor/workflow-editor.utils'
-import type { AddNodeOptions, FlowgramNodeData, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
+import type {
+  AddNodeOptions,
+  FlowgramNodeData,
+  TrialRunLoopIterationExecution,
+  TrialRunNodeExecution,
+} from '@/features/workflow/editor/workflow-editor.types'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
 import type { WorkflowNode } from '@/types/workflow'
@@ -296,9 +309,11 @@ export function FlowgramNodeCard({
 }) {
   const nodeJson = node.toJSON() as WorkflowJSON['nodes'][number] & { data?: FlowgramNodeData }
   const data = nodeJson.data
-  const effectiveExecution = trialRunExecution ?? data?.trialRunExecution
   const kind = String(data?.kind ?? nodeJson.type) as WorkflowNode['type'] | typeof LOOP_CANVAS_ANCHOR_NODE_TYPE
   const nodeId = String(nodeJson.id)
+  const parentLoopNodeId = getParentLoopNodeId(node) || undefined
+  const subscribedExecution = useNodeTrialRunExecution(nodeId, parentLoopNodeId)
+  const effectiveExecution = subscribedExecution ?? trialRunExecution ?? data?.trialRunExecution
 
   const setSelectedNodeId = useWorkflowStore((state) => state.setSelectedNodeId)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -449,6 +464,7 @@ export function FlowgramNodeCard({
               ) : kind === 'loop' ? (
                 <LoopNativeSubCanvas
                   data={data}
+                  loopNodeId={nodeId}
                 />
               ) : (
                 <>
@@ -539,14 +555,20 @@ export function FlowgramNodeCard({
 
 function LoopNativeSubCanvas({
   data,
+  loopNodeId,
 }: {
   data?: FlowgramNodeData
+  loopNodeId: string
 }) {
+  useTrialRunExecutionVersion()
   const canvasSize = getLoopBodyCanvasSize(data?.config ?? {}, data?.config.loopBodyNodes ?? [])
   const viewportWidth = canvasSize.width
   const viewportHeight = canvasSize.height
   const bodyNodes = filterLoopEndpointNodes(data?.config.loopBodyNodes ?? [])
   const bodyNodeCount = bodyNodes.length
+  const bodyExecutions = bodyNodes
+    .map((node) => ({ node, execution: getNodeTrialRunExecution({ nodeId: node.id, loopNodeId }) }))
+    .filter((item): item is { node: WorkflowNode; execution: TrialRunNodeExecution } => Boolean(item.execution))
 
   return (
     <div
@@ -588,9 +610,50 @@ function LoopNativeSubCanvas({
           }}
           tipText="循环体内部使用 FlowGram 原生连线：可拖拽重连、选中删除、在线中点添加节点。"
         />
+        {bodyExecutions.length > 0 && (
+          <div
+            className="aw-loop-native-canvas__execution-layer aw-flow-ignore-deselect"
+            style={{
+              width: canvasSize.width,
+              height: canvasSize.height,
+            }}
+          >
+            {bodyExecutions.map(({ node, execution }) => (
+              <div
+                key={node.id}
+                className="aw-loop-native-canvas__execution-panel"
+                style={getLoopBodyExecutionPanelStyle(node)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <NodeExecutionPanel execution={execution} autoExpand={false} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+function getLoopBodyExecutionPanelStyle(node: WorkflowNode) {
+  const nodeHeight = getEstimatedLoopBodyNodeHeight(node)
+  return {
+    left: Math.max(Math.round(node.position.x), 0),
+    top: Math.max(Math.round(node.position.y + nodeHeight + 8), 0),
+    width: 320,
+  }
+}
+
+function getEstimatedLoopBodyNodeHeight(node: WorkflowNode) {
+  if (node.type === 'selector') {
+    const branchCount = Math.max(node.config.selectorBranches?.length ?? 1, 1)
+    return Math.max(154, 104 + (branchCount + 1) * 34)
+  }
+  if (node.type === 'loop-start' || node.type === 'loop-end') {
+    return 74
+  }
+  return 154
 }
 
 function LoopEndpointContent({
@@ -630,30 +693,42 @@ function NodeExecutionPanel({
   const [expanded, setExpanded] = useState(
     () => isNodeExecutionPanelExpanded(execution.nodeId),
   )
+  const loopIterations = getLoopExecutionIterations(execution)
+  const selectedIterationIndex = useSelectedLoopIteration(execution.nodeId, execution.loopNodeId)
+  const activeIterationIndex = selectedIterationIndex
+    ?? execution.latestIterationIndex
+    ?? loopIterations.at(-1)?.iterationIndex
+    ?? 0
+  const selectedIteration = loopIterations.find((item) => item.iterationIndex === activeIterationIndex)
+    ?? loopIterations.at(-1)
+  const displayExecution = selectedIteration
+    ? loopIterationToNodeExecutionViewModel(selectedIteration, execution)
+    : execution
   const isExpanded = expanded || (autoExpand && execution.status === 'running')
   const statusLabel =
-    execution.status === 'running'
+    displayExecution.status === 'running'
       ? '运行中'
-      : execution.status === 'error'
+      : displayExecution.status === 'error'
         ? '运行失败'
-        : execution.degraded
+        : displayExecution.degraded
           ? '降级完成'
           : '运行完成'
-  const isRunning = execution.status === 'running'
-  const isError = execution.status === 'error'
-  const timeline = execution.timeline ?? []
-  const tokenUsage = execution.tokenUsage
+  const isRunning = displayExecution.status === 'running'
+  const isError = displayExecution.status === 'error'
+  const timeline = displayExecution.timeline ?? []
+  const tokenUsage = displayExecution.tokenUsage
   const tokenUsageLabel = tokenUsage ? formatTokenUsage(tokenUsage) : ''
   const executionRecord = [
     `状态：${statusLabel}`,
     tokenUsageLabel ? `Token：${tokenUsageLabel}` : '',
-    `日志：${execution.log}`,
-    execution.error ? `错误：${execution.error}` : '',
+    loopIterations.length > 0 && selectedIteration ? `轮次：第 ${selectedIteration.iterationIndex + 1} 轮` : '',
+    `日志：${displayExecution.log}`,
+    displayExecution.error ? `错误：${displayExecution.error}` : '',
     timeline.length > 0
       ? `执行过程：\n${timeline.map((item) => `[${item.title}] ${item.message}`).join('\n')}`
       : '',
-    `输入：\n${execution.input}`,
-    !isRunning ? `输出：\n${execution.output}` : '',
+    `输入：\n${displayExecution.input}`,
+    !isRunning ? `输出：\n${displayExecution.output}` : '',
   ].filter(Boolean).join('\n\n')
 
   const updateExpanded = useCallback((nextExpanded: boolean) => {
@@ -680,13 +755,13 @@ function NodeExecutionPanel({
               'aw-flow-node__execution-state',
               isRunning && 'aw-flow-node__execution-state--running',
               isError && 'aw-flow-node__execution-state--error',
-              execution.degraded && !isError && 'aw-flow-node__execution-state--warning',
+              displayExecution.degraded && !isError && 'aw-flow-node__execution-state--warning',
             )}
           >
             {statusLabel}
           </span>
           {!isRunning && (
-            <span className="aw-flow-node__execution-duration">{(execution.durationMs / 1000).toFixed(3)}s</span>
+            <span className="aw-flow-node__execution-duration">{(displayExecution.durationMs / 1000).toFixed(3)}s</span>
           )}
           {tokenUsage && (
             <span className="rounded-lg border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700 shadow-sm">
@@ -695,14 +770,14 @@ function NodeExecutionPanel({
           )}
         </div>
         <div className="aw-flow-node__execution-summary-content">
-          <p className="aw-flow-node__execution-summary-text">{execution.summaryInput ?? execution.log}</p>
+          <p className="aw-flow-node__execution-summary-text">{displayExecution.summaryInput ?? displayExecution.log}</p>
           <p
             className={cn(
               'aw-flow-node__execution-summary-text aw-flow-node__execution-summary-text--muted',
               isError && 'aw-flow-node__execution-summary-text--error',
             )}
           >
-            {execution.summaryOutput ?? '点击查看详细执行记录'}
+            {displayExecution.summaryOutput ?? '点击查看详细执行记录'}
           </p>
         </div>
         <ChevronDown
@@ -712,9 +787,19 @@ function NodeExecutionPanel({
       {isExpanded && (
         <>
           <div className="aw-flow-node__execution-header">
-            <p className="aw-flow-node__execution-log">{execution.log}</p>
+            <p className="aw-flow-node__execution-log">{displayExecution.log}</p>
             <CopyTextButton text={executionRecord} label="复制全部" />
           </div>
+          {loopIterations.length > 0 && (
+            <LoopIterationTabs
+              iterations={loopIterations}
+              selectedIterationIndex={selectedIteration?.iterationIndex ?? activeIterationIndex}
+              onSelect={(iterationIndex) => setSelectedLoopIteration({
+                nodeId: execution.nodeId,
+                loopNodeId: execution.loopNodeId,
+              }, iterationIndex)}
+            />
+          )}
           {tokenUsage && (
             <div className="aw-flow-node__execution-section">
               <span className="aw-flow-node__execution-label">Token 用量</span>
@@ -754,24 +839,89 @@ function NodeExecutionPanel({
               </div>
             </div>
           )}
-          {isError && execution.error && (
+          {isError && displayExecution.error && (
             <div className="aw-flow-node__execution-section">
-              <ExecutionSectionHeader label="错误信息" text={execution.error} danger />
-              <pre className="aw-flow-node__execution-code aw-flow-node__execution-code--error">{execution.error}</pre>
+              <ExecutionSectionHeader label="错误信息" text={displayExecution.error} danger />
+              <pre className="aw-flow-node__execution-code aw-flow-node__execution-code--error">{displayExecution.error}</pre>
             </div>
           )}
           <div className="aw-flow-node__execution-section">
-            <ExecutionSectionHeader label="输入" text={execution.input} />
-            <pre className="aw-flow-node__execution-code">{execution.input}</pre>
+            <ExecutionSectionHeader label={selectedIteration ? `第 ${selectedIteration.iterationIndex + 1} 轮输入` : '输入'} text={displayExecution.input} />
+            <pre className="aw-flow-node__execution-code">{displayExecution.input}</pre>
           </div>
           {!isRunning && (
             <div className="aw-flow-node__execution-section">
-              <ExecutionSectionHeader label="输出" text={execution.output} />
-              <pre className="aw-flow-node__execution-code">{execution.output}</pre>
+              <ExecutionSectionHeader label={selectedIteration ? `第 ${selectedIteration.iterationIndex + 1} 轮输出` : '输出'} text={displayExecution.output} />
+              <pre className="aw-flow-node__execution-code">{displayExecution.output}</pre>
             </div>
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function loopIterationToNodeExecutionViewModel(
+  iteration: TrialRunLoopIterationExecution,
+  base: TrialRunNodeExecution,
+): TrialRunNodeExecution {
+  return {
+    nodeId: iteration.nodeId,
+    nodeTitle: iteration.nodeTitle,
+    log: iteration.log,
+    input: iteration.input,
+    output: iteration.output,
+    durationMs: iteration.durationMs,
+    status: iteration.status,
+    error: iteration.error,
+    degraded: iteration.degraded,
+    tokenUsage: iteration.tokenUsage,
+    timeline: iteration.timeline,
+    summaryInput: iteration.summaryInput,
+    summaryOutput: iteration.summaryOutput,
+    loopNodeId: base.loopNodeId,
+    latestIterationIndex: base.latestIterationIndex,
+    iterationsByIndex: base.iterationsByIndex,
+    iterationOrder: base.iterationOrder,
+    loopIterations: base.loopIterations,
+  }
+}
+
+function LoopIterationTabs({
+  iterations,
+  selectedIterationIndex,
+  onSelect,
+}: {
+  iterations: TrialRunLoopIterationExecution[]
+  selectedIterationIndex: number
+  onSelect: (iterationIndex: number) => void
+}) {
+  const selectedIteration = iterations.find((iteration) => iteration.iterationIndex === selectedIterationIndex)
+    ?? iterations.at(-1)
+  return (
+    <div className="aw-flow-node__loop-iterations">
+      <div className="aw-flow-node__loop-iterations-head">
+        <span>循环轮次</span>
+        <strong>{iterations.length} 轮记录</strong>
+      </div>
+      <div className="aw-flow-node__loop-iteration-select-wrap">
+        <select
+          className={cn(
+            'aw-flow-node__loop-iteration-select',
+            selectedIteration?.status === 'error' && 'aw-flow-node__loop-iteration-select--error',
+            selectedIteration?.status === 'running' && 'aw-flow-node__loop-iteration-select--running',
+          )}
+          value={selectedIteration?.iterationIndex ?? selectedIterationIndex}
+          onChange={(event) => onSelect(Number(event.target.value))}
+        >
+          {iterations.map((iteration) => (
+            <option key={iteration.iterationIndex} value={iteration.iterationIndex}>
+              {`第 ${iteration.iterationIndex + 1} 轮 · ${iteration.status === 'running' ? '运行中' : iteration.status === 'error' ? '失败' : '完成'}`}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="aw-flow-node__loop-iteration-select-icon" />
+      </div>
     </div>
   )
 }

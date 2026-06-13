@@ -1,4 +1,4 @@
-import { Boxes, Check, ChevronDown, Clock3, Link2, PenLine, Plus, Trash2, Waypoints } from 'lucide-react'
+import { Boxes, Check, ChevronDown, Clock3, Plus, Trash2, Waypoints } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
 import {
@@ -16,7 +16,6 @@ import {
 } from '@/features/workflow/components/node-config/variable-utils'
 import { cn } from '@/lib/utils'
 import type {
-  WorkflowLoopIntermediateVariable,
   WorkflowLoopOutputRef,
   WorkflowNode,
   WorkflowNodeConfig,
@@ -36,13 +35,12 @@ export function LoopNodeConfigPanel({
     [variableSources],
   )
   const bodyNodes = node.config.loopBodyNodes ?? []
-  const intermediateVariables = node.config.loopIntermediateVariables ?? []
   const loopOutputs = node.config.loopOutputs ?? []
   const loopArrayInput = node.inputs[0] ?? { name: 'items', type: 'Array', description: '循环数组' }
   const loopArrayMapping = node.config.inputMappings[0] ?? {
     field: loopArrayInput.name,
     sourceType: 'node' as const,
-    source: node.config.loopArraySource ?? '',
+    source: '',
     valueType: loopArrayInput.type,
   }
   const bodyOutputSources = useMemo(() => createBodyOutputSources(bodyNodes), [bodyNodes])
@@ -51,10 +49,10 @@ export function LoopNodeConfigPanel({
     onUpdateNode({ config: patch })
   }
 
-  const updateLoopArrayInput = (patch: { name?: string; type?: string; source?: string }) => {
+  const updateLoopArrayInput = (patch: { type?: string; source?: string }) => {
     const nextInput = {
       ...loopArrayInput,
-      name: patch.name ?? loopArrayInput.name,
+      name: 'items',
       type: patch.type ?? loopArrayInput.type,
       description: '循环数组',
     }
@@ -62,7 +60,6 @@ export function LoopNodeConfigPanel({
     onUpdateNode({
       inputs: [nextInput],
       config: {
-        loopArraySource: nextSource,
         inputMappings: [{
           field: nextInput.name,
           sourceType: 'node',
@@ -71,10 +68,6 @@ export function LoopNodeConfigPanel({
         }],
       },
     })
-  }
-
-  const updateIntermediateVariables = (nextVariables: WorkflowLoopIntermediateVariable[]) => {
-    updateLoopConfig({ loopIntermediateVariables: nextVariables })
   }
 
   const updateLoopOutputs = (nextOutputs: WorkflowLoopOutputRef[]) => {
@@ -116,8 +109,7 @@ export function LoopNodeConfigPanel({
         {(node.config.loopMode ?? 'array') === 'array' ? (
           <div>
             <ArrayLoopInputRow
-              name={loopArrayInput.name}
-              source={node.config.loopArraySource || loopArrayMapping.source || ''}
+              source={loopArrayMapping.source || ''}
               arraySources={arraySources}
               onChange={updateLoopArrayInput}
             />
@@ -131,34 +123,6 @@ export function LoopNodeConfigPanel({
             onChange={(value) => updateLoopConfig({ loopCount: value })}
           />
         )}
-      </ConfigSection>
-
-      <ConfigSection title="中间变量" icon={<Link2 className="h-4 w-4 text-blue-300" />}>
-        <p className="rounded-xl border border-blue-300/12 bg-blue-400/7 px-2.5 py-2 text-[10px] leading-4 text-blue-100/80">
-          中间变量会出现在循环入口中，作为跨轮共享状态；循环体读取 shared.变量名，返回同名字段即可更新。
-        </p>
-        <div className="space-y-2">
-          {intermediateVariables.map((variable) => (
-            <IntermediateVariableRow
-              key={variable.id}
-              variable={variable}
-              variableSources={variableSources}
-              onChange={(nextVariable) =>
-                updateIntermediateVariables(intermediateVariables.map((item) => (item.id === variable.id ? nextVariable : item)))
-              }
-              onRemove={() => updateIntermediateVariables(intermediateVariables.filter((item) => item.id !== variable.id))}
-            />
-          ))}
-          {intermediateVariables.length === 0 && <EmptyHint text="暂无中间变量，可按需添加共享状态。" />}
-        </div>
-        <button
-          type="button"
-          onClick={() => updateIntermediateVariables([...intermediateVariables, createIntermediateVariable(intermediateVariables.length + 1)])}
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-blue-300/22 bg-slate-950/45 text-[11px] font-medium text-blue-100/90 transition hover:border-blue-300/45 hover:bg-blue-400/10"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          添加中间变量
-        </button>
       </ConfigSection>
 
       <ConfigSection title="输出变量" icon={<Boxes className="h-4 w-4 text-emerald-300" />}>
@@ -226,32 +190,20 @@ function LoopModeCard({
 }
 
 function ArrayLoopInputRow({
-  name,
   source,
   arraySources,
   onChange,
 }: {
-  name: string
   source: string
   arraySources: WorkflowVariableSource[]
-  onChange: (patch: { name?: string; type?: string; source?: string }) => void
+  onChange: (patch: { type?: string; source?: string }) => void
 }) {
   const selectedSource = arraySources.find((item) => item.value === source)
-  const fieldGridClass = 'grid-cols-[minmax(118px,0.95fr)_minmax(0,1.35fr)]'
 
   return (
     <div>
-      <div className={cn('grid gap-1.5 text-[10px] font-medium text-slate-500', fieldGridClass)}>
-        <span>当前元素变量名</span>
-        <span>循环数组来源</span>
-      </div>
-      <div className={cn('mt-1.5 grid gap-1.5 rounded-2xl border border-white/8 bg-slate-950/58 p-1.5', fieldGridClass)}>
-        <input
-          value={name}
-          placeholder="items"
-          onChange={(event) => onChange({ name: event.target.value })}
-          className="h-9 min-w-0 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] font-medium text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/10"
-        />
+      <div className="text-[10px] font-medium text-slate-500">循环数组来源</div>
+      <div className="mt-1.5 rounded-2xl border border-white/8 bg-slate-950/58 p-1.5">
         <PrettySelect
           value={source}
           placeholder="选择上游数组引用"
@@ -271,8 +223,9 @@ function ArrayLoopInputRow({
           }))}
         />
       </div>
+      <p className="mt-1.5 text-[10px] leading-4 text-slate-500">循环数组固定映射到节点输入 items，循环体内固定使用 item 引用当前元素。</p>
       <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <LoopEntryHintCard label="当前元素" value={name || 'item'} description="数组每一项的值" />
+        <LoopEntryHintCard label="当前元素" value="item" description="数组每一项的值" />
         <LoopEntryHintCard label="index 下标" value="index" description="从 0 开始递增" />
       </div>
     </div>
@@ -480,156 +433,6 @@ function PrettySelect({
   )
 }
 
-function IntermediateVariableRow({
-  variable,
-  variableSources,
-  onChange,
-  onRemove,
-}: {
-  variable: WorkflowLoopIntermediateVariable
-  variableSources: WorkflowVariableSource[]
-  onChange: (variable: WorkflowLoopIntermediateVariable) => void
-  onRemove: () => void
-}) {
-  const selectedType = formatValueType(variable.type || variable.valueType || 'String')
-  const fieldGridClass = 'grid-cols-[minmax(118px,0.95fr)_minmax(0,1.35fr)_28px]'
-
-  return (
-    <div className="rounded-2xl border border-white/8 bg-slate-950/58 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors hover:border-blue-300/18">
-      <div className={cn('grid gap-1.5 pb-1 text-[10px] font-medium text-slate-500', fieldGridClass)}>
-        <span>中间变量名</span>
-        <span>初始值来源</span>
-        <span />
-      </div>
-      <div className={cn('grid gap-1.5', fieldGridClass)}>
-        <input
-          value={variable.name}
-          placeholder="如 state"
-          onChange={(event) => onChange({ ...variable, name: event.target.value })}
-          className="h-9 min-w-0 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] font-medium text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-300/50 focus:ring-2 focus:ring-blue-300/10"
-        />
-        {variable.sourceType === 'node' ? (
-          <PrettySelect
-            value={variable.source}
-            placeholder="选择上游变量作为初始值"
-            selectedMeta={formatValueType(variable.type)}
-            accent="blue"
-            onChange={(nextSource) => {
-              const sourceOption = variableSources.find((item) => item.value === nextSource)
-              onChange({
-                ...variable,
-                source: nextSource,
-                type: sourceOption?.type ?? variable.type,
-                valueType: sourceOption?.type ?? variable.valueType,
-              })
-            }}
-            options={variableSources.map((sourceOption) => ({
-              value: sourceOption.value,
-              label: sourceOption.displayLabel,
-              meta: formatValueType(sourceOption.type),
-            }))}
-          />
-        ) : (
-          <textarea
-            value={variable.source}
-            placeholder="填写初始值，支持字符串或 JSON"
-            onChange={(event) => onChange({ ...variable, source: event.target.value, type: guessLiteralValueType(event.target.value) })}
-            rows={2}
-            className="min-h-9 resize-y rounded-xl border border-white/8 bg-slate-950/80 px-2.5 py-2 text-[11px] leading-4 text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-300/50 focus:ring-2 focus:ring-blue-300/10"
-          />
-        )}
-        <IconButton label="删除中间变量" onClick={onRemove} />
-      </div>
-      <div className="mt-2 grid grid-cols-[104px_1fr] gap-1.5">
-        <IntermediateSourceTypeSelect
-          value={variable.sourceType}
-          onChange={(sourceType) => onChange({ ...variable, sourceType, source: '' })}
-        />
-        <div className="flex min-h-9 items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/55 px-2.5 text-[10px] text-slate-400">
-          <span>当前类型</span>
-          <span className="truncate rounded-full border border-blue-300/14 bg-blue-400/8 px-2 py-0.5 text-blue-100/80">
-            {selectedType}
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function IntermediateSourceTypeSelect({
-  value,
-  onChange,
-}: {
-  value: 'literal' | 'node'
-  onChange: (value: 'literal' | 'node') => void
-}) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const options = [
-    { value: 'literal' as const, label: '自定义', description: '直接填写初始值', icon: <PenLine className="h-3 w-3" /> },
-    { value: 'node' as const, label: '引用', description: '引用上游变量', icon: <Link2 className="h-3 w-3" /> },
-  ]
-  const selected = options.find((option) => option.value === value) ?? options[0]
-
-  useClickOutside(containerRef, open, () => setOpen(false))
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className={cn(
-          'flex min-h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-left outline-none ring-2 ring-transparent transition',
-          'hover:border-blue-300/28 hover:bg-slate-900/85 focus:border-blue-300/55 focus:ring-blue-300/15',
-          open && 'border-blue-300/50 bg-blue-950/18 ring-blue-300/10',
-        )}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="text-blue-200/80">{selected.icon}</span>
-          <span className="truncate text-[11px] font-medium text-slate-100">{selected.label}</span>
-        </span>
-        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-slate-500 transition', open && 'rotate-180 text-blue-200')} />
-      </button>
-
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] z-50 w-40 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 p-1.5 shadow-[0_18px_48px_rgba(2,6,23,0.6)] backdrop-blur-xl"
-        >
-          {options.map((option) => {
-            const selectedOption = option.value === value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selectedOption}
-                onClick={() => {
-                  onChange(option.value)
-                  setOpen(false)
-                }}
-                className={cn(
-                  'flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left transition',
-                  selectedOption ? 'bg-blue-400/14 text-blue-100' : 'text-slate-300 hover:bg-white/7 hover:text-white',
-                )}
-              >
-                <span className="mt-0.5 text-slate-400">{option.icon}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[11px] font-medium leading-4">{option.label}</span>
-                  <span className="block truncate text-[9px] leading-3 text-slate-500">{option.description}</span>
-                </span>
-                {selectedOption && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-200" />}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function LoopOutputRow({
   output,
   bodyOutputSources,
@@ -708,45 +511,6 @@ function EmptyHint({ text }: { text: string }) {
       {text}
     </div>
   )
-}
-
-function createIntermediateVariable(index: number): WorkflowLoopIntermediateVariable {
-  return {
-    id: `loop_var_${Date.now()}_${index}`,
-    name: `state${index}`,
-    type: 'String',
-    sourceType: 'literal',
-    source: '',
-    valueType: 'String',
-  }
-}
-
-function guessLiteralValueType(value: string): WorkflowValueType | string {
-  const text = value.trim()
-  if (!text) {
-    return 'String'
-  }
-  if (text === 'true' || text === 'false') {
-    return 'Boolean'
-  }
-  if (/^-?\d+$/.test(text)) {
-    return 'Integer'
-  }
-  if (/^-?\d+\.\d+$/.test(text)) {
-    return 'Number'
-  }
-  try {
-    const parsed = JSON.parse(text) as unknown
-    if (Array.isArray(parsed)) {
-      return 'Array'
-    }
-    if (parsed && typeof parsed === 'object') {
-      return 'Object'
-    }
-  } catch {
-    return 'String'
-  }
-  return 'String'
 }
 
 interface BodyOutputSource {

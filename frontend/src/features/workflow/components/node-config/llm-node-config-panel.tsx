@@ -71,6 +71,7 @@ const REASONING_EFFORT_OPTIONS: ThinkingLevelOption[] = [
 
 const REASONING_OUTPUT_NAME = 'reasoning_content'
 const REASONING_OUTPUT_TYPE: WorkflowValueType = 'String'
+const LLM_PRIMARY_OUTPUT_LIMIT = 1
 const VISION_REFERENCE_TYPES = new Set<WorkflowValueType>(['Image', 'Video', 'Array<Image>', 'Array<Video>'])
 
 // 提示词编辑器的 Markdown 暗色语法高亮配色
@@ -271,6 +272,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           emptyLabel="输出变量"
           items={visibleOutputs}
           onChange={(items) => onUpdateNode({ outputs: normalizeReasoningOutputs(items, selectedModel.supportsThinking) })}
+          maxItems={selectedModel.supportsThinking ? LLM_PRIMARY_OUTPUT_LIMIT + 1 : LLM_PRIMARY_OUTPUT_LIMIT}
           readonlyNames={selectedModel.supportsThinking ? [REASONING_OUTPUT_NAME] : []}
         />
       </ConfigSection>

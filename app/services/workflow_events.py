@@ -87,12 +87,17 @@ def emit_workflow_event(event: WorkflowRuntimeEvent) -> None:
         return
     context = _event_context.get()
     if context:
+        event_data = {
+            **context,
+            **event.get("data", {}),
+        }
+        if context.get("scope") == "loop-body" and event.get("nodeId"):
+            event_data.setdefault("bodyNodeId", event["nodeId"])
+            if context.get("loopNodeId") is not None and context.get("iterationIndex") is not None:
+                event_data.setdefault("iterationRunId", f"{context['loopNodeId']}:{context['iterationIndex']}")
         event = {
             **event,
-            "data": {
-                **context,
-                **event.get("data", {}),
-            },
+            "data": event_data,
         }
     writer(event)
 

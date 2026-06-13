@@ -46,10 +46,16 @@ import type {
   GlobalDebugFieldValue,
   NodePaletteKey,
   TrialRunNodeExecution,
-  TrialRunTimelineItem,
   WorkflowRuntimeEvent,
-  WorkflowTokenUsage,
 } from '@/features/workflow/editor/workflow-editor.types'
+import {
+  executionFromLoopRuntimeEvent,
+  executionFromRuntimeEvent,
+  getLoopExecutionIterations,
+  isLoopBodyRuntimeEvent,
+  readLoopBodyNodeId,
+  readLoopNodeId,
+} from '@/features/workflow/editor/runtime-execution-adapter'
 import {
   fromFlowgramJSON,
   normalizeNodeData,
@@ -62,6 +68,12 @@ import {
   LOOP_CANVAS_ANCHOR_NODE_TYPE,
 } from '@/features/workflow/editor/loop-node.utils'
 import { clearNodeExecutionPanelExpansion } from '@/features/workflow/editor/node-execution-panel-state'
+import {
+  clearNodeTrialRunExecution,
+  createTrialRunId,
+  setNodeTrialRunExecution,
+  setActiveTrialRunId,
+} from '@/features/workflow/editor/node-trial-run-store'
 import { FlowgramNodeCard } from '@/features/workflow/editor/workflow-node-card'
 import { streamWorkflow } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
@@ -109,56 +121,6 @@ function parseArrayFieldValue(value: string) {
   }
 }
 
-function eventTitle(event: WorkflowRuntimeEvent) {
-  if (event.title) {
-    return event.title
-  }
-  const titles: Record<WorkflowRuntimeEvent['type'], string> = {
-    node_started: '节点开始执行',
-    node_completed: '节点执行完成',
-    node_failed: '节点执行失败',
-    node_log: '节点日志',
-    llm_started: '模型调用开始',
-    llm_token: '模型输出片段',
-    llm_completed: '模型调用完成',
-    llm_retry: '模型调用重试',
-    llm_failed: '模型调用失败',
-    tool_started: '工具调用开始',
-    tool_completed: '工具调用完成',
-    tool_failed: '工具调用失败',
-  }
-  return titles[event.type]
-}
-
-function readTokenUsage(data?: Record<string, unknown>): WorkflowTokenUsage | undefined {
-  const usage = data?.tokenUsage
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
-    return undefined
-  }
-  const inputTokens = readTokenCount((usage as Record<string, unknown>).inputTokens)
-  const outputTokens = readTokenCount((usage as Record<string, unknown>).outputTokens)
-  const totalTokens = readTokenCount((usage as Record<string, unknown>).totalTokens) || inputTokens + outputTokens
-  if (totalTokens <= 0) {
-    return undefined
-  }
-  return { inputTokens, outputTokens, totalTokens }
-}
-
-function readTokenCount(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.max(Math.trunc(value), 0)
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? Math.max(Math.trunc(parsed), 0) : 0
-  }
-  return 0
-}
-
-function formatTokenUsage(usage: WorkflowTokenUsage) {
-  return `Token ${usage.totalTokens} · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens}`
-}
-
 function workflowLineKey(line: WorkflowLineEntity) {
   const fromPort = line.info.fromPort ?? ''
   const toPort = line.info.toPort ?? ''
@@ -173,81 +135,6 @@ function updateTrialRunLineStyle(line: WorkflowLineEntity, active: boolean) {
     strokeWidth: active ? 3 : undefined,
     strokeWidthSelected: active ? 4 : undefined,
   })
-}
-
-function timelineItemFromRuntimeEvent(event: WorkflowRuntimeEvent): TrialRunTimelineItem {
-  const tokenUsage = readTokenUsage(event.data)
-  return {
-    id: event.id,
-    type: event.type,
-    level: event.level ?? 'info',
-    title: eventTitle(event),
-    message: event.token ?? (tokenUsage && event.type === 'llm_completed' ? formatTokenUsage(tokenUsage) : event.message),
-    timestamp: event.timestamp,
-    data: event.data,
-  }
-}
-
-function mergeTimelineItem(
-  timeline: TrialRunTimelineItem[] | undefined,
-  item: TrialRunTimelineItem,
-): TrialRunTimelineItem[] {
-  const items = timeline ? [...timeline] : []
-  const last = items.at(-1)
-  if (item.type === 'llm_token' && last?.type === 'llm_token') {
-    items[items.length - 1] = {
-      ...last,
-      id: item.id,
-      message: `${last.message}${item.message}`.slice(-600),
-      timestamp: item.timestamp,
-    }
-    return items
-  }
-  if (items.some((existing) => existing.id === item.id)) {
-    return items
-  }
-  return [...items, item].slice(-80)
-}
-
-function statusFromRuntimeEvent(event: WorkflowRuntimeEvent, current?: TrialRunNodeExecution) {
-  if (event.type === 'node_failed') {
-    return 'error' as const
-  }
-  if (event.type === 'node_completed') {
-    return 'success' as const
-  }
-  if (event.type === 'node_started') {
-    return 'running' as const
-  }
-  return current?.status ?? 'running'
-}
-
-function executionFromRuntimeEvent(
-  event: WorkflowRuntimeEvent,
-  current?: TrialRunNodeExecution,
-  fallbackNode?: WorkflowNode,
-): TrialRunNodeExecution {
-  const status = statusFromRuntimeEvent(event, current)
-  const nodeTitle = event.nodeTitle || current?.nodeTitle || fallbackNode?.title || event.nodeId || '节点'
-  const message = event.message || eventTitle(event)
-  const strategyHandled = event.type === 'node_log' && ['使用兜底输出', '忽略模型错误'].includes(event.title ?? '')
-  const degraded = current?.degraded || strategyHandled
-  const tokenUsage = readTokenUsage(event.data) ?? current?.tokenUsage
-  return {
-    nodeId: event.nodeId || current?.nodeId || fallbackNode?.id || '',
-    nodeTitle,
-    log: message,
-    input: current?.input ?? '{}',
-    output: current?.output ?? '{}',
-    durationMs: event.durationMs ?? current?.durationMs ?? 0,
-    status,
-    error: event.error ?? current?.error,
-    degraded,
-    tokenUsage,
-    timeline: mergeTimelineItem(current?.timeline, timelineItemFromRuntimeEvent(event)),
-    summaryInput: current?.summaryInput ?? '执行事件',
-    summaryOutput: tokenUsage && event.type === 'llm_completed' ? formatTokenUsage(tokenUsage) : event.type === 'llm_token' ? '模型正在输出…' : degraded && event.type === 'node_completed' ? '已按异常策略降级完成' : message,
-  }
 }
 
 function buildDebugPayloadFromFields(fields: GlobalDebugFieldValue[]) {
@@ -302,8 +189,23 @@ function findWorkflowNodeById(nodes: WorkflowNode[], nodeId: string): WorkflowNo
   return undefined
 }
 
+function trialRunExecutionStateKey(nodeId: string, loopNodeId?: string) {
+  return loopNodeId ? `${loopNodeId}::${nodeId}` : nodeId
+}
+
 function flattenWorkflowNodes(nodes: WorkflowNode[]): WorkflowNode[] {
   return nodes.flatMap((node) => [node, ...flattenWorkflowNodes(node.config.loopBodyNodes ?? [])])
+}
+
+function flattenFlowgramNodes(nodes: WorkflowNodeEntity[]): WorkflowNodeEntity[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...flattenFlowgramNodes([...(node.blocks ?? [])]),
+  ])
+}
+
+function findFlowgramNodeById(ctx: FreeLayoutPluginContext, nodeId: string) {
+  return flattenFlowgramNodes(ctx.document.getAllNodes()).find((node) => String(node.id) === nodeId)
 }
 
 function patchLoopChildDragIsolation(ctx: FreeLayoutPluginContext) {
@@ -705,6 +607,10 @@ export function WorkflowEditor({
   const runTimerIdsRef = useRef<number[]>([])
   const runAbortControllerRef = useRef<AbortController | null>(null)
   const singleNodeTrialCacheRef = useRef<Record<string, SingleNodeTrialCache>>({})
+  const activeTrialRunIdRef = useRef(createTrialRunId('idle'))
+  const trialRunExecutionsRef = useRef<Record<string, TrialRunNodeExecution>>({})
+  const pendingTrialRunExecutionsRef = useRef<Record<string, TrialRunNodeExecution>>({})
+  const trialRunFlushFrameRef = useRef<number | null>(null)
   const completedGlobalTrialNodeIdsRef = useRef<Set<string>>(new Set())
   const activeTrialRunEdgeKeysRef = useRef<Set<string>>(new Set())
 
@@ -730,14 +636,65 @@ export function WorkflowEditor({
     }
   }, [])
 
+  const replaceTrialRunExecutions = useCallback((next: Record<string, TrialRunNodeExecution>) => {
+    trialRunExecutionsRef.current = next
+    pendingTrialRunExecutionsRef.current = {}
+    if (trialRunFlushFrameRef.current !== null) {
+      window.cancelAnimationFrame(trialRunFlushFrameRef.current)
+      trialRunFlushFrameRef.current = null
+    }
+    setTrialRunExecutions(next)
+  }, [])
+
+  const enqueueTrialRunExecution = useCallback((stateKey: string, execution: TrialRunNodeExecution) => {
+    trialRunExecutionsRef.current = {
+      ...trialRunExecutionsRef.current,
+      [stateKey]: execution,
+    }
+    pendingTrialRunExecutionsRef.current = {
+      ...pendingTrialRunExecutionsRef.current,
+      [stateKey]: execution,
+    }
+    if (trialRunFlushFrameRef.current !== null) {
+      return
+    }
+    trialRunFlushFrameRef.current = window.requestAnimationFrame(() => {
+      trialRunFlushFrameRef.current = null
+      const pending = pendingTrialRunExecutionsRef.current
+      pendingTrialRunExecutionsRef.current = {}
+      if (Object.keys(pending).length === 0) {
+        return
+      }
+      setTrialRunExecutions((prev) => ({
+        ...prev,
+        ...pending,
+      }))
+    })
+  }, [])
+
   const syncNodeTrialRunExecution = useCallback(
-    (nodeId: string, execution?: TrialRunNodeExecution) => {
+    (nodeId: string, execution?: TrialRunNodeExecution, loopNodeId?: string) => {
+      const scopedLoopNodeId = loopNodeId ?? execution?.loopNodeId
+      if (execution) {
+        setNodeTrialRunExecution({
+          runId: activeTrialRunIdRef.current,
+          nodeId,
+          loopNodeId: scopedLoopNodeId,
+        }, execution)
+      } else {
+        clearNodeTrialRunExecution({
+          runId: activeTrialRunIdRef.current,
+          nodeId,
+          loopNodeId: scopedLoopNodeId,
+        })
+      }
+
       const ctx = ctxRef.current
       if (!ctx) {
         return
       }
 
-      const targetNode = ctx.document.getAllNodes().find((node) => String(node.id) === nodeId)
+      const targetNode = findFlowgramNodeById(ctx, nodeId)
       if (!targetNode) {
         return
       }
@@ -813,31 +770,56 @@ export function WorkflowEditor({
 
   const applyRuntimeEventToNode = useCallback(
     (event: WorkflowRuntimeEvent, nodeIdOverride?: string, nodeOverride?: WorkflowNode) => {
-      const nodeId = nodeIdOverride || event.nodeId
+      const isLoopBodyEvent = isLoopBodyRuntimeEvent(event)
+      const nodeId = isLoopBodyEvent ? (readLoopBodyNodeId(event) || event.nodeId) : (nodeIdOverride || event.nodeId)
       if (!nodeId) {
         return
       }
-      const fallbackNode = nodeOverride ?? nodes.find((item) => item.id === nodeId)
-      setTrialRunExecutions((prev) => {
-        const execution = executionFromRuntimeEvent(event, prev[nodeId], fallbackNode)
-        const next = {
-          ...prev,
-          [nodeId]: execution,
+      const loopNodeId = isLoopBodyEvent ? readLoopNodeId(event) : undefined
+      const stateKey = trialRunExecutionStateKey(nodeId, loopNodeId)
+      const fallbackNode = isLoopBodyEvent ? findWorkflowNodeById(nodes, nodeId) : (nodeOverride ?? findWorkflowNodeById(nodes, nodeId))
+      const previous = trialRunExecutionsRef.current[stateKey]
+      const execution = isLoopBodyEvent
+        ? executionFromLoopRuntimeEvent(event, previous, fallbackNode)
+        : executionFromRuntimeEvent(event, previous, fallbackNode)
+      syncNodeTrialRunExecution(nodeId, execution, loopNodeId)
+      enqueueTrialRunExecution(stateKey, execution)
+      if (loopNodeId && execution.status === 'error') {
+        const loopStateKey = trialRunExecutionStateKey(loopNodeId)
+        const loopNode = findWorkflowNodeById(nodes, loopNodeId)
+        const previousLoopExecution = trialRunExecutionsRef.current[loopStateKey]
+        const failedIteration = getLoopExecutionIterations(execution).find((item) => item.status === 'error')
+        const failureSummary = failedIteration
+          ? `第 ${failedIteration.iterationIndex + 1} 轮 / ${failedIteration.nodeTitle} 失败`
+          : `${execution.nodeTitle} 执行失败`
+        const loopExecution: TrialRunNodeExecution = {
+          nodeId: loopNodeId,
+          nodeTitle: previousLoopExecution?.nodeTitle ?? loopNode?.title ?? '循环节点',
+          log: failureSummary,
+          input: previousLoopExecution?.input ?? '{}',
+          output: previousLoopExecution?.output ?? '{}',
+          durationMs: previousLoopExecution?.durationMs ?? 0,
+          status: 'error',
+          error: execution.error,
+          timeline: previousLoopExecution?.timeline,
+          summaryInput: '循环体执行异常',
+          summaryOutput: failureSummary,
         }
-        syncNodeTrialRunExecution(nodeId, execution)
-        return next
-      })
+        syncNodeTrialRunExecution(loopNodeId, loopExecution)
+        enqueueTrialRunExecution(loopStateKey, loopExecution)
+      }
     },
-    [nodes, syncNodeTrialRunExecution],
+    [enqueueTrialRunExecution, nodes, syncNodeTrialRunExecution],
   )
 
   const clearAllNodeTrialRunExecutions = useCallback(() => {
+    clearNodeTrialRunExecution()
     const ctx = ctxRef.current
     if (!ctx) {
       return
     }
 
-    ctx.document.getAllNodes().forEach((node) => {
+    flattenFlowgramNodes(ctx.document.getAllNodes()).forEach((node) => {
       const nodeJson = node.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
       const currentData = normalizeNodeData(nodeJson.data, nodeJson.type as WorkflowNode['type'])
       if (!currentData.trialRunExecution) {
@@ -884,14 +866,10 @@ export function WorkflowEditor({
     setSingleNodeCombinedJson(combinedJson)
     setSingleNodeJsonMode(cached?.jsonMode ?? false)
     setSingleNodeJsonError('')
-    setTrialRunExecutions((prev) => {
-      if (!prev[nodeId]) {
-        return prev
-      }
-      const next = { ...prev }
-      delete next[nodeId]
-      return next
-    })
+    const nextExecutions = { ...trialRunExecutionsRef.current }
+    delete nextExecutions[nodeId]
+    replaceTrialRunExecutions(nextExecutions)
+    clearNodeTrialRunExecution({ runId: activeTrialRunIdRef.current, nodeId })
     clearNodeExecutionPanelExpansion(nodeId)
     syncNodeTrialRunExecution(nodeId, undefined)
     setSingleNodeTrialOpen(true)
@@ -904,14 +882,19 @@ export function WorkflowEditor({
     globalDebugJsonMode,
     nodes,
     onSelectNode,
+    replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
   ])
 
   const runSingleNode = useCallback(async (nodeId: string, payloadOverride?: Record<string, unknown>) => {
+    const runId = createTrialRunId('single')
+    activeTrialRunIdRef.current = runId
+    setActiveTrialRunId(runId)
     clearTrialRunTimers()
     abortTrialRunStream()
     setTrialRunOpen(false)
-    setTrialRunExecutions({})
+    replaceTrialRunExecutions({})
+    clearNodeTrialRunExecution()
     clearNodeExecutionPanelExpansion()
     clearTrialRunEdgeStyles()
     clearAllNodeTrialRunExecutions()
@@ -936,7 +919,7 @@ export function WorkflowEditor({
       summaryOutput: '等待输出',
     }
 
-    setTrialRunExecutions({ [nodeId]: runningExecution })
+    replaceTrialRunExecutions({ [nodeId]: runningExecution })
     syncNodeTrialRunExecution(nodeId, runningExecution)
 
     try {
@@ -953,30 +936,28 @@ export function WorkflowEditor({
           applyRuntimeEventToNode(event, nodeId, targetNode)
         },
         onStep: (execution) => {
-          setTrialRunExecutions((prev) => {
-            const mergedExecution = {
-              ...execution,
-              timeline: [...(prev[nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
-              degraded: prev[nodeId]?.degraded || execution.degraded,
-              tokenUsage: execution.tokenUsage ?? prev[nodeId]?.tokenUsage,
-            }
-            syncNodeTrialRunExecution(nodeId, mergedExecution)
-            return { [nodeId]: mergedExecution }
-          })
+          const previous = trialRunExecutionsRef.current[nodeId]
+          const mergedExecution = {
+            ...execution,
+            timeline: [...(previous?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
+            degraded: previous?.degraded || execution.degraded,
+            tokenUsage: execution.tokenUsage ?? previous?.tokenUsage,
+          }
+          syncNodeTrialRunExecution(nodeId, mergedExecution)
+          enqueueTrialRunExecution(nodeId, mergedExecution)
         },
       })
       const fallbackExecution = executions.at(-1)
       if (fallbackExecution) {
-        setTrialRunExecutions((prev) => {
-          const mergedExecution = {
-            ...fallbackExecution,
-            timeline: [...(prev[nodeId]?.timeline ?? []), ...(fallbackExecution.timeline ?? [])].slice(-80),
-            degraded: prev[nodeId]?.degraded || fallbackExecution.degraded,
-            tokenUsage: fallbackExecution.tokenUsage ?? prev[nodeId]?.tokenUsage,
-          }
-          syncNodeTrialRunExecution(nodeId, mergedExecution)
-          return { [nodeId]: mergedExecution }
-        })
+        const previous = trialRunExecutionsRef.current[nodeId]
+        const mergedExecution = {
+          ...fallbackExecution,
+          timeline: [...(previous?.timeline ?? []), ...(fallbackExecution.timeline ?? [])].slice(-80),
+          degraded: previous?.degraded || fallbackExecution.degraded,
+          tokenUsage: fallbackExecution.tokenUsage ?? previous?.tokenUsage,
+        }
+        syncNodeTrialRunExecution(nodeId, mergedExecution)
+        enqueueTrialRunExecution(nodeId, mergedExecution)
       }
       if (runAbortControllerRef.current === abortController) {
         runAbortControllerRef.current = null
@@ -995,7 +976,7 @@ export function WorkflowEditor({
         summaryOutput: '运行失败',
       }
       setTrialRunning(false)
-      setTrialRunExecutions({ [nodeId]: failedExecution })
+      replaceTrialRunExecutions({ [nodeId]: failedExecution })
       syncNodeTrialRunExecution(nodeId, failedExecution)
     }
   }, [
@@ -1004,10 +985,12 @@ export function WorkflowEditor({
     clearAllNodeTrialRunExecutions,
     clearTrialRunEdgeStyles,
     clearTrialRunTimers,
+    enqueueTrialRunExecution,
     globalDebugCombinedJson,
     globalDebugFields,
     globalDebugJsonMode,
     nodes,
+    replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
   ])
 
@@ -1050,16 +1033,16 @@ export function WorkflowEditor({
       setTrialRunning(false)
       setTrialRunOpen(false)
       setSingleNodeTrialOpen(false)
-      setTrialRunExecutions({})
+      replaceTrialRunExecutions({})
+      clearNodeTrialRunExecution()
       clearNodeExecutionPanelExpansion()
       clearTrialRunEdgeStyles()
     },
     onNodeDeleted: (nodeId) => {
-      setTrialRunExecutions((prev) => {
-        const next = { ...prev }
-        delete next[nodeId]
-        return next
-      })
+      const nextExecutions = { ...trialRunExecutionsRef.current }
+      delete nextExecutions[nodeId]
+      replaceTrialRunExecutions(nextExecutions)
+      clearNodeTrialRunExecution({ runId: activeTrialRunIdRef.current, nodeId })
       clearNodeExecutionPanelExpansion(nodeId)
       clearTrialRunEdgeStyles()
     },
@@ -1256,16 +1239,24 @@ export function WorkflowEditor({
       clearTrialRunTimers()
       abortTrialRunStream()
       clearTrialRunEdgeStyles()
+      if (trialRunFlushFrameRef.current !== null) {
+        window.cancelAnimationFrame(trialRunFlushFrameRef.current)
+        trialRunFlushFrameRef.current = null
+      }
     }
   }, [abortTrialRunStream, clearTrialRunEdgeStyles, clearTrialRunTimers])
 
   const startTrialRun = useCallback(async () => {
+    const runId = createTrialRunId('global')
+    activeTrialRunIdRef.current = runId
+    setActiveTrialRunId(runId)
     clearTrialRunTimers()
     abortTrialRunStream()
     clearTrialRunEdgeStyles()
     setTrialRunOpen(true)
     setSingleNodeTrialOpen(false)
-    setTrialRunExecutions({})
+    replaceTrialRunExecutions({})
+    clearNodeTrialRunExecution()
     clearNodeExecutionPanelExpansion()
     clearAllNodeTrialRunExecutions()
 
@@ -1293,20 +1284,15 @@ export function WorkflowEditor({
           applyRuntimeEventToNode(event)
         },
         onStep: (execution) => {
-          setTrialRunExecutions((prev) => {
-            const mergedExecution = {
-              ...execution,
-              timeline: [...(prev[execution.nodeId]?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
-              degraded: prev[execution.nodeId]?.degraded || execution.degraded,
-              tokenUsage: execution.tokenUsage ?? prev[execution.nodeId]?.tokenUsage,
-            }
-            const next = {
-              ...prev,
-              [execution.nodeId]: mergedExecution,
-            }
-            syncNodeTrialRunExecution(execution.nodeId, mergedExecution)
-            return next
-          })
+          const previous = trialRunExecutionsRef.current[execution.nodeId]
+          const mergedExecution = {
+            ...execution,
+            timeline: [...(previous?.timeline ?? []), ...(execution.timeline ?? [])].slice(-80),
+            degraded: previous?.degraded || execution.degraded,
+            tokenUsage: execution.tokenUsage ?? previous?.tokenUsage,
+          }
+          syncNodeTrialRunExecution(execution.nodeId, mergedExecution)
+          enqueueTrialRunExecution(execution.nodeId, mergedExecution)
         },
       })
       if (runAbortControllerRef.current === abortController) {
@@ -1318,7 +1304,8 @@ export function WorkflowEditor({
         return
       }
       setTrialRunning(false)
-      setTrialRunExecutions({})
+      replaceTrialRunExecutions({})
+      clearNodeTrialRunExecution()
       clearTrialRunEdgeStyles()
       clearAllNodeTrialRunExecutions()
       setGlobalDebugJsonError('运行失败，请检查 JSON、节点配置或后端服务')
@@ -1330,11 +1317,13 @@ export function WorkflowEditor({
     abortTrialRunStream,
     applyGlobalTrialRunEdgeEvent,
     applyRuntimeEventToNode,
+    enqueueTrialRunExecution,
     edges,
     globalDebugCombinedJson,
     globalDebugFields,
     globalDebugJsonMode,
     nodes,
+    replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
   ])
 
@@ -1343,11 +1332,12 @@ export function WorkflowEditor({
     abortTrialRunStream()
     setTrialRunning(false)
     setTrialRunOpen(false)
-    setTrialRunExecutions({})
+    replaceTrialRunExecutions({})
+    clearNodeTrialRunExecution()
     clearNodeExecutionPanelExpansion()
     clearTrialRunEdgeStyles()
     clearAllNodeTrialRunExecutions()
-  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunEdgeStyles, clearTrialRunTimers])
+  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunEdgeStyles, clearTrialRunTimers, replaceTrialRunExecutions])
 
   const updateGlobalDebugField = useCallback((fieldName: string, value: string) => {
     setGlobalDebugFields((prev) =>

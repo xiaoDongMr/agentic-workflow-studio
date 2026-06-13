@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.schemas.workflow import WorkflowNode
+from app.schemas.workflow import WorkflowNode, WorkflowSelectorOperand
 from app.workflow.services.value_casting import coerce_by_io_definitions
 from app.workflow.state import WorkflowState
 
@@ -44,6 +44,45 @@ def build_mapped_values(mappings: list[Any], state: WorkflowState) -> dict[str, 
     return result
 
 
+def build_selector_reference_values(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for branch in node.config.selectorBranches:
+        for condition in branch.conditions:
+            for operand in (condition.left, condition.right):
+                if operand.sourceType == "literal":
+                    continue
+                field = get_selector_operand_field(operand)
+                if not field or field in result:
+                    continue
+                if operand.sourceType == "context":
+                    result[field] = get_by_path(state.get("input", {}), operand.contextPath or operand.source)
+                else:
+                    result[field] = resolve_selector_node_operand(operand, state)
+    return result
+
+
+def get_selector_operand_field(operand: WorkflowSelectorOperand) -> str:
+    if operand.sourceType == "context":
+        return operand.contextPath or operand.source
+    return operand.source or ".".join(item for item in [operand.nodeId, operand.fieldPath] if item)
+
+
+def resolve_selector_node_operand(operand: WorkflowSelectorOperand, state: WorkflowState) -> Any:
+    source = operand.source or ".".join(item for item in [operand.nodeId, operand.fieldPath] if item)
+    if source:
+        resolved = resolve_mapping(source, state)
+        if resolved is not None:
+            return resolved
+        input_value = state.get("input", {})
+        if isinstance(input_value, dict) and source in input_value:
+            return input_value.get(source)
+
+    node_value = state.get("variables", {}).get(operand.nodeId)
+    if isinstance(node_value, dict):
+        return get_by_path(node_value, operand.fieldPath)
+    return None
+
+
 def parse_literal_mapping_value(source: Any, value_type: str) -> Any:
     if not isinstance(source, str):
         return source
@@ -76,6 +115,8 @@ def parse_literal_mapping_value(source: Any, value_type: str) -> Any:
 
 def build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
     result = build_mapped_values(node.config.inputMappings, state)
+    if not result and node.type == "selector" and node.config.selectorBranches:
+        result = build_selector_reference_values(node, state)
     if not result:
         result["input"] = state.get("input", {})
     return coerce_by_io_definitions(result, node.inputs)

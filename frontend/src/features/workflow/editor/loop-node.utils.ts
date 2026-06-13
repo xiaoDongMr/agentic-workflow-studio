@@ -50,12 +50,11 @@ export function filterLoopEndpointNodes(bodyNodes: WorkflowNode[]): WorkflowNode
 export function createLoopEntryOutputs(loopNode: WorkflowNode): WorkflowNodeIO[] {
   const loopMode = loopNode.config.loopMode ?? 'array'
   const arrayInput = loopNode.inputs[0]
-  const arrayElementName = arrayInput?.name?.trim() || 'item'
   const outputs: WorkflowNodeIO[] = loopMode === 'array'
     ? [{
-        name: arrayElementName,
+        name: 'item',
         type: getArrayElementType(arrayInput?.type ?? 'Array'),
-        description: `当前元素：数组每一项的值，子图中引用 ${arrayElementName}`,
+        description: '当前元素：数组每一项的值，子图中固定引用 item',
       }]
     : []
 
@@ -64,20 +63,6 @@ export function createLoopEntryOutputs(loopNode: WorkflowNode): WorkflowNodeIO[]
     type: 'Integer',
     description: loopMode === 'array' ? 'index 下标：当前元素在数组中的位置，从 0 开始' : 'index 下标：当前循环轮次，从 0 开始',
   })
-
-  const usedNames = new Set(outputs.map((output) => output.name))
-  for (const variable of loopNode.config.loopIntermediateVariables ?? []) {
-    const name = variable.name.trim()
-    if (!name || usedNames.has(name)) {
-      continue
-    }
-    outputs.push({
-      name,
-      type: variable.type || variable.valueType || 'String',
-      description: `中间变量：跨轮共享状态，子图中引用 shared.${name}`,
-    })
-    usedNames.add(name)
-  }
 
   return outputs
 }

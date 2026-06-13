@@ -1,6 +1,12 @@
-import { collectSelectorOperandReferences, getSingleNodeInputDefinitions } from '@/features/workflow/editor/debug/single-node-workflow'
+import {
+  collectSelectorOperandReferences,
+  getSingleNodeInputDefinitions,
+  type DebugInputDefinition,
+} from '@/features/workflow/editor/debug/single-node-workflow'
 import type { GlobalDebugFieldValue } from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowNode } from '@/types/workflow'
+
+type DebugFieldDefinition = DebugInputDefinition & Partial<Omit<GlobalDebugFieldValue, 'type' | 'value' | 'valueType'>>
 
 export function createSingleNodeTrialFields(
   node: WorkflowNode,
@@ -10,20 +16,10 @@ export function createSingleNodeTrialFields(
   if (node.type === 'selector') {
     return createSelectorTrialFields(node, fallbackPayload, allNodes)
   }
-  return getSingleNodeInputDefinitions(node)
+  const definitions = getSingleNodeInputDefinitions(node, allNodes)
+  return definitions
     .filter((input) => input.name)
-    .map((input) => {
-      const value = fallbackPayload[input.name]
-      const inputType = getDebugFieldInputType(input.type)
-      const structured = inputType === 'json'
-      const arrayStructured = isArrayWorkflowType(input.type) && inputType === 'json'
-      return {
-        name: input.name,
-        type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
-        valueType: input.type,
-        value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
-      } satisfies GlobalDebugFieldValue
-    })
+    .map((input) => createDebugFieldFromDefinition(input, fallbackPayload))
 }
 
 export function createGlobalDebugFields(nodes: WorkflowNode[], previousFields: GlobalDebugFieldValue[]) {
@@ -35,17 +31,7 @@ export function createGlobalDebugFields(nodes: WorkflowNode[], previousFields: G
   const previousByName = new Map(previousFields.map((field) => [field.name, field]))
   return definitions.map((definition) => {
     const previous = previousByName.get(definition.name)
-    const type = getDebugFieldInputType(definition.type)
-    return {
-      name: definition.name,
-      type,
-      valueType: definition.type,
-      value: previous?.value ?? formatInputFieldValue(
-        undefined,
-        type === 'json' || type.endsWith('-array'),
-        isArrayWorkflowType(definition.type) && type === 'json',
-      ),
-    } satisfies GlobalDebugFieldValue
+    return createDebugFieldFromDefinition(definition, previous ? { [definition.name]: parsePreviousFieldValue(previous) } : {})
   })
 }
 
@@ -64,7 +50,7 @@ function createSelectorTrialFields(
   fallbackPayload: Record<string, unknown>,
   allNodes: WorkflowNode[],
 ) {
-  const references = collectSelectorOperandReferences(node, allNodes).filter((reference) => reference.group === 'context')
+  const references = collectSelectorOperandReferences(node, allNodes)
   return references.map((reference) => {
     const value = fallbackPayload[reference.name]
     const inputType = getDebugFieldInputType(reference.valueType)
@@ -83,6 +69,38 @@ function createSelectorTrialFields(
       value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
     } satisfies GlobalDebugFieldValue
   })
+}
+
+function createDebugFieldFromDefinition(
+  definition: DebugFieldDefinition,
+  fallbackPayload: Record<string, unknown>,
+) {
+  const value = fallbackPayload[definition.name]
+  const inputType = getDebugFieldInputType(definition.type)
+  const structured = inputType === 'json'
+  const arrayStructured = isArrayWorkflowType(definition.type) && inputType === 'json'
+  return {
+    name: definition.name,
+    label: definition.label,
+    description: definition.description,
+    group: definition.group,
+    groupLabel: definition.groupLabel,
+    sourceLabel: definition.sourceLabel,
+    type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
+    valueType: definition.type,
+    value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
+  } satisfies GlobalDebugFieldValue
+}
+
+function parsePreviousFieldValue(field: GlobalDebugFieldValue) {
+  if (field.type !== 'json') {
+    return field.value
+  }
+  try {
+    return JSON.parse(field.value) as unknown
+  } catch {
+    return field.value
+  }
 }
 
 function getDebugFieldInputType(type: string): GlobalDebugFieldValue['type'] {

@@ -133,12 +133,7 @@ export function EditorTrialRunPanel({
   onRun,
 }: {
   open: boolean
-  fields: Array<{
-    name: string
-    type: GlobalDebugFieldValue['type']
-    valueType?: string
-    value: string
-  }>
+  fields: GlobalDebugFieldValue[]
   running: boolean
   jsonMode: boolean
   combinedJson: string
@@ -224,11 +219,21 @@ export function EditorTrialRunPanel({
             ) : (
               fields.map((field) => (
                 <div key={field.name}>
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-200">{field.name}</span>
-                    <span className="rounded-md border border-white/8 bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
-                      {field.valueType ?? getDebugFieldTypeLabel(field.type)}
-                    </span>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium text-slate-200">{field.label || field.name}</span>
+                        <span className="rounded-md border border-white/8 bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
+                          {field.valueType ?? getDebugFieldTypeLabel(field.type)}
+                        </span>
+                      </div>
+                      {field.description && <p className="mt-0.5 text-[10px] text-slate-500">{field.description}</p>}
+                    </div>
+                    {field.sourceLabel && (
+                      <span className="rounded-full border border-blue-300/14 bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-100">
+                        {field.sourceLabel}
+                      </span>
+                    )}
                   </div>
                   {field.type === 'json' ? (
                     <JsonInputEditor

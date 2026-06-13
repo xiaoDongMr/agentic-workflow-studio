@@ -921,6 +921,50 @@ textarea {
   border-radius: 24px;
 }
 
+.aw-loop-native-canvas__execution-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.aw-loop-native-canvas__execution-panel {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution {
+  margin-top: 8px;
+  border-color: rgba(56, 189, 248, 0.24);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(8, 13, 27, 0.94));
+  box-shadow: 0 18px 42px rgba(2, 6, 23, 0.36), 0 0 0 1px rgba(56, 189, 248, 0.08);
+}
+
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-summary {
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, 0.13), rgba(15, 23, 42, 0.88));
+}
+
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-summary-text,
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-log,
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-label,
+.aw-loop-native-canvas__execution-panel .aw-flow-node__timeline-message {
+  color: #cbd5e1;
+}
+
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-summary-text--muted,
+.aw-loop-native-canvas__execution-panel .aw-flow-node__timeline-time {
+  color: #94a3b8;
+}
+
+.aw-loop-native-canvas__execution-panel .aw-flow-node__execution-code {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.42);
+  color: #dbeafe;
+}
+
 .aw-loop-native-canvas--empty .aw-loop-native-canvas__render {
   pointer-events: none;
 }
@@ -2026,6 +2070,81 @@ textarea {
   font-size: 11px;
   line-height: 1.5;
   color: #475569;
+}
+
+.aw-flow-node__loop-iterations {
+  margin: 0 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  background:
+    linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(248, 250, 252, 0.94));
+  padding: 10px;
+}
+
+.aw-flow-node__loop-iterations-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.aw-flow-node__loop-iterations-head strong {
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  padding: 2px 7px;
+  font-size: 10px;
+  color: #2563eb;
+}
+
+.aw-flow-node__loop-iteration-select-wrap {
+  position: relative;
+}
+
+.aw-flow-node__loop-iteration-select {
+  width: 100%;
+  appearance: none;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.94));
+  padding: 9px 34px 9px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+  outline: none;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+}
+
+.aw-flow-node__loop-iteration-select:focus {
+  border-color: rgba(37, 99, 235, 0.52);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.aw-flow-node__loop-iteration-select--error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background:
+    linear-gradient(135deg, rgba(254, 242, 242, 0.98), rgba(255, 247, 247, 0.94));
+  color: #b91c1c;
+}
+
+.aw-flow-node__loop-iteration-select--running {
+  border-color: rgba(14, 165, 233, 0.42);
+  color: #0369a1;
+}
+
+.aw-flow-node__loop-iteration-select-icon {
+  pointer-events: none;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  height: 14px;
+  width: 14px;
+  transform: translateY(-50%);
+  color: #64748b;
 }
 
 .aw-flow-node__execution-section {

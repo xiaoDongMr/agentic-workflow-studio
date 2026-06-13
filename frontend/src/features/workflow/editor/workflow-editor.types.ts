@@ -73,6 +73,23 @@ export interface TrialRunTimelineItem {
   data?: Record<string, unknown>
 }
 
+export interface TrialRunLoopIterationExecution {
+  iterationIndex: number
+  nodeId: string
+  nodeTitle: string
+  log: string
+  input: string
+  output: string
+  durationMs: number
+  status: TrialRunNodeState
+  error?: string
+  degraded?: boolean
+  tokenUsage?: WorkflowTokenUsage
+  timeline?: TrialRunTimelineItem[]
+  summaryInput?: string
+  summaryOutput?: string
+}
+
 export interface TrialRunNodeExecution {
   nodeId: string
   nodeTitle: string
@@ -87,6 +104,11 @@ export interface TrialRunNodeExecution {
   timeline?: TrialRunTimelineItem[]
   summaryInput?: string
   summaryOutput?: string
+  loopNodeId?: string
+  latestIterationIndex?: number
+  iterationsByIndex?: Record<number, TrialRunLoopIterationExecution>
+  iterationOrder?: number[]
+  loopIterations?: TrialRunLoopIterationExecution[]
 }
 
 export interface GlobalDebugFieldValue {

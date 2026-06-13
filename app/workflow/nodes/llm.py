@@ -140,7 +140,7 @@ class LlmNodeExecutor:
         raise last_error or RuntimeError("大模型调用失败")
 
     def _format_output(self, node: WorkflowNode, content: str, reasoning_content: str) -> dict[str, Any]:
-        output_key = node.config.outputKey or "output"
+        output_key = resolve_llm_output_key(node)
         reasoning_key = node.config.reasoningKey or "reasoning_content"
         output: dict[str, Any]
         if node.config.responseMode == "json":
@@ -153,6 +153,18 @@ class LlmNodeExecutor:
             output = {output_key: content}
         output.setdefault(reasoning_key, reasoning_content)
         return output
+
+
+def resolve_llm_output_key(node: WorkflowNode) -> str:
+    configured_key = (node.config.outputKey or "").strip()
+    if configured_key and configured_key != "output":
+        return configured_key
+
+    for output in node.outputs:
+        name = output.name.strip()
+        if name and name != (node.config.reasoningKey or "reasoning_content"):
+            return name
+    return configured_key or "output"
 
 
 def model_name(node: WorkflowNode, app_config: AppConfig | None) -> str | None:

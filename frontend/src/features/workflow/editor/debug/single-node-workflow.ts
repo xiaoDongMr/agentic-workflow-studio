@@ -18,6 +18,13 @@ export interface SelectorOperandReference {
   usageHints: string[]
 }
 
+export type DebugInputDefinition = WorkflowNodeIO & {
+  label?: string
+  group?: 'node' | 'context' | 'general'
+  groupLabel?: string
+  sourceLabel?: string
+}
+
 export function normalizeWorkflowNodesForRun(nodes: WorkflowNode[]) {
   return nodes.map((node) => normalizeSelectorLabelsForNode(node, nodes))
 }
@@ -65,17 +72,20 @@ export function toSingleNodeTestWorkflow(node: WorkflowNode, allNodes: WorkflowN
 }
 
 export function getSingleNodeInputDefinitions(node: WorkflowNode, allNodes: WorkflowNode[] = []): WorkflowNodeIO[] {
-  if (node.type !== 'selector') {
-    return node.inputs
+  if (node.type === 'selector') {
+    return collectSelectorOperandReferences(node, allNodes)
+      .map((reference) => ({
+        name: reference.name,
+        label: reference.label,
+        type: reference.valueType,
+        description: reference.description,
+        group: reference.group,
+        groupLabel: reference.groupLabel,
+        sourceLabel: reference.sourceLabel,
+      }))
   }
 
-  return collectSelectorOperandReferences(node, allNodes)
-    .filter((reference) => reference.group === 'context')
-    .map((reference) => ({
-      name: reference.name,
-      type: reference.valueType,
-      description: reference.description,
-    }))
+  return uniqueDebugInputDefinitions(node.inputs)
 }
 
 export function collectSelectorOperandReferences(
@@ -100,7 +110,7 @@ export function collectSelectorOperandReferences(
         const sourceNode = operand.nodeId ? nodeById.get(operand.nodeId) : undefined
         const displayLabel = operand.sourceType === 'node' && sourceNode
           ? formatSelectorNodeReferenceLabel(sourceNode, operand.fieldPath || name.split('.').slice(1).join('.'))
-          : operand.displayLabel || name
+          : formatSelectorOperandFallbackLabel(operand, name)
         const next = references.get(name) ?? {
           name,
           label: displayLabel,
@@ -164,6 +174,17 @@ function normalizeSelectorOperandDisplayLabel(
   }
 }
 
+function uniqueDebugInputDefinitions(definitions: DebugInputDefinition[]): DebugInputDefinition[] {
+  const seen = new Set<string>()
+  return definitions.filter((definition) => {
+    if (!definition.name || seen.has(definition.name)) {
+      return false
+    }
+    seen.add(definition.name)
+    return true
+  })
+}
+
 function createSingleNodeContextMappings(node: WorkflowNode, allNodes: WorkflowNode[] = []): WorkflowInputMapping[] {
   const inputDefinitions = getSingleNodeInputDefinitions(node, allNodes)
   if (inputDefinitions.length > 0) {
@@ -207,5 +228,17 @@ function getSelectorTrialInputName(operand: WorkflowSelectorOperand) {
 }
 
 function formatSelectorNodeReferenceLabel(node: WorkflowNode, fieldPath: string) {
-  return `${node.title}.${fieldPath}`
+  return fieldPath ? `${node.title}.${fieldPath}` : node.title
+}
+
+function formatSelectorOperandFallbackLabel(operand: WorkflowSelectorOperand, name: string) {
+  if (operand.sourceType === 'context') {
+    return operand.displayLabel || operand.contextPath || operand.source || name
+  }
+
+  const fieldPath = operand.fieldPath || (operand.source ?? name).split('.').slice(1).join('.')
+  if (fieldPath) {
+    return operand.displayLabel && operand.displayLabel !== operand.source ? operand.displayLabel : fieldPath
+  }
+  return operand.displayLabel && operand.displayLabel !== operand.source ? operand.displayLabel : '节点输出'
 }

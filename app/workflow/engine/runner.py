@@ -6,6 +6,7 @@ from typing import Any
 from deerflow.config.app_config import AppConfig
 
 from app.schemas.workflow import WorkflowDocument
+from app.services.workflow_events import emit_workflow_event
 from app.workflow.engine.graph_compiler import WorkflowGraphCompiler
 from app.workflow.nodes.registry import WorkflowNodeExecutorRegistry
 from app.workflow.state import WorkflowRunEvent, WorkflowState
@@ -75,7 +76,16 @@ class WorkflowRunner:
         }
 
     async def run_compiled_from_state(self, compiled_graph: Any, initial_state: WorkflowState) -> WorkflowState:
-        return await compiled_graph.ainvoke(initial_state)
+        final_state = initial_state
+        async for item in compiled_graph.astream(initial_state, stream_mode=["values", "custom"]):
+            mode, chunk = item if isinstance(item, tuple) and len(item) == 2 else ("values", item)
+            if mode == "custom":
+                if isinstance(chunk, dict):
+                    emit_workflow_event(chunk)
+                continue
+            if mode == "values":
+                final_state = chunk
+        return final_state
 
 
 def initial_workflow_state(run_input: dict[str, Any]) -> WorkflowState:

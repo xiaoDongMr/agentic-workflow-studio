@@ -41,6 +41,10 @@ import {
   useNodeTrialRunExecution,
   useTrialRunExecutionVersion,
 } from '@/features/workflow/editor/node-trial-run-store'
+import {
+  getEndNodeDisplay,
+  LOOP_BODY_END_NODE_DISPLAY,
+} from '@/features/workflow/node-display'
 import { getLoopExecutionIterations } from '@/features/workflow/editor/runtime-execution-adapter'
 import { getSelectorBranchPortInfos } from '@/features/workflow/editor/workflow-editor.utils'
 import type {
@@ -314,6 +318,7 @@ export function FlowgramNodeCard({
   const parentLoopNodeId = getParentLoopNodeId(node) || undefined
   const subscribedExecution = useNodeTrialRunExecution(nodeId, parentLoopNodeId)
   const effectiveExecution = subscribedExecution ?? trialRunExecution ?? data?.trialRunExecution
+  const isLoopBodyEndNode = kind === 'end' && Boolean(parentLoopNodeId)
 
   const setSelectedNodeId = useWorkflowStore((state) => state.setSelectedNodeId)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -327,6 +332,7 @@ export function FlowgramNodeCard({
   const canRunNode = !isLoopEndpoint
   const canAddFromOutputPort = kind !== 'selector' && kind !== 'end' && kind !== 'loop-end'
   const isNodeRunning = nodeActionRunning || effectiveExecution?.status === 'running'
+  const loopEndpointDisplay = kind === 'loop-end' ? LOOP_BODY_END_NODE_DISPLAY : undefined
   const loopCanvasSize = kind === 'loop'
     ? getLoopBodyCanvasSize(data?.config ?? {}, data?.config.loopBodyNodes ?? [])
     : undefined
@@ -356,6 +362,9 @@ export function FlowgramNodeCard({
           : data?.status === 'success'
             ? '完成'
             : '待执行'
+  const nodeDisplay = isLoopBodyEndNode ? getEndNodeDisplay(true) : undefined
+  const nodeTitle = nodeDisplay?.title ?? data?.title
+  const nodeDescription = nodeDisplay?.description ?? data?.description
   const handleNodeBodyMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (isLoopEndpoint) {
       event.stopPropagation()
@@ -439,7 +448,12 @@ export function FlowgramNodeCard({
         onMouseDown={handleNodeBodyMouseDown}
       >
         {isLoopEndpoint ? (
-          <LoopEndpointContent kind={kind} title={data?.title ?? ''} description={data?.description ?? ''} Icon={Icon} />
+          <LoopEndpointContent
+            kind={kind}
+            title={loopEndpointDisplay?.title ?? data?.title ?? ''}
+            description={loopEndpointDisplay?.description ?? data?.description ?? ''}
+            Icon={Icon}
+          />
         ) : (
           <>
             <div className="aw-flow-node__header" draggable={kind === 'loop'}>
@@ -456,8 +470,8 @@ export function FlowgramNodeCard({
                 {runtimeStatusLabel}
               </span>
             </div>
-            <div className="aw-flow-node__title" draggable={kind === 'loop'}>{data?.title}</div>
-            <div className="aw-flow-node__description" draggable={kind === 'loop'}>{data?.description}</div>
+            <div className="aw-flow-node__title" draggable={kind === 'loop'}>{nodeTitle}</div>
+            <div className="aw-flow-node__description" draggable={kind === 'loop'}>{nodeDescription}</div>
             <div className="aw-flow-node__io">
               {kind === 'selector' ? (
                 <SelectorBranchRows data={data} />

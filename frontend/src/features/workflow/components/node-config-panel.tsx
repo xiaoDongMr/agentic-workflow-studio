@@ -7,19 +7,26 @@ import {
   BasicInfoSection,
   ConfigSection,
   ConfigShell,
+  Field,
   IOSection,
   type NodeConfigPanelProps,
 } from '@/features/workflow/components/node-config/config-fields'
 import { getAvailableInputSources } from '@/features/workflow/components/node-config/variable-utils'
+import {
+  getEndNodeDisplay,
+  isWorkflowNodeInsideLoop,
+  LOOP_BODY_END_NODE_DISPLAY,
+  type FixedWorkflowNodeDisplay,
+} from '@/features/workflow/node-display'
 
-export function NodeConfigPanel({
-  node,
-  nodes,
-  edges,
-  onUpdateNode,
-  className,
-}: NodeConfigPanelProps) {
-  const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
+export function NodeConfigPanel(props: NodeConfigPanelProps) {
+  const {
+    node,
+    nodes,
+    edges,
+    onUpdateNode,
+    className,
+  } = props
 
   if (node.type === 'llm') {
     return <LlmNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
@@ -38,6 +45,44 @@ export function NodeConfigPanel({
   if (node.type === 'loop') {
     return <LoopNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
+  if (node.type === 'loop-end') {
+    return <FixedInfoPanel node={node} className={className} display={LOOP_BODY_END_NODE_DISPLAY} />
+  }
+  if (node.type === 'end') {
+    const display = getEndNodeDisplay(isWorkflowNodeInsideLoop(node.id, nodes ?? []), node.description)
+    return <FixedInfoPanel node={node} className={className} display={display} />
+  }
+
+  return <DefaultNodeConfigPanel {...props} />
+}
+
+function FixedInfoPanel({
+  node,
+  className,
+  display,
+}: {
+  node: NodeConfigPanelProps['node']
+  className?: string
+  display: FixedWorkflowNodeDisplay
+}) {
+  return (
+    <ConfigShell node={{ ...node, title: display.title }} className={className}>
+      <ConfigSection title="基础信息">
+        <Field label="节点名称" value={display.title} />
+        <Field label="节点说明" value={display.description} />
+      </ConfigSection>
+    </ConfigShell>
+  )
+}
+
+function DefaultNodeConfigPanel({
+  node,
+  nodes,
+  edges,
+  onUpdateNode,
+  className,
+}: NodeConfigPanelProps) {
+  const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const isStartNode = node.type === 'start'
 
   return (
@@ -52,7 +97,6 @@ export function NodeConfigPanel({
             items={node.inputs}
             sourceOptions={inputSources}
             inputMappings={node.config.inputMappings}
-            allowCustomValue={node.type !== 'end'}
             onChange={(items) => onUpdateNode({ inputs: items })}
             onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
           />

@@ -9,3 +9,4 @@ __pycache__/
 gateway/
 refer_frontend/
 config.yaml
+kubeconfig.yaml

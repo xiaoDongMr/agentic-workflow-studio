@@ -11,6 +11,17 @@ object_storage:
   public_url_prefix: /api/storage/files
   max_file_size_mb: 20
 
+sandbox_pool:
+  provider: kubernetes_api
+  kubernetes_api:
+    namespace: aio-sandbox
+    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    service_type: NodePort
+    connection:
+      kubeconfig: ./kubeconfig.yaml
+      context: default
+      verify_ssl: true
+
 models:
   - name: openai_qwen3-235b-a22b-instruct-2507
     display_name: AIDP / openai_qwen3-235b-a22b-instruct-2507

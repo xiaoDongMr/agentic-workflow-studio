@@ -1,0 +1,440 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from kubernetes import client, config
+from kubernetes.client import ApiClient
+from kubernetes.client.exceptions import ApiException
+
+from deerflow.config.app_config import AppConfig
+
+from app.sandbox_pool.schemas import SandboxCreateRequest, SandboxSummary
+
+DEFAULT_IMAGE = "enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest"
+DEFAULT_NAMESPACE = "aio-sandbox"
+DEFAULT_PORT = 8080
+MANAGED_BY_LABEL = "agentic-workflow-studio"
+SANDBOX_ID_LABEL = "sandbox.agentic-workflow-studio/id"
+THREAD_ID_ANNOTATION = "sandbox.agentic-workflow-studio/thread-id"
+
+
+@dataclass(frozen=True)
+class KubernetesSandboxGatewaySettings:
+    enabled: bool = False
+    route_mode: str = "host"
+    ingress_class_name: str = "nginx"
+    host_template: str = ""
+    base_url: str = ""
+    path_template: str = "/sandboxes/{sandbox_id}"
+    scheme: str = "http"
+    port: int = 0
+    path: str = "/"
+
+
+@dataclass(frozen=True)
+class KubernetesApiConnectionSettings:
+    kubeconfig: str = ""
+    context: str = ""
+    host: str = ""
+    token: str = ""
+    ca_cert_file: str = ""
+    verify_ssl: bool = True
+
+
+@dataclass(frozen=True)
+class KubernetesApiSandboxPoolSettings:
+    namespace: str = DEFAULT_NAMESPACE
+    image: str = DEFAULT_IMAGE
+    image_pull_policy: str = "IfNotPresent"
+    service_type: str = "NodePort"
+    node_host: str = ""
+    port: int = DEFAULT_PORT
+    cpu_request: str = "250m"
+    memory_request: str = "512Mi"
+    cpu_limit: str = "2"
+    memory_limit: str = "4Gi"
+    connection: KubernetesApiConnectionSettings = field(default_factory=KubernetesApiConnectionSettings)
+    gateway: KubernetesSandboxGatewaySettings = field(default_factory=KubernetesSandboxGatewaySettings)
+    extra_labels: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_app_config(cls, app_config: AppConfig) -> "KubernetesApiSandboxPoolSettings":
+        raw_pool = getattr(app_config, "sandbox_pool", {}) or {}
+        if hasattr(raw_pool, "model_dump"):
+            raw_pool = raw_pool.model_dump()
+        raw_api = raw_pool.get("kubernetes_api", {}) if isinstance(raw_pool, dict) else {}
+        if not isinstance(raw_api, dict):
+            raw_api = {}
+        raw_gateway = raw_api.get("gateway", {}) or {}
+        if not isinstance(raw_gateway, dict):
+            raw_gateway = {}
+        raw_connection = raw_api.get("connection", {}) or {}
+        if not isinstance(raw_connection, dict):
+            raw_connection = {}
+
+        sandbox = app_config.sandbox
+        return cls(
+            namespace=str(raw_api.get("namespace", DEFAULT_NAMESPACE)),
+            image=str(raw_api.get("image") or sandbox.image or DEFAULT_IMAGE),
+            image_pull_policy=str(raw_api.get("image_pull_policy", "IfNotPresent")),
+            service_type=str(raw_api.get("service_type", "NodePort")),
+            node_host=str(raw_api.get("node_host", "")),
+            port=int(raw_api.get("port", DEFAULT_PORT)),
+            cpu_request=str(raw_api.get("cpu_request", "250m")),
+            memory_request=str(raw_api.get("memory_request", "512Mi")),
+            cpu_limit=str(raw_api.get("cpu_limit", "2")),
+            memory_limit=str(raw_api.get("memory_limit", "4Gi")),
+            connection=KubernetesApiConnectionSettings(
+                kubeconfig=str(raw_connection.get("kubeconfig", "")),
+                context=str(raw_connection.get("context", "")),
+                host=str(raw_connection.get("host", "")),
+                token=str(raw_connection.get("token", "")),
+                ca_cert_file=str(raw_connection.get("ca_cert_file", "")),
+                verify_ssl=bool(raw_connection.get("verify_ssl", True)),
+            ),
+            gateway=KubernetesSandboxGatewaySettings(
+                enabled=bool(raw_gateway.get("enabled", False)),
+                route_mode=str(raw_gateway.get("route_mode", "host")),
+                ingress_class_name=str(raw_gateway.get("ingress_class_name", "nginx")),
+                host_template=str(raw_gateway.get("host_template", "")),
+                base_url=str(raw_gateway.get("base_url", "")),
+                path_template=str(raw_gateway.get("path_template", "/sandboxes/{sandbox_id}")),
+                scheme=str(raw_gateway.get("scheme", "http")),
+                port=int(raw_gateway.get("port", 0) or 0),
+                path=str(raw_gateway.get("path", "/")),
+            ),
+            extra_labels=dict(raw_api.get("labels", {}) or {}),
+        )
+
+
+class KubernetesApiSandboxPool:
+    def __init__(self, app_config: AppConfig):
+        self.settings = KubernetesApiSandboxPoolSettings.from_app_config(app_config)
+        api_client = self._build_api_client()
+        self.core_api = client.CoreV1Api(api_client)
+        self.networking_api = client.NetworkingV1Api(api_client)
+        self.version_api = client.VersionApi(api_client)
+
+    def health(self) -> dict[str, Any]:
+        extra = {
+            "connection": self._connection_health(),
+            "gateway": self._gateway_health(),
+            "error": "",
+        }
+        try:
+            version = self.version_api.get_code()
+            extra["clientVersion"] = version.to_dict() if hasattr(version, "to_dict") else {}
+        except Exception as exc:
+            extra["clientVersion"] = {}
+            extra["error"] = str(exc)
+        return {
+            "backend": "kubernetes_api",
+            "namespace": self.settings.namespace,
+            "client": "kubernetes-python-client",
+            "enabled": True,
+            "extra": extra,
+        }
+
+    def list(self) -> list[SandboxSummary]:
+        pods = self.core_api.list_namespaced_pod(
+            namespace=self.settings.namespace,
+            label_selector=f"app.kubernetes.io/managed-by={MANAGED_BY_LABEL}",
+        )
+        return [self._summary_from_pod(item) for item in pods.items]
+
+    def create(self, request: SandboxCreateRequest) -> SandboxSummary:
+        sandbox_id = _normalize_name(request.sandbox_id)
+        image = request.image or self.settings.image
+        pod = self._pod_manifest(sandbox_id, request.thread_id, image, request.env, request.labels)
+        service = self._service_manifest(sandbox_id)
+        ingress = self._ingress_manifest(sandbox_id) if self.settings.gateway.enabled else None
+
+        self._create_if_missing(self.core_api.create_namespaced_pod, pod)
+        self._create_if_missing(self.core_api.create_namespaced_service, service)
+        if ingress is not None:
+            self._create_if_missing(self.networking_api.create_namespaced_ingress, ingress)
+        return self.get(sandbox_id)
+
+    def get(self, sandbox_id: str) -> SandboxSummary:
+        sandbox_id = _normalize_name(sandbox_id)
+        pod = self.core_api.read_namespaced_pod(name=self._pod_name(sandbox_id), namespace=self.settings.namespace)
+        return self._summary_from_pod(pod)
+
+    def delete(self, sandbox_id: str) -> None:
+        sandbox_id = _normalize_name(sandbox_id)
+        resources = [
+            (self.core_api.delete_namespaced_pod, self._pod_name(sandbox_id)),
+            (self.core_api.delete_namespaced_service, self._service_name(sandbox_id)),
+        ]
+        if self.settings.gateway.enabled:
+            resources.append((self.networking_api.delete_namespaced_ingress, self._ingress_name(sandbox_id)))
+        for deleter, name in resources:
+            try:
+                deleter(name=name, namespace=self.settings.namespace)
+            except ApiException as exc:
+                if exc.status != 404:
+                    raise
+
+    def _build_api_client(self) -> ApiClient:
+        connection = self.settings.connection
+        if connection.kubeconfig:
+            config.load_kube_config(config_file=connection.kubeconfig, context=connection.context or None)
+            return client.ApiClient()
+
+        if connection.host:
+            configuration = client.Configuration()
+            configuration.host = connection.host
+            configuration.verify_ssl = connection.verify_ssl
+            if connection.ca_cert_file:
+                configuration.ssl_ca_cert = connection.ca_cert_file
+            if connection.token:
+                configuration.api_key = {"authorization": f"Bearer {connection.token}"}
+            return client.ApiClient(configuration)
+
+        config.load_kube_config(context=connection.context or None)
+        return client.ApiClient()
+
+    def _create_if_missing(self, create_method, body) -> None:
+        try:
+            create_method(namespace=self.settings.namespace, body=body)
+        except ApiException as exc:
+            if exc.status != 409:
+                raise
+
+    def _pod_manifest(
+        self,
+        sandbox_id: str,
+        thread_id: str,
+        image: str,
+        env: dict[str, str],
+        labels: dict[str, str],
+    ) -> client.V1Pod:
+        return client.V1Pod(
+            metadata=client.V1ObjectMeta(
+                name=self._pod_name(sandbox_id),
+                namespace=self.settings.namespace,
+                labels=self._labels(sandbox_id, labels),
+                annotations={THREAD_ID_ANNOTATION: thread_id},
+            ),
+            spec=client.V1PodSpec(
+                restart_policy="Never",
+                containers=[
+                    client.V1Container(
+                        name="aio-sandbox",
+                        image=image,
+                        image_pull_policy=self.settings.image_pull_policy,
+                        ports=[client.V1ContainerPort(name="http", container_port=self.settings.port)],
+                        env=[client.V1EnvVar(name=key, value=value) for key, value in sorted(env.items())],
+                        resources=client.V1ResourceRequirements(
+                            requests={"cpu": self.settings.cpu_request, "memory": self.settings.memory_request},
+                            limits={"cpu": self.settings.cpu_limit, "memory": self.settings.memory_limit},
+                        ),
+                    )
+                ],
+            ),
+        )
+
+    def _service_manifest(self, sandbox_id: str) -> client.V1Service:
+        return client.V1Service(
+            metadata=client.V1ObjectMeta(
+                name=self._service_name(sandbox_id),
+                namespace=self.settings.namespace,
+                labels=self._labels(sandbox_id, {}),
+            ),
+            spec=client.V1ServiceSpec(
+                type=self.settings.service_type,
+                selector={SANDBOX_ID_LABEL: sandbox_id},
+                ports=[
+                    client.V1ServicePort(
+                        name="http",
+                        port=self.settings.port,
+                        target_port=self.settings.port,
+                    )
+                ],
+            ),
+        )
+
+    def _ingress_manifest(self, sandbox_id: str) -> client.V1Ingress:
+        path = self._gateway_ingress_path(sandbox_id)
+        path_type = "ImplementationSpecific" if self._is_path_gateway() else "Prefix"
+        rule = client.V1IngressRuleValue(
+            http=client.V1HTTPIngressRuleValue(
+                paths=[
+                    client.V1HTTPIngressPath(
+                        path=path,
+                        path_type=path_type,
+                        backend=client.V1IngressBackend(
+                            service=client.V1IngressServiceBackend(
+                                name=self._service_name(sandbox_id),
+                                port=client.V1ServiceBackendPort(number=self.settings.port),
+                            )
+                        ),
+                    )
+                ]
+            )
+        )
+        ingress_rule = client.V1IngressRule(
+            host=None if self._is_path_gateway() else self._gateway_host(sandbox_id),
+            http=rule.http,
+        )
+        annotations: dict[str, str] = {}
+        if self._is_path_gateway():
+            annotations = {
+                "nginx.ingress.kubernetes.io/use-regex": "true",
+                "nginx.ingress.kubernetes.io/rewrite-target": "/$2",
+            }
+        return client.V1Ingress(
+            metadata=client.V1ObjectMeta(
+                name=self._ingress_name(sandbox_id),
+                namespace=self.settings.namespace,
+                labels=self._labels(sandbox_id, {}),
+                annotations=annotations,
+            ),
+            spec=client.V1IngressSpec(
+                ingress_class_name=self.settings.gateway.ingress_class_name,
+                rules=[ingress_rule],
+            ),
+        )
+
+    def _summary_from_pod(self, pod: client.V1Pod) -> SandboxSummary:
+        metadata = pod.metadata or client.V1ObjectMeta()
+        status = pod.status or client.V1PodStatus()
+        spec = pod.spec or client.V1PodSpec(containers=[])
+        labels = metadata.labels or {}
+        annotations = metadata.annotations or {}
+        sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
+        node_name = spec.node_name or ""
+        return SandboxSummary(
+            sandbox_id=sandbox_id,
+            sandbox_url=self._sandbox_url(sandbox_id, node_name),
+            status=getattr(status, "phase", "Unknown") or "Unknown",
+            pod_name=metadata.name or "",
+            service_name=self._service_name(sandbox_id) if sandbox_id else "",
+            ingress_name=self._ingress_name(sandbox_id) if sandbox_id and self.settings.gateway.enabled else "",
+            namespace=metadata.namespace or self.settings.namespace,
+            node_name=node_name,
+            pod_ip=status.pod_ip or "",
+            created_at=metadata.creation_timestamp.isoformat().replace("+00:00", "Z") if metadata.creation_timestamp else "",
+            thread_id=annotations.get(THREAD_ID_ANNOTATION, ""),
+            labels=labels,
+        )
+
+    def _sandbox_url(self, sandbox_id: str, node_name: str = "") -> str:
+        if not sandbox_id:
+            return ""
+        if self.settings.gateway.enabled:
+            # Gateway mode keeps the sandbox Service internal, usually as
+            # ClusterIP, and exposes it through Ingress/Gateway. Host mode is
+            # preferred for aio-sandbox UI because it preserves root-relative
+            # paths such as /code-server and /static.
+            if self._is_path_gateway():
+                base_url = self.settings.gateway.base_url.rstrip("/")
+                if not base_url:
+                    raise ValueError("sandbox_pool.kubernetes_api.gateway.base_url is required for path gateway mode")
+                return f"{base_url}{self._gateway_public_path(sandbox_id)}"
+            host = self._gateway_host(sandbox_id)
+            port = f":{self.settings.gateway.port}" if self.settings.gateway.port else ""
+            return f"{self.settings.gateway.scheme}://{host}{port}"
+        if self.settings.service_type.lower() == "nodeport":
+            # NodePort is the default browser-friendly mode: expose each
+            # sandbox on the Kubernetes node IP plus the allocated nodePort.
+            node_port = self._node_port(sandbox_id)
+            node_host = self.settings.node_host or self._node_host(node_name)
+            if node_host and node_port:
+                return f"http://{node_host}:{node_port}"
+        # Plain ClusterIP returns the in-cluster Service DNS. Use this when the
+        # caller runs inside Kubernetes, or enable gateway mode to expose it
+        # outside the cluster through Ingress/Gateway.
+        return self._service_dns_url(sandbox_id)
+
+    def _service_dns_url(self, sandbox_id: str) -> str:
+        return f"http://{self._service_name(sandbox_id)}.{self.settings.namespace}.svc.cluster.local:{self.settings.port}"
+
+    def _node_port(self, sandbox_id: str) -> int | None:
+        try:
+            service = self.core_api.read_namespaced_service(name=self._service_name(sandbox_id), namespace=self.settings.namespace)
+        except ApiException:
+            return None
+        ports = service.spec.ports if service.spec and service.spec.ports else []
+        return ports[0].node_port if ports and ports[0].node_port is not None else None
+
+    def _node_host(self, node_name: str) -> str:
+        if not node_name:
+            return ""
+        try:
+            node = self.core_api.read_node(name=node_name)
+        except ApiException:
+            return ""
+        addresses = node.status.addresses if node.status and node.status.addresses else []
+        for address_type in ("ExternalIP", "InternalIP", "Hostname"):
+            for address in addresses:
+                if address.type == address_type and address.address:
+                    return address.address
+        return ""
+
+    def _gateway_host(self, sandbox_id: str) -> str:
+        template = self.settings.gateway.host_template.strip()
+        if not template:
+            raise ValueError("sandbox_pool.kubernetes_api.gateway.host_template is required when host gateway mode is enabled")
+        return template.format(sandbox_id=sandbox_id, namespace=self.settings.namespace)
+
+    def _gateway_public_path(self, sandbox_id: str) -> str:
+        template = self.settings.gateway.path_template.strip() or "/sandboxes/{sandbox_id}"
+        path = template.format(sandbox_id=sandbox_id, namespace=self.settings.namespace)
+        return path if path.startswith("/") else f"/{path}"
+
+    def _gateway_ingress_path(self, sandbox_id: str) -> str:
+        if self._is_path_gateway():
+            return f"{self._gateway_public_path(sandbox_id)}(/|$)(.*)"
+        return self.settings.gateway.path or "/"
+
+    def _is_path_gateway(self) -> bool:
+        return self.settings.gateway.route_mode.lower() == "path"
+
+    def _labels(self, sandbox_id: str, labels: dict[str, str]) -> dict[str, str]:
+        return {
+            **self.settings.extra_labels,
+            **labels,
+            "app.kubernetes.io/name": "aio-sandbox",
+            "app.kubernetes.io/managed-by": MANAGED_BY_LABEL,
+            SANDBOX_ID_LABEL: sandbox_id,
+        }
+
+    def _pod_name(self, sandbox_id: str) -> str:
+        return f"aio-sandbox-{sandbox_id}"
+
+    def _service_name(self, sandbox_id: str) -> str:
+        return f"aio-sandbox-{sandbox_id}"
+
+    def _ingress_name(self, sandbox_id: str) -> str:
+        return f"aio-sandbox-{sandbox_id}"
+
+    def _connection_health(self) -> dict[str, Any]:
+        connection = self.settings.connection
+        return {
+            "mode": "kubeconfig" if connection.kubeconfig else ("direct" if connection.host else "default"),
+            "kubeconfig": connection.kubeconfig,
+            "context": connection.context,
+            "host": connection.host,
+            "verifySsl": connection.verify_ssl,
+        }
+
+    def _gateway_health(self) -> dict[str, Any]:
+        return {
+            "enabled": self.settings.gateway.enabled,
+            "routeMode": self.settings.gateway.route_mode,
+            "ingressClassName": self.settings.gateway.ingress_class_name,
+            "hostTemplate": self.settings.gateway.host_template,
+            "baseUrl": self.settings.gateway.base_url,
+            "scheme": self.settings.gateway.scheme,
+            "port": self.settings.gateway.port,
+        }
+
+
+def _normalize_name(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower()).strip("-")
+    if not normalized:
+        raise ValueError("sandbox_id must contain at least one DNS-compatible character")
+    return normalized[:63]

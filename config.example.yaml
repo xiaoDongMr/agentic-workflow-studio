@@ -1,0 +1,62 @@
+config_version: 1
+
+# Sandbox pool examples. Copy one mode into config.yaml.
+
+sandbox_pool:
+  provider: kubernetes_api
+  kubernetes_api:
+    namespace: aio-sandbox
+    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+    # Default mode: NodePort.
+    # The backend reads the sandbox Service nodePort and the Pod's Node IP,
+    # then returns http://<node-ip>:<node-port>. No gateway is required.
+    service_type: NodePort
+
+    connection:
+      kubeconfig: ./kubeconfig.yaml
+      context: default
+      verify_ssl: true
+
+    # Optional: omit port unless the aio-sandbox image listens on a non-default
+    # port. The default is 8080.
+    # port: 8080
+
+# Alternative mode: plain ClusterIP.
+# Use this when the workflow runner runs inside Kubernetes and can resolve
+# Service DNS directly. The returned sandbox_url is an in-cluster DNS name like:
+# http://aio-sandbox-demo.aio-sandbox.svc.cluster.local:8080
+#
+# sandbox_pool:
+#   provider: kubernetes_api
+#   kubernetes_api:
+#     namespace: aio-sandbox
+#     image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+#     service_type: ClusterIP
+#     connection:
+#       kubeconfig: ./kubeconfig.yaml
+#       context: default
+#       verify_ssl: true
+
+# Alternative mode: ClusterIP + Gateway/Ingress.
+# Use this when callers are outside Kubernetes but you want a stable external
+# entrypoint. Host/subdomain routing is recommended for aio-sandbox UI because
+# it keeps root-relative paths such as /code-server and /static working.
+#
+# sandbox_pool:
+#   provider: kubernetes_api
+#   kubernetes_api:
+#     namespace: aio-sandbox
+#     image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+#     service_type: ClusterIP
+#     connection:
+#       kubeconfig: ./kubeconfig.yaml
+#       context: default
+#       verify_ssl: true
+#     gateway:
+#       enabled: true
+#       route_mode: host
+#       ingress_class_name: nginx
+#       host_template: "{sandbox_id}.sandbox.example.com"
+#       scheme: https
+#       port: 443

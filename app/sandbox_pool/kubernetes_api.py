@@ -17,7 +17,6 @@ DEFAULT_NAMESPACE = "aio-sandbox"
 DEFAULT_PORT = 8080
 MANAGED_BY_LABEL = "agentic-workflow-studio"
 SANDBOX_ID_LABEL = "sandbox.agentic-workflow-studio/id"
-THREAD_ID_ANNOTATION = "sandbox.agentic-workflow-studio/thread-id"
 
 
 @dataclass(frozen=True)
@@ -142,12 +141,16 @@ class KubernetesApiSandboxPool:
             namespace=self.settings.namespace,
             label_selector=f"app.kubernetes.io/managed-by={MANAGED_BY_LABEL}",
         )
-        return [self._summary_from_pod(item) for item in pods.items]
+        return [
+            self._summary_from_pod(item)
+            for item in pods.items
+            if not (item.metadata and item.metadata.deletion_timestamp)
+        ]
 
     def create(self, request: SandboxCreateRequest) -> SandboxSummary:
         sandbox_id = _normalize_name(request.sandbox_id)
         image = request.image or self.settings.image
-        pod = self._pod_manifest(sandbox_id, request.thread_id, image, request.env, request.labels)
+        pod = self._pod_manifest(sandbox_id, image, request.env, request.labels)
         service = self._service_manifest(sandbox_id)
         ingress = self._ingress_manifest(sandbox_id) if self.settings.gateway.enabled else None
 
@@ -206,7 +209,6 @@ class KubernetesApiSandboxPool:
     def _pod_manifest(
         self,
         sandbox_id: str,
-        thread_id: str,
         image: str,
         env: dict[str, str],
         labels: dict[str, str],
@@ -216,7 +218,6 @@ class KubernetesApiSandboxPool:
                 name=self._pod_name(sandbox_id),
                 namespace=self.settings.namespace,
                 labels=self._labels(sandbox_id, labels),
-                annotations={THREAD_ID_ANNOTATION: thread_id},
             ),
             spec=client.V1PodSpec(
                 restart_policy="Never",
@@ -303,7 +304,6 @@ class KubernetesApiSandboxPool:
         status = pod.status or client.V1PodStatus()
         spec = pod.spec or client.V1PodSpec(containers=[])
         labels = metadata.labels or {}
-        annotations = metadata.annotations or {}
         sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
         node_name = spec.node_name or ""
         return SandboxSummary(
@@ -317,7 +317,6 @@ class KubernetesApiSandboxPool:
             node_name=node_name,
             pod_ip=status.pod_ip or "",
             created_at=metadata.creation_timestamp.isoformat().replace("+00:00", "Z") if metadata.creation_timestamp else "",
-            thread_id=annotations.get(THREAD_ID_ANNOTATION, ""),
             labels=labels,
         )
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -9,13 +9,17 @@ import {
   Layers3,
   LoaderCircle,
   Network,
+  Plus,
   RefreshCw,
   Server,
   ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 
 import {
+  createSandbox,
   deleteSandbox,
   getSandboxPoolHealth,
   listSandboxes,
@@ -43,6 +47,71 @@ function formatDate(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
+}
+
+interface CreateSandboxFormState {
+  sandboxId: string
+  image: string
+  envText: string
+  labelsText: string
+}
+
+function createSandboxId(): string {
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi?.randomUUID) {
+    return `sandbox-${cryptoApi.randomUUID().replace(/-/g, '').slice(0, 24)}`
+  }
+
+  if (cryptoApi?.getRandomValues) {
+    const randomPart = Array.from(cryptoApi.getRandomValues(new Uint8Array(12)))
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('')
+    return `sandbox-${randomPart}`
+  }
+
+  const fallbackPart = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}${Math.random()
+    .toString(36)
+    .slice(2, 10)}`
+  return `sandbox-${fallbackPart.slice(0, 24)}`
+}
+
+function createDefaultForm(): CreateSandboxFormState {
+  return {
+    sandboxId: createSandboxId(),
+    image: '',
+    envText: '',
+    labelsText: '',
+  }
+}
+
+function parseKeyValueText(value: string, fieldLabel: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  const lines = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  for (const line of lines) {
+    const separatorIndex = line.indexOf('=')
+    if (separatorIndex <= 0) {
+      throw new Error(`${fieldLabel} 请使用 KEY=VALUE 格式，每行一组`)
+    }
+    const key = line.slice(0, separatorIndex).trim()
+    const nextValue = line.slice(separatorIndex + 1).trim()
+    if (!key) {
+      throw new Error(`${fieldLabel} 存在空 Key`)
+    }
+    result[key] = nextValue
+  }
+
+  return result
+}
+
+function formInputClassName(className?: string): string {
+  return cn(
+    'w-full rounded-2xl border border-white/8 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-blue-400/60 focus:bg-slate-950/90',
+    className,
+  )
 }
 
 function statusClassName(status: SandboxStatus): string {
@@ -97,6 +166,160 @@ function StatCard({
       <div className="mt-4 text-2xl font-semibold tracking-tight text-white">{value}</div>
       <div className="mt-1 text-xs text-slate-400">{label}</div>
     </div>
+  )
+}
+
+function CreateSandboxPanel({
+  value,
+  creating,
+  disabled,
+  showAdvanced,
+  onChange,
+  onSubmit,
+  onGenerateId,
+  onToggleAdvanced,
+}: {
+  value: CreateSandboxFormState
+  creating: boolean
+  disabled: boolean
+  showAdvanced: boolean
+  onChange: (nextValue: CreateSandboxFormState) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onGenerateId: () => void
+  onToggleAdvanced: () => void
+}) {
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-blue-300/14 bg-slate-950/64 shadow-[0_24px_80px_rgba(2,6,23,0.24)]">
+      <div className="relative border-b border-white/8 p-5">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(59,130,246,0.18),transparent_34%),radial-gradient(circle_at_92%_18%,rgba(168,85,247,0.14),transparent_30%)]" />
+        <div className="relative flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
+              <Plus className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200/80">Create Sandbox</p>
+              <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">创建沙箱</h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                一键生成独立 aio-sandbox 实例，默认使用资源池配置。仅在调试或定制运行环境时展开高级配置。
+              </p>
+            </div>
+          </div>
+          <Badge className="w-fit rounded-2xl border-violet-400/18 bg-violet-400/10 px-3 py-1.5 text-violet-100">
+            自动命名
+          </Badge>
+        </div>
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-4 p-5">
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">自动生成的沙箱 ID</span>
+              <input
+                value={value.sandboxId}
+                readOnly
+                disabled={disabled}
+                className={cn(
+                  formInputClassName('mt-1.5 cursor-default font-mono text-xs'),
+                  'disabled:cursor-not-allowed disabled:opacity-60',
+                )}
+              />
+            </label>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onGenerateId}
+                disabled={disabled || creating}
+                className="h-10 w-full md:w-auto"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                重新生成
+              </Button>
+            </div>
+          </div>
+
+          <Button type="submit" disabled={disabled || creating || !value.sandboxId.trim()} className="h-10 shrink-0">
+            {creating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+            {creating ? '创建中' : '创建沙箱'}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm leading-6 text-slate-400">
+            <span className="font-medium text-slate-200">默认创建：</span>
+            自动生成高熵 ID，使用资源池默认镜像，无需用户填写额外参数。
+          </div>
+          <Button type="button" variant="secondary" onClick={onToggleAdvanced} disabled={disabled || creating} className="shrink-0">
+            <SlidersHorizontal className="mr-2 h-4 w-4" />
+            {showAdvanced ? '收起高级配置' : '高级配置'}
+          </Button>
+        </div>
+
+        {showAdvanced && (
+          <div className="rounded-[24px] border border-white/8 bg-slate-950/45 p-4">
+            <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-white">运行参数</h4>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  仅用于临时调试、验证新镜像或排查运行问题。普通创建建议保持为空。
+                </p>
+              </div>
+              <Badge className="w-fit rounded-xl border-amber-400/18 bg-amber-400/10 px-2.5 py-1 text-amber-100">
+                可选
+              </Badge>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3 lg:col-span-2">
+                <span className="text-xs font-medium text-slate-300">运行镜像</span>
+                <p className="mt-1 text-xs text-slate-500">留空时使用资源池默认 aio-sandbox 镜像。</p>
+                <input
+                  value={value.image}
+                  onChange={(event) => onChange({ ...value, image: event.target.value })}
+                  placeholder="例如：registry.example.com/aio-sandbox:debug"
+                  disabled={disabled || creating}
+                  className={cn(formInputClassName('mt-3 font-mono text-xs'), 'disabled:cursor-not-allowed disabled:opacity-60')}
+                />
+              </label>
+
+              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+                <span className="text-xs font-medium text-slate-300">环境变量</span>
+                <p className="mt-1 text-xs text-slate-500">传入容器启动参数，每行一组 KEY=VALUE。</p>
+                <textarea
+                  rows={4}
+                  value={value.envText}
+                  onChange={(event) => onChange({ ...value, envText: event.target.value })}
+                  placeholder={'LOG_LEVEL=debug\nFEATURE_FLAG=true'}
+                  disabled={disabled || creating}
+                  className={cn(
+                    formInputClassName('mt-3 resize-none font-mono text-xs'),
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                  )}
+                />
+              </label>
+
+              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+                <span className="text-xs font-medium text-slate-300">资源标签</span>
+                <p className="mt-1 text-xs text-slate-500">追加到 Kubernetes labels，用于筛选和归类。</p>
+                <textarea
+                  rows={4}
+                  value={value.labelsText}
+                  onChange={(event) => onChange({ ...value, labelsText: event.target.value })}
+                  placeholder={'owner=team-a\npurpose=debug'}
+                  disabled={disabled || creating}
+                  className={cn(
+                    formInputClassName('mt-3 resize-none font-mono text-xs'),
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                  )}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+      </form>
+    </section>
   )
 }
 
@@ -238,12 +461,6 @@ function SandboxCard({
           </div>
         </div>
 
-        {sandbox.threadId && (
-          <div className="rounded-2xl border border-emerald-400/12 bg-emerald-400/8 px-3 py-2 text-xs text-emerald-100">
-            thread: <span className="font-mono">{sandbox.threadId}</span>
-          </div>
-        )}
-
         <div className="flex items-center justify-between pt-1">
           <span className="min-w-0 truncate text-xs text-slate-500">
             Service: {sandbox.serviceName || '-'}
@@ -271,8 +488,14 @@ export function SandboxPoolPage() {
   const [sandboxes, setSandboxes] = useState<SandboxSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [createForm, setCreateForm] = useState<CreateSandboxFormState>(() => createDefaultForm())
+  const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
+
+  const createDisabled = !health?.enabled || Boolean(health?.extra.error)
 
   const stats = useMemo(() => {
     const running = sandboxes.filter((item) => item.status === 'Running').length
@@ -310,6 +533,31 @@ export function SandboxPoolPage() {
     void load()
   }, [load])
 
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setCreating(true)
+    setError('')
+    setNotice('')
+
+    try {
+      const createdSandbox = await createSandbox({
+        sandboxId: createForm.sandboxId.trim(),
+        image: createForm.image.trim(),
+        env: parseKeyValueText(createForm.envText, '环境变量'),
+        labels: parseKeyValueText(createForm.labelsText, '标签'),
+      })
+      setNotice(`沙箱 ${createdSandbox.sandboxId} 已提交创建，实例状态会在资源池中持续更新。`)
+      setCreateForm(createDefaultForm())
+      setShowCreateAdvanced(false)
+      await load(true)
+    } catch (currentError) {
+      const message = currentError instanceof Error ? currentError.message : '创建沙箱失败'
+      setError(message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
   async function handleDelete(sandboxId: string) {
     const confirmed = window.confirm(`确认删除沙箱 ${sandboxId} 吗？该操作会删除对应 Pod、Service 和 Ingress。`)
     if (!confirmed) {
@@ -320,6 +568,7 @@ export function SandboxPoolPage() {
     setError('')
     try {
       await deleteSandbox(sandboxId)
+      setSandboxes((current) => current.filter((item) => item.sandboxId !== sandboxId))
       await load(true)
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '删除沙箱失败'
@@ -337,16 +586,18 @@ export function SandboxPoolPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-200/70">Resource Pool</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">沙箱资源池总览</h2>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void load(true)}
-            disabled={refreshing || loading}
-            className="w-fit"
-          >
-            <RefreshCw className={cn('mr-2 h-4 w-4', refreshing && 'animate-spin')} />
-            刷新资源池
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void load(true)}
+              disabled={refreshing || loading}
+              className="w-fit"
+            >
+              <RefreshCw className={cn('mr-2 h-4 w-4', refreshing && 'animate-spin')} />
+              刷新资源池
+            </Button>
+          </div>
         </div>
 
         {error && (
@@ -358,7 +609,27 @@ export function SandboxPoolPage() {
           </div>
         )}
 
+        {notice && (
+          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{notice}</span>
+            </div>
+          </div>
+        )}
+
         <HealthPanel health={health} />
+
+        <CreateSandboxPanel
+          value={createForm}
+          creating={creating}
+          disabled={createDisabled}
+          showAdvanced={showCreateAdvanced}
+          onChange={setCreateForm}
+          onSubmit={handleCreate}
+          onGenerateId={() => setCreateForm((current) => ({ ...current, sandboxId: createSandboxId() }))}
+          onToggleAdvanced={() => setShowCreateAdvanced((current) => !current)}
+        />
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard icon={ShieldCheck} label="运行中沙箱" value={stats.running} tone="emerald" />

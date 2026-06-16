@@ -13,7 +13,6 @@ export interface SandboxSummary {
   nodeName: string
   podIp: string
   createdAt: string
-  threadId: string
   labels: Record<string, string>
 }
 
@@ -29,6 +28,13 @@ export interface SandboxPoolHealth {
   }
 }
 
+export interface SandboxCreateRequest {
+  sandboxId: string
+  image?: string
+  env?: Record<string, string>
+  labels?: Record<string, string>
+}
+
 interface SandboxSummaryDto {
   sandbox_id: string
   sandbox_url?: string
@@ -40,7 +46,6 @@ interface SandboxSummaryDto {
   node_name?: string
   pod_ip?: string
   created_at?: string
-  thread_id?: string
   labels?: Record<string, string>
 }
 
@@ -56,6 +61,13 @@ interface SandboxPoolHealthDto {
   extra?: SandboxPoolHealth['extra']
 }
 
+interface SandboxCreateRequestDto {
+  sandbox_id: string
+  image?: string
+  env?: Record<string, string>
+  labels?: Record<string, string>
+}
+
 function toSandboxSummary(item: SandboxSummaryDto): SandboxSummary {
   return {
     sandboxId: item.sandbox_id,
@@ -68,7 +80,6 @@ function toSandboxSummary(item: SandboxSummaryDto): SandboxSummary {
     nodeName: item.node_name ?? '',
     podIp: item.pod_ip ?? '',
     createdAt: item.created_at ?? '',
-    threadId: item.thread_id ?? '',
     labels: item.labels ?? {},
   }
 }
@@ -91,6 +102,23 @@ export async function getSandboxPoolHealth(): Promise<SandboxPoolHealth> {
 export async function listSandboxes(): Promise<SandboxSummary[]> {
   const { data } = await http.get<SandboxListResponseDto>('/sandboxes')
   return data.sandboxes.map(toSandboxSummary)
+}
+
+export async function createSandbox(request: SandboxCreateRequest): Promise<SandboxSummary> {
+  const payload: SandboxCreateRequestDto = {
+    sandbox_id: request.sandboxId,
+  }
+  if (request.image) {
+    payload.image = request.image
+  }
+  if (request.env && Object.keys(request.env).length > 0) {
+    payload.env = request.env
+  }
+  if (request.labels && Object.keys(request.labels).length > 0) {
+    payload.labels = request.labels
+  }
+  const { data } = await http.post<SandboxSummaryDto>('/sandboxes', payload)
+  return toSandboxSummary(data)
 }
 
 export async function deleteSandbox(sandboxId: string): Promise<void> {

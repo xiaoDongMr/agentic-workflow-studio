@@ -147,6 +147,11 @@ async def init_engine(
         logger.debug("deerflow.persistence.models not found; skipping auto-create tables")
 
     try:
+        import app.persistence.workflow_models  # noqa: F401
+    except ImportError:
+        logger.debug("app.persistence.workflow_models not found; skipping workflow tables")
+
+    try:
         async with _engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     except Exception as exc:

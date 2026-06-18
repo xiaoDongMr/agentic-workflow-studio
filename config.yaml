@@ -1,4 +1,10 @@
 config_version: 1
+database:
+  backend: postgres
+  postgres_url: $DATABASE_URL
+  echo_sql: false
+  pool_size: 5
+
 log_level: info
 
 sandbox:

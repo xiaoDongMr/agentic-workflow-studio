@@ -1,5 +1,16 @@
 config_version: 1
 
+# Persistence backend. SQLite is fine for local single-node development.
+# Use PostgreSQL for shared development machines and production.
+database:
+  backend: postgres
+  postgres_url: $DATABASE_URL
+  # For PostgreSQL, keep the real URL in .env or deployment secrets:
+  # backend: postgres
+  # postgres_url: $DATABASE_URL
+  # echo_sql: false
+  # pool_size: 5
+
 # Sandbox pool examples. Copy one mode into config.yaml.
 
 sandbox_pool:

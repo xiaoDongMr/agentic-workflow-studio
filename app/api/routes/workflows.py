@@ -2,14 +2,74 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from deerflow.persistence.engine import get_session_factory
+
 from app.deps import get_app_config
-from app.schemas.workflow import WorkflowRunRequest, WorkflowRunResponse
+from app.schemas.workflow import (
+    WorkflowDocument,
+    WorkflowProjectSummary,
+    WorkflowRunRequest,
+    WorkflowRunResponse,
+    WorkflowSaveDraftRequest,
+    WorkflowSaveDraftResponse,
+)
+from app.services.workflow_store import DEFAULT_WORKSPACE_ID, WorkflowStore, WorkflowProjectSummary as StoredWorkflowProjectSummary
 from app.services.workflow_runner import WorkflowRunner
 
 router = APIRouter()
+
+
+def _get_workflow_store() -> WorkflowStore:
+    session_factory = get_session_factory()
+    if session_factory is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Workflow persistence is not available. Configure database.backend as sqlite or postgres.",
+        )
+    return WorkflowStore(session_factory)
+
+
+def _to_project_summary(summary: StoredWorkflowProjectSummary) -> WorkflowProjectSummary:
+    return WorkflowProjectSummary(
+        id=summary.id,
+        name=summary.name,
+        description=summary.description,
+        status=summary.status,
+        currentDraftVersionId=summary.current_draft_version_id,
+        latestPublishedVersionId=summary.latest_published_version_id,
+        nodeCount=summary.node_count,
+        edgeCount=summary.edge_count,
+        updatedAt=summary.updated_at.isoformat(),
+    )
+
+
+@router.get("/workflows", response_model=list[WorkflowProjectSummary])
+async def list_workflows(workspaceId: str = DEFAULT_WORKSPACE_ID) -> list[WorkflowProjectSummary]:
+    store = _get_workflow_store()
+    projects = await store.list_projects(workspaceId)
+    return [_to_project_summary(project) for project in projects]
+
+
+@router.post("/workflows/draft", response_model=WorkflowSaveDraftResponse)
+async def save_workflow_draft(body: WorkflowSaveDraftRequest) -> WorkflowSaveDraftResponse:
+    store = _get_workflow_store()
+    saved = await store.save_draft(body.workflow, workspace_id=body.workspaceId)
+    return WorkflowSaveDraftResponse(
+        project=_to_project_summary(saved.project),
+        workflow=saved.workflow,
+    )
+
+
+@router.get("/workflows/{workflow_id}/draft", response_model=WorkflowDocument)
+async def get_workflow_draft(workflow_id: str) -> WorkflowDocument:
+    store = _get_workflow_store()
+    workflow = await store.get_draft(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="Workflow draft not found")
+    return workflow
 
 
 @router.post("/workflows/run", response_model=WorkflowRunResponse)

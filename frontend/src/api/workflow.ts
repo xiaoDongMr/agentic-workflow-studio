@@ -6,6 +6,23 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowDocument } from '@/types/workflow'
 
+export interface WorkflowProjectSummary {
+  id: string
+  name: string
+  description: string
+  status: string
+  currentDraftVersionId: string | null
+  latestPublishedVersionId: string | null
+  nodeCount: number
+  edgeCount: number
+  updatedAt: string
+}
+
+interface WorkflowSaveDraftResponse {
+  project: WorkflowProjectSummary
+  workflow: WorkflowDocument
+}
+
 interface WorkflowRunStep {
   nodeId: string
   nodeTitle: string
@@ -128,6 +145,27 @@ export async function runWorkflow(
   })
 
   return data.steps.map(toTrialRunExecution)
+}
+
+export async function listWorkflowProjects(): Promise<WorkflowProjectSummary[]> {
+  const { data } = await http.get<WorkflowProjectSummary[]>('/workflows')
+  return data
+}
+
+export async function getWorkflowDraft(workflowId: string): Promise<WorkflowDocument> {
+  const { data } = await http.get<WorkflowDocument>(`/workflows/${workflowId}/draft`)
+  return sanitizeWorkflowDocument(data)
+}
+
+export async function saveWorkflowDraft(workflow: WorkflowDocument): Promise<WorkflowSaveDraftResponse> {
+  const normalizedWorkflow = sanitizeWorkflowDocument(workflow)
+  const { data } = await http.post<WorkflowSaveDraftResponse>('/workflows/draft', {
+    workflow: normalizedWorkflow,
+  })
+  return {
+    project: data.project,
+    workflow: sanitizeWorkflowDocument(data.workflow),
+  }
 }
 
 export async function streamWorkflow(

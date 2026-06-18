@@ -199,3 +199,25 @@ class WorkflowRunResponse(BaseModel):
     output: dict[str, Any]
     state: dict[str, Any]
     steps: list[WorkflowRunStep]
+
+
+class WorkflowSaveDraftRequest(BaseModel):
+    workflow: WorkflowDocument
+    workspaceId: str = "00000000-0000-0000-0000-000000000000"
+
+
+class WorkflowProjectSummary(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    status: str = "draft"
+    currentDraftVersionId: str | None = None
+    latestPublishedVersionId: str | None = None
+    nodeCount: int = 0
+    edgeCount: int = 0
+    updatedAt: str
+
+
+class WorkflowSaveDraftResponse(BaseModel):
+    project: WorkflowProjectSummary
+    workflow: WorkflowDocument

@@ -2,18 +2,19 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { mockWorkflow } from '@/features/workflow/mock-data'
-import type { WorkflowNode } from '@/types/workflow'
+import type { WorkflowDocument, WorkflowNode } from '@/types/workflow'
 
 const WORKFLOW_DRAFT_STORAGE_KEY = 'agentic-workflow-studio:draft:v1'
 
 interface WorkflowStore {
-  workflow: typeof mockWorkflow
+  workflow: WorkflowDocument
   selectedNodeId: string
   activeTab: 'visual' | 'code' | 'logs'
   draftHydrated: boolean
   setSelectedNodeId: (nodeId: string) => void
   setActiveTab: (tab: WorkflowStore['activeTab']) => void
   setDraftHydrated: (draftHydrated: boolean) => void
+  setWorkflow: (workflow: WorkflowDocument) => void
   setWorkflowGraph: (
     nodes: typeof mockWorkflow.nodes,
     edges: typeof mockWorkflow.edges,
@@ -71,6 +72,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
       setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
       setActiveTab: (activeTab) => set({ activeTab }),
       setDraftHydrated: (draftHydrated) => set({ draftHydrated }),
+      setWorkflow: (workflow) => set({ workflow, selectedNodeId: '' }),
       setWorkflowGraph: (nodes, edges) =>
         set((state) => ({
             workflow: {

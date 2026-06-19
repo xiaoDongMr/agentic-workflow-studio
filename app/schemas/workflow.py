@@ -206,6 +206,17 @@ class WorkflowSaveDraftRequest(BaseModel):
     workspaceId: str = "00000000-0000-0000-0000-000000000000"
 
 
+class WorkflowProjectUpdateRequest(BaseModel):
+    name: str
+    description: str = ""
+    workspaceId: str = "00000000-0000-0000-0000-000000000000"
+
+
+class WorkflowProjectDuplicateRequest(BaseModel):
+    name: str | None = None
+    workspaceId: str = "00000000-0000-0000-0000-000000000000"
+
+
 class WorkflowProjectSummary(BaseModel):
     id: str
     name: str
@@ -216,6 +227,7 @@ class WorkflowProjectSummary(BaseModel):
     nodeCount: int = 0
     edgeCount: int = 0
     updatedAt: str
+    preview: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowSaveDraftResponse(BaseModel):

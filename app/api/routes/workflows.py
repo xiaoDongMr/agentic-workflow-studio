@@ -10,7 +10,9 @@ from deerflow.persistence.engine import get_session_factory
 from app.deps import get_app_config
 from app.schemas.workflow import (
     WorkflowDocument,
+    WorkflowProjectDuplicateRequest,
     WorkflowProjectSummary,
+    WorkflowProjectUpdateRequest,
     WorkflowRunRequest,
     WorkflowRunResponse,
     WorkflowSaveDraftRequest,
@@ -43,6 +45,7 @@ def _to_project_summary(summary: StoredWorkflowProjectSummary) -> WorkflowProjec
         nodeCount=summary.node_count,
         edgeCount=summary.edge_count,
         updatedAt=summary.updated_at.isoformat(),
+        preview=summary.preview,
     )
 
 
@@ -70,6 +73,43 @@ async def get_workflow_draft(workflow_id: str) -> WorkflowDocument:
     if workflow is None:
         raise HTTPException(status_code=404, detail="Workflow draft not found")
     return workflow
+
+
+@router.patch("/workflows/{workflow_id}", response_model=WorkflowProjectSummary)
+async def update_workflow_project(workflow_id: str, body: WorkflowProjectUpdateRequest) -> WorkflowProjectSummary:
+    store = _get_workflow_store()
+    project = await store.update_project_metadata(
+        workflow_id,
+        name=body.name,
+        description=body.description,
+        workspace_id=body.workspaceId,
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="Workflow project not found")
+    return _to_project_summary(project)
+
+
+@router.post("/workflows/{workflow_id}/duplicate", response_model=WorkflowSaveDraftResponse)
+async def duplicate_workflow_project(
+    workflow_id: str,
+    body: WorkflowProjectDuplicateRequest,
+) -> WorkflowSaveDraftResponse:
+    store = _get_workflow_store()
+    saved = await store.duplicate_project(workflow_id, name=body.name, workspace_id=body.workspaceId)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Workflow project not found")
+    return WorkflowSaveDraftResponse(
+        project=_to_project_summary(saved.project),
+        workflow=saved.workflow,
+    )
+
+
+@router.delete("/workflows/{workflow_id}", status_code=204)
+async def delete_workflow_project(workflow_id: str, workspaceId: str = DEFAULT_WORKSPACE_ID) -> None:
+    store = _get_workflow_store()
+    deleted = await store.delete_project(workflow_id, workspace_id=workspaceId)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Workflow project not found")
 
 
 @router.post("/workflows/run", response_model=WorkflowRunResponse)

@@ -6,6 +6,27 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import type { WorkflowDocument } from '@/types/workflow'
 
+export interface WorkflowProjectPreviewNode {
+  id: string
+  title: string
+  type: WorkflowDocument['nodes'][number]['type']
+  position: {
+    x: number
+    y: number
+  }
+}
+
+export interface WorkflowProjectPreviewEdge {
+  id: string
+  source: string
+  target: string
+}
+
+export interface WorkflowProjectPreview {
+  nodes: WorkflowProjectPreviewNode[]
+  edges: WorkflowProjectPreviewEdge[]
+}
+
 export interface WorkflowProjectSummary {
   id: string
   name: string
@@ -16,6 +37,7 @@ export interface WorkflowProjectSummary {
   nodeCount: number
   edgeCount: number
   updatedAt: string
+  preview: WorkflowProjectPreview
 }
 
 interface WorkflowSaveDraftResponse {
@@ -161,6 +183,28 @@ export async function saveWorkflowDraft(workflow: WorkflowDocument): Promise<Wor
   const normalizedWorkflow = sanitizeWorkflowDocument(workflow)
   const { data } = await http.post<WorkflowSaveDraftResponse>('/workflows/draft', {
     workflow: normalizedWorkflow,
+  })
+  return {
+    project: data.project,
+    workflow: sanitizeWorkflowDocument(data.workflow),
+  }
+}
+
+export async function updateWorkflowProject(
+  workflowId: string,
+  payload: { name: string; description: string },
+): Promise<WorkflowProjectSummary> {
+  const { data } = await http.patch<WorkflowProjectSummary>(`/workflows/${workflowId}`, payload)
+  return data
+}
+
+export async function deleteWorkflowProject(workflowId: string): Promise<void> {
+  await http.delete(`/workflows/${workflowId}`)
+}
+
+export async function duplicateWorkflowProject(workflowId: string, name?: string): Promise<WorkflowSaveDraftResponse> {
+  const { data } = await http.post<WorkflowSaveDraftResponse>(`/workflows/${workflowId}/duplicate`, {
+    name,
   })
   return {
     project: data.project,

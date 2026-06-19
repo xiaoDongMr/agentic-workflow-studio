@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select
@@ -24,6 +25,7 @@ class WorkflowProjectSummary:
     node_count: int
     edge_count: int
     updated_at: datetime
+    preview: dict
 
 
 @dataclass(slots=True)
@@ -44,7 +46,10 @@ class WorkflowStore:
                 .where(WorkflowProjectRow.workspace_id == workspace_id, WorkflowProjectRow.deleted_at.is_(None))
                 .order_by(WorkflowProjectRow.updated_at.desc())
             )
-            return [self._to_summary(project, version) for project, version in result.all()]
+            rows = result.all()
+            version_ids = [version.id for _, version in rows if version is not None]
+            previews = await self._load_project_previews(session, version_ids)
+            return [self._to_summary(project, version, previews.get(version.id) if version else None) for project, version in rows]
 
     async def get_draft(self, workflow_id: str) -> WorkflowDocument | None:
         async with self._session_factory() as session:
@@ -56,6 +61,83 @@ class WorkflowStore:
             if version is None:
                 return None
             return WorkflowDocument.model_validate(version.graph_snapshot)
+
+    async def update_project_metadata(
+        self,
+        workflow_id: str,
+        *,
+        name: str,
+        description: str,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+        actor_id: str | None = None,
+    ) -> WorkflowProjectSummary | None:
+        next_name = name.strip() or "未命名项目"
+        next_description = description.strip()
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(WorkflowProjectRow, WorkflowVersionRow)
+                .outerjoin(WorkflowVersionRow, WorkflowVersionRow.id == WorkflowProjectRow.current_draft_version_id)
+                .where(
+                    WorkflowProjectRow.id == workflow_id,
+                    WorkflowProjectRow.workspace_id == workspace_id,
+                    WorkflowProjectRow.deleted_at.is_(None),
+                )
+            )
+            row = result.one_or_none()
+            if row is None:
+                return None
+
+            project, version = row
+            project.name = next_name
+            project.description = next_description
+            project.updated_by = actor_id
+            project.revision = (project.revision or 0) + 1
+
+            if version is not None:
+                version.name = next_name
+                version.description = next_description
+                if version.graph_snapshot:
+                    workflow = WorkflowDocument.model_validate(version.graph_snapshot)
+                    version.graph_snapshot = workflow.model_copy(
+                        update={"name": next_name, "description": next_description}
+                    ).model_dump(mode="json")
+                version.revision = (version.revision or 0) + 1
+
+            await session.commit()
+            return self._to_summary(project, version)
+
+    async def delete_project(self, workflow_id: str, *, workspace_id: str = DEFAULT_WORKSPACE_ID) -> bool:
+        async with self._session_factory() as session:
+            project = await session.get(WorkflowProjectRow, workflow_id)
+            if project is None or project.workspace_id != workspace_id or project.deleted_at is not None:
+                return False
+
+            project.deleted_at = datetime.now(UTC)
+            project.revision = (project.revision or 0) + 1
+            await session.commit()
+            return True
+
+    async def duplicate_project(
+        self,
+        workflow_id: str,
+        *,
+        name: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+    ) -> SavedWorkflowDraft | None:
+        workflow = await self.get_draft(workflow_id)
+        if workflow is None:
+            return None
+
+        duplicate_name = name.strip() if name else f"{workflow.name or '未命名项目'} 副本"
+        duplicated = workflow.model_copy(
+            update={
+                "id": str(uuid4()),
+                "name": duplicate_name or "未命名项目 副本",
+                "description": workflow.description,
+            }
+        )
+        return await self.save_draft(duplicated, workspace_id=workspace_id)
 
     async def save_draft(
         self,
@@ -123,7 +205,41 @@ class WorkflowStore:
                 workflow=workflow,
             )
 
-    def _to_summary(self, project: WorkflowProjectRow, version: WorkflowVersionRow | None) -> WorkflowProjectSummary:
+    async def _load_project_previews(self, session: AsyncSession, version_ids: list[str]) -> dict[str, dict]:
+        if not version_ids:
+            return {}
+
+        node_result = await session.execute(
+            select(WorkflowNodeRow)
+            .where(WorkflowNodeRow.workflow_version_id.in_(version_ids), WorkflowNodeRow.parent_node_key.is_(None))
+            .order_by(WorkflowNodeRow.workflow_version_id, WorkflowNodeRow.sort_order)
+        )
+        nodes_by_version: dict[str, list[WorkflowNodeRow]] = defaultdict(list)
+        for node in node_result.scalars():
+            if len(nodes_by_version[node.workflow_version_id]) < 8:
+                nodes_by_version[node.workflow_version_id].append(node)
+
+        edge_result = await session.execute(
+            select(WorkflowEdgeRow)
+            .where(WorkflowEdgeRow.workflow_version_id.in_(version_ids), WorkflowEdgeRow.parent_node_key.is_(None))
+            .order_by(WorkflowEdgeRow.workflow_version_id, WorkflowEdgeRow.sort_order)
+        )
+        edges_by_version: dict[str, list[WorkflowEdgeRow]] = defaultdict(list)
+        for edge in edge_result.scalars():
+            if len(edges_by_version[edge.workflow_version_id]) < 24:
+                edges_by_version[edge.workflow_version_id].append(edge)
+
+        return {
+            version_id: _build_project_preview_from_rows(nodes_by_version[version_id], edges_by_version[version_id])
+            for version_id in version_ids
+        }
+
+    def _to_summary(
+        self,
+        project: WorkflowProjectRow,
+        version: WorkflowVersionRow | None,
+        preview: dict | None = None,
+    ) -> WorkflowProjectSummary:
         return WorkflowProjectSummary(
             id=project.id,
             name=project.name,
@@ -134,6 +250,7 @@ class WorkflowStore:
             node_count=version.node_count if version else 0,
             edge_count=version.edge_count if version else 0,
             updated_at=project.updated_at,
+            preview=preview if preview is not None else _build_project_preview(version),
         )
 
 
@@ -142,6 +259,60 @@ def _normalize_uuid_or_new(value: str) -> str:
         return str(UUID(value))
     except (TypeError, ValueError):
         return str(uuid4())
+
+
+def _build_project_preview(version: WorkflowVersionRow | None) -> dict:
+    if version is None or not version.graph_snapshot:
+        return {"nodes": [], "edges": []}
+
+    try:
+        workflow = WorkflowDocument.model_validate(version.graph_snapshot)
+    except Exception:
+        return {"nodes": [], "edges": []}
+
+    nodes = [
+        {
+            "id": node.id,
+            "title": node.title,
+            "type": node.type,
+            "position": node.position,
+        }
+        for node in workflow.nodes[:8]
+    ]
+    preview_node_ids = {node["id"] for node in nodes}
+    edges = [
+        {
+            "id": edge.id,
+            "source": edge.source,
+            "target": edge.target,
+        }
+        for edge in workflow.edges
+        if edge.source in preview_node_ids and edge.target in preview_node_ids
+    ][:12]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _build_project_preview_from_rows(nodes: list[WorkflowNodeRow], edges: list[WorkflowEdgeRow]) -> dict:
+    preview_nodes = [
+        {
+            "id": node.node_key,
+            "title": node.title,
+            "type": node.type,
+            "position": {"x": node.position_x, "y": node.position_y},
+        }
+        for node in nodes
+    ]
+    preview_node_ids = {node["id"] for node in preview_nodes}
+    preview_edges = [
+        {
+            "id": edge.edge_key,
+            "source": edge.source_node_key,
+            "target": edge.target_node_key,
+        }
+        for edge in edges
+        if edge.source_node_key in preview_node_ids and edge.target_node_key in preview_node_ids
+    ][:12]
+    return {"nodes": preview_nodes, "edges": preview_edges}
 
 
 def _flatten_nodes(nodes: list[WorkflowNode], parent_node_key: str | None = None) -> list[tuple[WorkflowNode, str | None]]:

@@ -40,6 +40,34 @@ export interface WorkflowProjectSummary {
   preview: WorkflowProjectPreview
 }
 
+export interface WorkflowProjectPage {
+  items: WorkflowProjectSummary[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export type WorkflowProjectFilter = 'all' | 'simple' | 'complex'
+
+export interface WorkflowProjectListParams {
+  page?: number
+  pageSize?: number
+  query?: string
+  filter?: WorkflowProjectFilter
+}
+
+export interface WorkflowVersionSummary {
+  id: string
+  version: string
+  name: string
+  description: string
+  nodeCount: number
+  edgeCount: number
+  createdAt: string
+  updatedAt: string
+  isCurrent: boolean
+}
+
 interface WorkflowSaveDraftResponse {
   project: WorkflowProjectSummary
   workflow: WorkflowDocument
@@ -169,13 +197,30 @@ export async function runWorkflow(
   return data.steps.map(toTrialRunExecution)
 }
 
-export async function listWorkflowProjects(): Promise<WorkflowProjectSummary[]> {
-  const { data } = await http.get<WorkflowProjectSummary[]>('/workflows')
+export async function listWorkflowProjects(params: WorkflowProjectListParams = {}): Promise<WorkflowProjectPage> {
+  const { data } = await http.get<WorkflowProjectPage>('/workflows', {
+    params: {
+      page: params.page,
+      pageSize: params.pageSize,
+      q: params.query,
+      filter: params.filter,
+    },
+  })
   return data
 }
 
 export async function getWorkflowDraft(workflowId: string): Promise<WorkflowDocument> {
   const { data } = await http.get<WorkflowDocument>(`/workflows/${workflowId}/draft`)
+  return sanitizeWorkflowDocument(data)
+}
+
+export async function listWorkflowVersions(workflowId: string): Promise<WorkflowVersionSummary[]> {
+  const { data } = await http.get<WorkflowVersionSummary[]>(`/workflows/${workflowId}/versions`)
+  return data
+}
+
+export async function getWorkflowVersion(workflowId: string, versionId: string): Promise<WorkflowDocument> {
+  const { data } = await http.get<WorkflowDocument>(`/workflows/${workflowId}/versions/${versionId}`)
   return sanitizeWorkflowDocument(data)
 }
 

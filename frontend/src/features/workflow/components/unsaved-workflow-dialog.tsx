@@ -25,7 +25,7 @@ export function UnsavedWorkflowDialog({
             <div className="min-w-0">
               <p className="text-lg font-semibold tracking-tight text-white">当前工作流还未保存</p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                “{workflowName || '未命名项目'}” 有未保存修改。仅本地暂存依赖浏览器缓存，清理缓存或异常环境可能导致丢失。
+                  “{workflowName || '未命名项目'}” 有未保存修改。刷新或关闭标签页时会触发浏览器确认；仅本地暂存依赖浏览器缓存，保存草稿后才会生成服务端版本。
               </p>
             </div>
           </div>

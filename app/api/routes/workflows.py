@@ -11,14 +11,21 @@ from app.deps import get_app_config
 from app.schemas.workflow import (
     WorkflowDocument,
     WorkflowProjectDuplicateRequest,
+    WorkflowProjectPage,
     WorkflowProjectSummary,
     WorkflowProjectUpdateRequest,
     WorkflowRunRequest,
     WorkflowRunResponse,
     WorkflowSaveDraftRequest,
     WorkflowSaveDraftResponse,
+    WorkflowVersionSummary,
 )
-from app.services.workflow_store import DEFAULT_WORKSPACE_ID, WorkflowStore, WorkflowProjectSummary as StoredWorkflowProjectSummary
+from app.services.workflow_store import (
+    DEFAULT_WORKSPACE_ID,
+    WorkflowStore,
+    WorkflowProjectSummary as StoredWorkflowProjectSummary,
+    WorkflowVersionSummary as StoredWorkflowVersionSummary,
+)
 from app.services.workflow_runner import WorkflowRunner
 
 router = APIRouter()
@@ -49,11 +56,36 @@ def _to_project_summary(summary: StoredWorkflowProjectSummary) -> WorkflowProjec
     )
 
 
-@router.get("/workflows", response_model=list[WorkflowProjectSummary])
-async def list_workflows(workspaceId: str = DEFAULT_WORKSPACE_ID) -> list[WorkflowProjectSummary]:
+def _to_version_summary(summary: StoredWorkflowVersionSummary) -> WorkflowVersionSummary:
+    return WorkflowVersionSummary(
+        id=summary.id,
+        version=summary.version,
+        name=summary.name,
+        description=summary.description,
+        nodeCount=summary.node_count,
+        edgeCount=summary.edge_count,
+        createdAt=summary.created_at.isoformat(),
+        updatedAt=summary.updated_at.isoformat(),
+        isCurrent=summary.is_current,
+    )
+
+
+@router.get("/workflows", response_model=WorkflowProjectPage)
+async def list_workflows(
+    workspaceId: str = DEFAULT_WORKSPACE_ID,
+    page: int = 1,
+    pageSize: int = 6,
+    q: str = "",
+    filter: str = "all",
+) -> WorkflowProjectPage:
     store = _get_workflow_store()
-    projects = await store.list_projects(workspaceId)
-    return [_to_project_summary(project) for project in projects]
+    projects = await store.list_projects(workspaceId, page=page, page_size=pageSize, query=q, project_filter=filter)
+    return WorkflowProjectPage(
+        items=[_to_project_summary(project) for project in projects.items],
+        page=projects.page,
+        pageSize=projects.page_size,
+        total=projects.total,
+    )
 
 
 @router.post("/workflows/draft", response_model=WorkflowSaveDraftResponse)
@@ -72,6 +104,31 @@ async def get_workflow_draft(workflow_id: str) -> WorkflowDocument:
     workflow = await store.get_draft(workflow_id)
     if workflow is None:
         raise HTTPException(status_code=404, detail="Workflow draft not found")
+    return workflow
+
+
+@router.get("/workflows/{workflow_id}/versions", response_model=list[WorkflowVersionSummary])
+async def list_workflow_versions(
+    workflow_id: str,
+    workspaceId: str = DEFAULT_WORKSPACE_ID,
+) -> list[WorkflowVersionSummary]:
+    store = _get_workflow_store()
+    versions = await store.list_versions(workflow_id, workspace_id=workspaceId)
+    if versions is None:
+        raise HTTPException(status_code=404, detail="Workflow project not found")
+    return [_to_version_summary(version) for version in versions]
+
+
+@router.get("/workflows/{workflow_id}/versions/{version_id}", response_model=WorkflowDocument)
+async def get_workflow_version(
+    workflow_id: str,
+    version_id: str,
+    workspaceId: str = DEFAULT_WORKSPACE_ID,
+) -> WorkflowDocument:
+    store = _get_workflow_store()
+    workflow = await store.get_version(workflow_id, version_id, workspace_id=workspaceId)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="Workflow version not found")
     return workflow
 
 

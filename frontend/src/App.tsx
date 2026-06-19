@@ -26,6 +26,7 @@ function App() {
     allWorkflowEdges,
     allWorkflowNodes,
     canvasApi,
+    currentWorkflowSaved,
     draftHydrated,
     hasUnsavedChanges,
     lastSavedAt,
@@ -35,13 +36,22 @@ function App() {
     pendingLeaveAction,
     projectsError,
     projectsLoading,
+    restoringVersionId,
     saveMessage,
     saveStatus,
     selectedNode,
     selectedNodeId,
     workflow,
     workflowEditorOpen,
+    workflowProjectFilter,
+    workflowProjectPage,
+    workflowProjectPageSize,
+    workflowProjectQuery,
+    workflowProjectTotal,
     workflowProjects,
+    workflowVersions,
+    versionsError,
+    versionsLoading,
     cancelPendingLeave,
     changeActiveView,
     closeWorkflowEditor,
@@ -54,9 +64,13 @@ function App() {
     openLocalWorkflowDraft,
     openWorkflowProject,
     refreshWorkflowProjects,
+    restoreSavedWorkflowVersion,
     saveAndContinuePendingLeave,
     setCanvasApi,
     setSelectedNodeId,
+    setWorkflowProjectFilter,
+    setWorkflowProjectPage,
+    setWorkflowProjectQuery,
     stashAndContinuePendingLeave,
     updateLocalWorkflowProject,
     updateSavedWorkflowProject,
@@ -86,8 +100,13 @@ function App() {
                     name={workflow.name}
                     saveMessage={saveMessage}
                     saveStatus={saveStatus}
+                    versions={workflowVersions}
+                    versionsError={versionsError}
+                    versionsLoading={versionsLoading}
                     version={workflow.version}
+                    restoringVersionId={restoringVersionId}
                     onBack={closeWorkflowEditor}
+                    onRestoreVersion={restoreSavedWorkflowVersion}
                     onSave={handleSaveWorkflow}
                     onUpdateMetadata={updateWorkflowMetadata}
                   />
@@ -95,6 +114,7 @@ function App() {
                   <div className="relative min-h-0 flex-1">
                     {draftHydrated ? (
                       <WorkflowCanvas
+                        key={`${workflow.id}:${workflow.version}`}
                         className="h-full"
                         nodes={workflow.nodes}
                         edges={workflow.edges}
@@ -169,6 +189,12 @@ function App() {
                 workflow={workflow}
                 localDrafts={localDrafts}
                 projects={workflowProjects}
+                projectsFilter={workflowProjectFilter}
+                projectsPage={workflowProjectPage}
+                projectsPageSize={workflowProjectPageSize}
+                projectsQuery={workflowProjectQuery}
+                projectsTotal={workflowProjectTotal}
+                currentWorkflowSaved={currentWorkflowSaved}
                 hasUnsavedChanges={hasUnsavedChanges}
                 loadingProjects={projectsLoading}
                 projectsError={projectsError}
@@ -177,6 +203,9 @@ function App() {
                 onOpenWorkflow={openWorkflowProject}
                 onOpenLocalDraft={openLocalWorkflowDraft}
                 onRefreshProjects={refreshWorkflowProjects}
+                onChangeProjectsFilter={setWorkflowProjectFilter}
+                onChangeProjectsPage={setWorkflowProjectPage}
+                onChangeProjectsQuery={setWorkflowProjectQuery}
                 onUpdateLocalDraft={updateLocalWorkflowProject}
                 onDeleteLocalDraft={deleteLocalWorkflowProject}
                 onDuplicateLocalDraft={duplicateLocalWorkflowProject}

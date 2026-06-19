@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, ChevronLeft, LoaderCircle, PencilLine, Save, X } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  History,
+  LoaderCircle,
+  PencilLine,
+  RotateCcw,
+  Save,
+  X,
+} from 'lucide-react'
 
+import type { WorkflowVersionSummary } from '@/api/workflow'
 import { cn } from '@/lib/utils'
 
 type WorkflowSaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -12,8 +24,13 @@ interface WorkflowEditorHeaderProps {
   name: string
   saveMessage: string
   saveStatus: WorkflowSaveState
+  versions: WorkflowVersionSummary[]
+  versionsError: string
+  versionsLoading: boolean
   version: string
+  restoringVersionId: string | null
   onBack: () => void
+  onRestoreVersion: (versionId: string) => void
   onSave: () => void
   onUpdateMetadata: (metadata: { name: string; description: string }) => void
 }
@@ -25,24 +42,32 @@ export function WorkflowEditorHeader({
   name,
   saveMessage,
   saveStatus,
+  versions,
+  versionsError,
+  versionsLoading,
   version,
+  restoringVersionId,
   onBack,
+  onRestoreVersion,
   onSave,
   onUpdateMetadata,
 }: WorkflowEditorHeaderProps) {
   return (
-    <div className="relative z-30 flex flex-col gap-3 rounded-[26px] border border-white/8 bg-slate-950/78 p-3 shadow-[0_18px_56px_rgba(2,6,23,0.28)] backdrop-blur xl:flex-row xl:items-center xl:justify-between">
-      <div className="flex min-w-0 items-center gap-3">
+    <div className="relative z-30 grid gap-2 rounded-[20px] border border-white/8 bg-slate-950/76 px-2.5 py-2 shadow-[0_14px_36px_rgba(2,6,23,0.22)] backdrop-blur xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
+      <div className="flex items-center">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/88 px-3.5 py-2 text-sm font-medium text-slate-200 shadow-[0_18px_48px_rgba(2,6,23,0.36)] backdrop-blur transition hover:border-blue-300/30 hover:bg-slate-900/95 hover:text-white"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/88 px-3 text-sm font-medium text-slate-200 shadow-[0_12px_28px_rgba(2,6,23,0.22)] backdrop-blur transition hover:border-blue-300/30 hover:bg-slate-900/95 hover:text-white"
           aria-label="返回工作流项目列表"
           title="返回工作流项目列表"
         >
           <ChevronLeft className="h-4 w-4 text-blue-200" />
           项目列表
         </button>
+      </div>
+
+      <div className="min-w-0 border-t border-white/8 pt-2 xl:border-l xl:border-t-0 xl:py-0 xl:pl-3">
         <WorkflowTitleEditor
           description={description}
           name={name}
@@ -51,23 +76,179 @@ export function WorkflowEditorHeader({
         />
       </div>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <WorkflowSaveStatus
           hasUnsavedChanges={hasUnsavedChanges}
           lastSavedAt={lastSavedAt}
           message={saveMessage}
           status={saveStatus}
         />
+        <WorkflowVersionMenu
+          currentVersion={version}
+          hasUnsavedChanges={hasUnsavedChanges}
+          restoringVersionId={restoringVersionId}
+          versions={versions}
+          versionsError={versionsError}
+          versionsLoading={versionsLoading}
+          onRestoreVersion={onRestoreVersion}
+        />
         <button
           type="button"
           onClick={onSave}
           disabled={saveStatus === 'saving'}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/28 bg-blue-500/18 px-4 py-2.5 text-sm font-semibold text-blue-50 shadow-[0_18px_48px_rgba(37,99,235,0.18)] backdrop-blur transition hover:border-blue-200/46 hover:bg-blue-500/26 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-300/28 bg-blue-500/18 px-3 text-sm font-semibold text-blue-50 shadow-[0_12px_30px_rgba(37,99,235,0.14)] backdrop-blur transition hover:border-blue-200/46 hover:bg-blue-500/26 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {saveStatus === 'saving' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           保存草稿
         </button>
       </div>
+    </div>
+  )
+}
+
+function WorkflowVersionMenu({
+  currentVersion,
+  hasUnsavedChanges,
+  restoringVersionId,
+  versions,
+  versionsError,
+  versionsLoading,
+  onRestoreVersion,
+}: {
+  currentVersion: string
+  hasUnsavedChanges: boolean
+  restoringVersionId: string | null
+  versions: WorkflowVersionSummary[]
+  versionsError: string
+  versionsLoading: boolean
+  onRestoreVersion: (versionId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [confirmVersionId, setConfirmVersionId] = useState<string | null>(null)
+  const current = versions.find((item) => item.isCurrent)
+  const label = current?.version || currentVersion
+
+  const restore = useCallback(
+    (versionId: string) => {
+      onRestoreVersion(versionId)
+      setConfirmVersionId(null)
+      setOpen(false)
+    },
+    [onRestoreVersion],
+  )
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/82 px-3 text-sm font-semibold text-slate-100 shadow-[0_12px_30px_rgba(2,6,23,0.18)] backdrop-blur transition hover:border-blue-300/28 hover:bg-slate-900/95"
+        aria-expanded={open}
+        aria-label="查看历史版本"
+      >
+        <History className="h-4 w-4 text-blue-200" />
+        <span className="hidden sm:inline">历史版本</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-300">
+          {label}
+        </span>
+        <ChevronDown className={cn('h-3.5 w-3.5 text-slate-500 transition', open && 'rotate-180')} />
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 top-[calc(100%+10px)] z-40 w-[360px] overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/96 p-2 shadow-[0_24px_80px_rgba(2,6,23,0.48)] backdrop-blur">
+          <div className="flex items-center justify-between border-b border-white/8 px-3 py-2.5">
+            <div>
+              <p className="text-sm font-semibold text-white">版本记录</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">选择历史版本恢复为未保存草稿</p>
+            </div>
+            {versionsLoading ? <LoaderCircle className="h-4 w-4 animate-spin text-blue-200" /> : null}
+          </div>
+
+          {versionsError ? (
+            <div className="m-2 rounded-2xl border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
+              {versionsError}
+            </div>
+          ) : null}
+
+          <div className="max-h-[340px] overflow-y-auto p-1">
+            {!versionsLoading && versions.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 px-3 py-5 text-center text-xs text-slate-500">
+                保存后会在这里看到版本记录
+              </div>
+            ) : null}
+
+            {versions.map((item) => {
+              const restoring = restoringVersionId === item.id
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    'group rounded-2xl border px-3 py-2.5 transition',
+                    item.isCurrent
+                      ? 'border-blue-300/26 bg-blue-400/[0.10]'
+                      : 'border-white/8 bg-white/[0.035] hover:border-blue-300/20 hover:bg-white/[0.055]',
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-100">{item.version}</p>
+                        {item.isCurrent ? (
+                          <span className="rounded-full border border-blue-200/22 bg-blue-300/12 px-2 py-0.5 text-[10px] font-semibold text-blue-100">
+                            当前
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-400">{item.name || '未命名项目'}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        {formatVersionTime(item.createdAt)} · {item.nodeCount} 节点 / {item.edgeCount} 连线
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={item.isCurrent || restoring || Boolean(restoringVersionId)}
+                      onClick={() => {
+                        if (hasUnsavedChanges) {
+                          setConfirmVersionId(item.id)
+                          return
+                        }
+                        restore(item.id)
+                      }}
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/58 px-2.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {restoring ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                      恢复
+                    </button>
+                  </div>
+                  {confirmVersionId === item.id ? (
+                    <div className="mt-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.08] p-2">
+                      <p className="text-[11px] leading-5 text-amber-100/90">
+                        当前画布有未保存修改，恢复后会用该历史版本覆盖本地草稿。
+                      </p>
+                      <div className="mt-2 flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmVersionId(null)}
+                          className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-slate-300 transition hover:text-white"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => restore(item.id)}
+                          className="rounded-lg border border-amber-200/24 bg-amber-300/12 px-2 py-1 text-[11px] font-semibold text-amber-50 transition hover:bg-amber-300/18"
+                        >
+                          继续恢复
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -99,7 +280,7 @@ function WorkflowSaveStatus({
       : status === 'error'
         ? '保存失败'
         : hasUnsavedChanges
-          ? '有未保存修改'
+            ? '有未保存修改'
           : '已保存'
   const detail =
     message ||
@@ -110,16 +291,18 @@ function WorkflowSaveStatus({
   return (
     <div
       className={cn(
-        'hidden items-center gap-2 rounded-2xl border bg-slate-950/82 px-3.5 py-2 text-left shadow-[0_18px_48px_rgba(2,6,23,0.28)] backdrop-blur sm:flex',
+        'hidden h-9 items-center gap-2 rounded-xl border bg-slate-950/82 px-3 text-left shadow-[0_12px_30px_rgba(2,6,23,0.18)] backdrop-blur sm:flex',
         status === 'error' ? 'border-rose-300/24' : 'border-white/10',
       )}
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05]">
         {icon}
       </span>
-      <span className="min-w-[128px]">
-        <span className="block text-xs font-semibold text-slate-100">{label}</span>
-        <span className="mt-0.5 block max-w-[260px] truncate text-[11px] text-slate-500">{detail}</span>
+      <span className="min-w-0">
+          <span className="block max-w-[220px] truncate text-xs font-semibold text-slate-100">{message || label}</span>
+          {!message && lastSavedAt && !hasUnsavedChanges ? (
+            <span className="sr-only">{detail}</span>
+        ) : null}
       </span>
     </div>
   )
@@ -165,9 +348,9 @@ function WorkflowTitleEditor({
 
   if (editing) {
     return (
-      <div className="min-w-0 flex-1 rounded-2xl border border-blue-300/24 bg-blue-400/[0.08] px-3.5 py-2.5 shadow-[0_18px_48px_rgba(37,99,235,0.12)]">
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="min-w-0 flex-1 space-y-2">
+      <div className="min-w-0 rounded-xl border border-blue-300/20 bg-blue-400/[0.07] px-2.5 py-1.5 shadow-[0_12px_28px_rgba(37,99,235,0.10)]">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="grid min-w-0 flex-1 gap-1 md:grid-cols-[minmax(180px,0.7fr)_minmax(220px,1fr)]">
             <input
               autoFocus
               value={draftName}
@@ -183,7 +366,7 @@ function WorkflowTitleEditor({
                   cancel()
                 }
               }}
-              className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-slate-500"
+              className="h-7 w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-slate-500"
               placeholder="输入工作流名称"
             />
             <input
@@ -196,7 +379,7 @@ function WorkflowTitleEditor({
                   cancel()
                 }
               }}
-              className="w-full bg-transparent text-xs text-slate-300 outline-none placeholder:text-slate-600"
+              className="h-7 w-full bg-transparent text-xs text-slate-300 outline-none placeholder:text-slate-600"
               placeholder="补充工作流描述"
             />
           </div>
@@ -204,7 +387,7 @@ function WorkflowTitleEditor({
             <button
               type="button"
               onClick={commit}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-300/24 bg-emerald-400/12 text-emerald-100 transition hover:border-emerald-200/44 hover:bg-emerald-400/18"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-300/24 bg-emerald-400/12 text-emerald-100 transition hover:border-emerald-200/44 hover:bg-emerald-400/18"
               aria-label="确认工作流信息"
               title="确认"
             >
@@ -213,7 +396,7 @@ function WorkflowTitleEditor({
             <button
               type="button"
               onClick={cancel}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-slate-950/58 text-slate-400 transition hover:border-rose-300/28 hover:text-rose-100"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-slate-950/58 text-slate-400 transition hover:border-rose-300/28 hover:text-rose-100"
               aria-label="取消修改工作流信息"
               title="取消"
             >
@@ -221,29 +404,30 @@ function WorkflowTitleEditor({
             </button>
           </div>
         </div>
-        <p className="mt-1 truncate text-[11px] text-blue-100/58">修改后会进入未保存状态，点击右侧保存草稿写入服务端。</p>
       </div>
     )
   }
 
   return (
-    <div className="group min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 transition hover:border-blue-300/20 hover:bg-white/[0.06]">
-      <div className="flex min-w-0 items-center gap-2">
-        <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+    <div className="group flex min-w-0 items-center gap-2">
+      <h1 className="truncate text-sm font-semibold leading-5 text-white">{displayName}</h1>
+      <span className="hidden max-w-[360px] truncate text-xs text-slate-500 lg:inline">
+        {displayDescription}
+      </span>
+      <div className="flex shrink-0 items-center gap-1.5">
         <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[11px] font-medium text-slate-400">
           {version}
         </span>
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-white/8 bg-slate-950/50 text-slate-500 opacity-80 transition hover:border-blue-300/30 hover:text-blue-100 group-hover:opacity-100"
-          aria-label="修改工作流名称"
-          title="修改名称"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/8 bg-white/[0.04] text-slate-500 opacity-80 transition hover:border-blue-300/30 hover:bg-blue-400/[0.08] hover:text-blue-100 group-hover:opacity-100"
+          aria-label="修改工作流信息"
+          title="修改工作流信息"
         >
           <PencilLine className="h-3.5 w-3.5" />
         </button>
       </div>
-      <p className="mt-1 max-w-[520px] truncate text-xs text-slate-500">{displayDescription}</p>
     </div>
   )
 }
@@ -254,6 +438,20 @@ function formatSaveTime(date: Date | null) {
   }
 
   return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatVersionTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '时间未知'
+  }
+
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })

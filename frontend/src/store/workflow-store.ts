@@ -5,7 +5,7 @@ import type { WorkflowDocument, WorkflowNode } from '@/types/workflow'
 
 const WORKFLOW_DRAFT_STORAGE_KEY = 'agentic-workflow-studio:draft:v1'
 
-type PersistedWorkflowStore = Pick<WorkflowStore, 'activeTab' | 'localDrafts' | 'workflow'>
+type PersistedWorkflowStore = Pick<WorkflowStore, 'activeTab' | 'lastSavedWorkflowSignature' | 'localDrafts' | 'workflow'>
 
 function createBlankWorkflowDocument(): WorkflowDocument {
   return {
@@ -20,6 +20,7 @@ function createBlankWorkflowDocument(): WorkflowDocument {
 
 interface WorkflowStore {
   workflow: WorkflowDocument
+  lastSavedWorkflowSignature: string
   localDrafts: WorkflowDocument[]
   selectedNodeId: string
   activeTab: 'visual' | 'code' | 'logs'
@@ -27,6 +28,7 @@ interface WorkflowStore {
   setSelectedNodeId: (nodeId: string) => void
   setActiveTab: (tab: WorkflowStore['activeTab']) => void
   setDraftHydrated: (draftHydrated: boolean) => void
+  setLastSavedWorkflowSignature: (signature: string) => void
   setWorkflow: (workflow: WorkflowDocument) => void
   upsertLocalDraft: (workflow: WorkflowDocument) => void
   updateLocalDraftMetadata: (workflowId: string, metadata: { name: string; description: string }) => void
@@ -82,6 +84,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
   persist(
     (set) => ({
       workflow: createBlankWorkflowDocument(),
+      lastSavedWorkflowSignature: '',
       localDrafts: [],
       selectedNodeId: '',
       activeTab: 'visual',
@@ -89,6 +92,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
       setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
       setActiveTab: (activeTab) => set({ activeTab }),
       setDraftHydrated: (draftHydrated) => set({ draftHydrated }),
+      setLastSavedWorkflowSignature: (lastSavedWorkflowSignature) => set({ lastSavedWorkflowSignature }),
       setWorkflow: (workflow) => set({ workflow, selectedNodeId: '' }),
       upsertLocalDraft: (workflow) =>
         set((state) => ({
@@ -123,12 +127,12 @@ export const useWorkflowStore = create<WorkflowStore>()(
         })),
       setWorkflowGraph: (nodes, edges) =>
         set((state) => ({
-            workflow: {
-              ...state.workflow,
-              nodes,
-              edges,
-            },
-          })),
+          workflow: {
+            ...state.workflow,
+            nodes,
+            edges,
+          },
+        })),
       updateSelectedNode: (partial) =>
         set((state) => ({
           workflow: {
@@ -139,9 +143,10 @@ export const useWorkflowStore = create<WorkflowStore>()(
     }),
     {
       name: WORKFLOW_DRAFT_STORAGE_KEY,
-      version: 2,
+      version: 3,
       partialize: (state) => ({
         workflow: state.workflow,
+        lastSavedWorkflowSignature: state.lastSavedWorkflowSignature,
         localDrafts: state.localDrafts,
         activeTab: state.activeTab,
       }),
@@ -151,10 +156,13 @@ export const useWorkflowStore = create<WorkflowStore>()(
           state.workflow?.id === 'basic-langgraph-flow'
             ? createBlankWorkflowDocument()
             : state.workflow ?? createBlankWorkflowDocument()
+        const localDrafts = state.localDrafts ?? []
+        const hasLocalDraft = localDrafts.some((draft) => draft.id === workflow.id)
 
         return {
           workflow,
-          localDrafts: state.localDrafts ?? [],
+          lastSavedWorkflowSignature: state.lastSavedWorkflowSignature ?? (hasLocalDraft ? '' : JSON.stringify(workflow)),
+          localDrafts,
           activeTab: state.activeTab ?? 'visual',
         }
       },

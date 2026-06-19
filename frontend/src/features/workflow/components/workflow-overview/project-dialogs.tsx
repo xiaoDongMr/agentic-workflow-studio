@@ -110,7 +110,7 @@ export function ProjectDeleteDialog({
             <div>
               <p className="text-lg font-semibold tracking-tight text-white">确认删除工作流？</p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                将删除“{projectName || '未命名项目'}”。{source === 'server' ? '服务端项目会被软删除，列表中不再展示。' : '本地草稿会从浏览器缓存中移除。'}
+                  将删除“{projectName || '未命名项目'}”。{source === 'server' ? '服务端项目会被移出列表，历史版本和画布数据会保留在数据库中。' : '本地草稿会从浏览器缓存中移除。'}
               </p>
             </div>
           </div>

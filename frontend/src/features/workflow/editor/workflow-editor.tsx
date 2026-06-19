@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { Cable } from 'lucide-react'
 import {
   EditorRenderer,
   FreeLayoutEditorProvider,
@@ -83,7 +82,6 @@ import {
 } from '@/features/workflow/editor/node-trial-run-store'
 import { FlowgramNodeCard } from '@/features/workflow/editor/workflow-node-card'
 import { streamWorkflow } from '@/api/workflow'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
 import {
@@ -629,6 +627,7 @@ export function WorkflowEditor({
     const target = event.target as HTMLElement
     if (
       target.closest('.aw-flow-node') ||
+        target.closest('.aw-flow-port') ||
       target.closest('.aw-flow-ignore-deselect') ||
       target.closest('.gedit-minimap-layer')
     ) {
@@ -1112,19 +1111,8 @@ export function WorkflowEditor({
         className,
       )}
     >
-      <div className="relative flex items-center justify-between border-b border-white/8 px-4 py-3">
-        <div className="flex items-center gap-2 text-sm text-slate-300">
-          <Cable className="h-4 w-4 text-blue-300" />
-          工作流主画布
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge>FlowGram</Badge>
-          <Badge className="border-white/15 bg-white/3 text-slate-300">Free Layout</Badge>
-        </div>
-      </div>
-
       <div
-        className="aw-flow-editor-shell relative h-[calc(100%-61px)] min-h-[680px]"
+        className="aw-flow-editor-shell relative h-full min-h-[680px]"
         onMouseDownCapture={(event) => {
           if (resetLineFromMouse(event)) {
             return

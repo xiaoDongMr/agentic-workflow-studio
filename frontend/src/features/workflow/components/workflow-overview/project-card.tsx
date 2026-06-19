@@ -83,6 +83,8 @@ export function WorkflowProjectSummaryCard({
               name: project.name,
               nodes: project.preview?.nodes ?? [],
               edges: project.preview?.edges ?? [],
+                totalNodeCount: project.nodeCount,
+                totalEdgeCount: project.edgeCount,
             }}
             tone="emerald"
           />

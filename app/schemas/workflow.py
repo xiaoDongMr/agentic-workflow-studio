@@ -230,6 +230,25 @@ class WorkflowProjectSummary(BaseModel):
     preview: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowProjectPage(BaseModel):
+    items: list[WorkflowProjectSummary]
+    page: int = 1
+    pageSize: int = 6
+    total: int = 0
+
+
+class WorkflowVersionSummary(BaseModel):
+    id: str
+    version: str
+    name: str
+    description: str = ""
+    nodeCount: int = 0
+    edgeCount: int = 0
+    createdAt: str
+    updatedAt: str
+    isCurrent: bool = False
+
+
 class WorkflowSaveDraftResponse(BaseModel):
     project: WorkflowProjectSummary
     workflow: WorkflowDocument

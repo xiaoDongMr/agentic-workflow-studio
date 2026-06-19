@@ -4,10 +4,14 @@ import {
   deleteWorkflowProject,
   duplicateWorkflowProject,
   getWorkflowDraft,
+  getWorkflowVersion,
   listWorkflowProjects,
+  listWorkflowVersions,
   saveWorkflowDraft,
   updateWorkflowProject,
+  type WorkflowProjectFilter,
   type WorkflowProjectSummary,
+  type WorkflowVersionSummary,
 } from '@/api/workflow'
 import type { AppNavigationView } from '@/features/workflow/components/navigation-sidebar'
 import type { WorkflowCanvasApi } from '@/features/workflow/components/workflow-canvas'
@@ -21,6 +25,7 @@ import {
 import { useWorkflowStore } from '@/store/workflow-store'
 
 type WorkflowSaveState = 'idle' | 'saving' | 'saved' | 'error'
+const WORKFLOW_PROJECT_PAGE_SIZE = 6
 
 type PendingWorkflowLeaveAction =
   | { type: 'closeEditor' }
@@ -38,10 +43,12 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export function useWorkflowWorkspace() {
   const workflow = useWorkflowStore((state) => state.workflow)
+  const lastSavedSignature = useWorkflowStore((state) => state.lastSavedWorkflowSignature)
   const localDrafts = useWorkflowStore((state) => state.localDrafts)
   const selectedNodeId = useWorkflowStore((state) => state.selectedNodeId)
   const draftHydrated = useWorkflowStore((state) => state.draftHydrated)
   const setWorkflow = useWorkflowStore((state) => state.setWorkflow)
+  const setLastSavedSignature = useWorkflowStore((state) => state.setLastSavedWorkflowSignature)
   const upsertLocalDraft = useWorkflowStore((state) => state.upsertLocalDraft)
   const updateLocalDraftMetadata = useWorkflowStore((state) => state.updateLocalDraftMetadata)
   const removeLocalDraft = useWorkflowStore((state) => state.removeLocalDraft)
@@ -51,13 +58,20 @@ export function useWorkflowWorkspace() {
   const [activeView, setActiveView] = useState<AppNavigationView>('workflow')
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false)
   const [workflowProjects, setWorkflowProjects] = useState<WorkflowProjectSummary[]>([])
+  const [workflowProjectPage, setWorkflowProjectPageState] = useState(1)
+  const [workflowProjectTotal, setWorkflowProjectTotal] = useState(0)
+  const [workflowProjectQuery, setWorkflowProjectQueryState] = useState('')
+  const [workflowProjectFilter, setWorkflowProjectFilterState] = useState<WorkflowProjectFilter>('all')
+  const [workflowVersions, setWorkflowVersions] = useState<WorkflowVersionSummary[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [versionsError, setVersionsError] = useState('')
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null)
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [projectsError, setProjectsError] = useState('')
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<WorkflowSaveState>('idle')
   const [saveMessage, setSaveMessage] = useState('')
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
-  const [lastSavedSignature, setLastSavedSignature] = useState(() => getWorkflowSignature(workflow))
   const [pendingLeaveAction, setPendingLeaveAction] = useState<PendingWorkflowLeaveAction | null>(null)
   const [leaveDialogSaving, setLeaveDialogSaving] = useState(false)
   const [canvasApi, setCanvasApi] = useState<WorkflowCanvasApi | null>(null)
@@ -74,8 +88,10 @@ export function useWorkflowWorkspace() {
   const workflowSignature = useMemo(() => getWorkflowSignature(workflow), [workflow])
   const hasUnsavedChanges = lastSavedSignature !== workflowSignature
   const currentWorkflowSaved = useMemo(
-    () => workflowProjects.some((project) => project.id === workflow.id),
-    [workflow.id, workflowProjects],
+    () =>
+      (Boolean(lastSavedSignature) && !workflow.id.startsWith('workflow-') && workflow.id !== 'blank-workflow') ||
+      workflowProjects.some((project) => project.id === workflow.id),
+    [lastSavedSignature, workflow.id, workflowProjects],
   )
 
   const persistCurrentWorkflowDraft = useCallback(() => {
@@ -99,24 +115,75 @@ export function useWorkflowWorkspace() {
     [hasUnsavedChanges, persistCurrentWorkflowDraft],
   )
 
-  const refreshWorkflowProjects = useCallback(async () => {
+  const refreshWorkflowProjects = useCallback(async (
+    options: { page?: number; query?: string; filter?: WorkflowProjectFilter } = {},
+  ) => {
+    const nextPage = options.page ?? workflowProjectPage
+    const nextQuery = options.query ?? workflowProjectQuery
+    const nextFilter = options.filter ?? workflowProjectFilter
     setProjectsLoading(true)
     setProjectsError('')
     try {
-      const projects = await listWorkflowProjects()
-      setWorkflowProjects(projects)
+      const projectPage = await listWorkflowProjects({
+        page: nextPage,
+        pageSize: WORKFLOW_PROJECT_PAGE_SIZE,
+        query: nextQuery,
+        filter: nextFilter,
+      })
+      setWorkflowProjects(projectPage.items)
+      setWorkflowProjectPageState(projectPage.page)
+      setWorkflowProjectTotal(projectPage.total)
+      if (projectPage.items.length === 0 && projectPage.total > 0 && projectPage.page > 1) {
+        setWorkflowProjectPageState(Math.max(Math.ceil(projectPage.total / WORKFLOW_PROJECT_PAGE_SIZE), 1))
+      }
     } catch (error) {
       setProjectsError(getErrorMessage(error, '加载工作流列表失败'))
     } finally {
       setProjectsLoading(false)
+    }
+  }, [workflowProjectFilter, workflowProjectPage, workflowProjectQuery])
+
+  const setWorkflowProjectPage = useCallback((page: number) => {
+    setWorkflowProjectPageState(Math.max(page, 1))
+  }, [])
+
+  const setWorkflowProjectQuery = useCallback((query: string) => {
+    setWorkflowProjectQueryState(query)
+    setWorkflowProjectPageState(1)
+  }, [])
+
+  const setWorkflowProjectFilter = useCallback((filter: WorkflowProjectFilter) => {
+    setWorkflowProjectFilterState(filter)
+    setWorkflowProjectPageState(1)
+  }, [])
+
+  const refreshWorkflowVersions = useCallback(async (workflowId: string) => {
+    if (!workflowId) {
+      setWorkflowVersions([])
+      return
+    }
+
+    setVersionsLoading(true)
+    setVersionsError('')
+    try {
+      const versions = await listWorkflowVersions(workflowId)
+      setWorkflowVersions(versions)
+    } catch (error) {
+      setWorkflowVersions([])
+      setVersionsError(getErrorMessage(error, '加载版本列表失败'))
+    } finally {
+      setVersionsLoading(false)
     }
   }, [])
 
   const openWorkflowEditor = useCallback(() => {
     setSelectedNodeId('')
     setCanvasApi(null)
+    if (currentWorkflowSaved) {
+      void refreshWorkflowVersions(workflow.id)
+    }
     setWorkflowEditorOpen(true)
-  }, [setSelectedNodeId])
+  }, [currentWorkflowSaved, refreshWorkflowVersions, setSelectedNodeId, workflow.id])
 
   const loadWorkflowProject = useCallback(
     async (workflowId: string) => {
@@ -129,6 +196,7 @@ export function useWorkflowWorkspace() {
         setLastSavedAt(new Date())
         setSaveStatus('saved')
         setSaveMessage('已加载服务端草稿')
+        void refreshWorkflowVersions(draft.id)
         setSelectedNodeId('')
         setCanvasApi(null)
         setWorkflowEditorOpen(true)
@@ -138,7 +206,7 @@ export function useWorkflowWorkspace() {
         setOpeningProjectId(null)
       }
     },
-    [setSelectedNodeId, setWorkflow],
+    [refreshWorkflowVersions, setSelectedNodeId, setWorkflow],
   )
 
   const activateLocalWorkflowDraft = useCallback(
@@ -153,6 +221,8 @@ export function useWorkflowWorkspace() {
       setLastSavedAt(null)
       setSaveStatus('idle')
       setSaveMessage('')
+      setWorkflowVersions([])
+      setVersionsError('')
       setSelectedNodeId('')
       setCanvasApi(null)
       setWorkflowEditorOpen(true)
@@ -168,6 +238,8 @@ export function useWorkflowWorkspace() {
     setLastSavedAt(null)
     setSaveStatus('idle')
     setSaveMessage('')
+    setWorkflowVersions([])
+    setVersionsError('')
     setCanvasApi(null)
     setWorkflowEditorOpen(true)
   }, [setWorkflow, upsertLocalDraft])
@@ -219,18 +291,55 @@ export function useWorkflowWorkspace() {
       setLastSavedAt(new Date())
       setSaveStatus('saved')
       setSaveMessage('草稿已保存')
-      await refreshWorkflowProjects()
+      await refreshWorkflowVersions(saved.workflow.id)
+        setWorkflowProjectPageState(1)
+        await refreshWorkflowProjects({ page: 1 })
       return true
     } catch (error) {
       setSaveStatus('error')
       setSaveMessage(getErrorMessage(error, '保存失败，请检查后端服务和数据库连接'))
       return false
     }
-  }, [refreshWorkflowProjects, removeLocalDraft, setWorkflow, workflow])
+  }, [refreshWorkflowProjects, refreshWorkflowVersions, removeLocalDraft, setWorkflow, workflow])
 
   const handleSaveWorkflow = useCallback(() => {
     void saveCurrentWorkflowDraft()
   }, [saveCurrentWorkflowDraft])
+
+  const restoreSavedWorkflowVersion = useCallback(
+    async (versionId: string) => {
+      if (!workflow.id || restoringVersionId) {
+        return
+      }
+
+      setRestoringVersionId(versionId)
+      setSaveStatus('saving')
+      setSaveMessage('正在恢复历史版本为草稿')
+      try {
+        const restoredDraft = await getWorkflowVersion(workflow.id, versionId)
+        setWorkflow(restoredDraft)
+        setLastSavedSignature('')
+        setLastSavedAt(null)
+        setSaveStatus('idle')
+        setSaveMessage(`已基于 ${restoredDraft.version} 恢复为本地草稿，保存后生成新版本`)
+        setSelectedNodeId('')
+        setCanvasApi(null)
+        upsertLocalDraft(restoredDraft)
+      } catch (error) {
+        setSaveStatus('error')
+        setSaveMessage(getErrorMessage(error, '恢复历史版本失败'))
+      } finally {
+        setRestoringVersionId(null)
+      }
+    },
+    [
+      restoringVersionId,
+      setSelectedNodeId,
+      setWorkflow,
+      upsertLocalDraft,
+      workflow.id,
+    ],
+  )
 
   const updateWorkflowMetadata = useCallback(
     (metadata: { name: string; description: string }) => {
@@ -272,6 +381,8 @@ export function useWorkflowWorkspace() {
         setLastSavedAt(null)
         setSaveStatus('idle')
         setSaveMessage('')
+        setWorkflowVersions([])
+        setVersionsError('')
       }
     },
     [removeLocalDraft, setWorkflow, workflow.id],
@@ -312,13 +423,14 @@ export function useWorkflowWorkspace() {
         setLastSavedSignature(getWorkflowSignature(nextWorkflow))
       }
     },
-    [setWorkflow, workflow],
+      [setWorkflow, workflow],
   )
 
   const deleteSavedWorkflowProject = useCallback(
     async (workflowId: string) => {
       await deleteWorkflowProject(workflowId)
       setWorkflowProjects((projects) => projects.filter((project) => project.id !== workflowId))
+        setWorkflowProjectTotal((total) => Math.max(total - 1, 0))
       removeLocalDraft(workflowId)
 
       if (workflow.id === workflowId) {
@@ -328,6 +440,8 @@ export function useWorkflowWorkspace() {
         setLastSavedAt(null)
         setSaveStatus('idle')
         setSaveMessage('')
+        setWorkflowVersions([])
+        setVersionsError('')
       }
     },
     [removeLocalDraft, setWorkflow, workflow.id],
@@ -336,16 +450,18 @@ export function useWorkflowWorkspace() {
   const duplicateSavedWorkflowProject = useCallback(
     async (workflowId: string) => {
       const duplicated = await duplicateWorkflowProject(workflowId)
-      setWorkflowProjects((projects) => [duplicated.project, ...projects])
+        setWorkflowProjectPageState(1)
+        void refreshWorkflowProjects({ page: 1 })
       if (!hasUnsavedChanges) {
         setWorkflow(duplicated.workflow)
         setLastSavedSignature(getWorkflowSignature(duplicated.workflow))
         setLastSavedAt(new Date())
         setSaveStatus('saved')
         setSaveMessage('已复制并加载新工作流')
+        void refreshWorkflowVersions(duplicated.workflow.id)
       }
     },
-    [hasUnsavedChanges, setWorkflow],
+      [hasUnsavedChanges, refreshWorkflowProjects, refreshWorkflowVersions, setWorkflow],
   )
 
   const openWorkflowProject = useCallback(
@@ -411,12 +527,18 @@ export function useWorkflowWorkspace() {
   }, [requestWorkflowLeave, runLeaveAction])
 
   const createWorkflow = useCallback(() => {
+      if (!workflowEditorOpen && hasUnsavedChanges) {
+        persistCurrentWorkflowDraft()
+        startNewWorkflow()
+        return
+      }
+
     if (requestWorkflowLeave({ type: 'createWorkflow' })) {
       return
     }
 
     startNewWorkflow()
-  }, [requestWorkflowLeave, startNewWorkflow])
+    }, [hasUnsavedChanges, persistCurrentWorkflowDraft, requestWorkflowLeave, startNewWorkflow, workflowEditorOpen])
 
   const changeActiveView = useCallback(
     (view: AppNavigationView) => {
@@ -465,6 +587,24 @@ export function useWorkflowWorkspace() {
       void refreshWorkflowProjects()
     }
   }, [activeView, draftHydrated, refreshWorkflowProjects, workflowEditorOpen])
+
+  useEffect(() => {
+    if (!workflowEditorOpen || !currentWorkflowSaved || workflowVersions.length > 0 || versionsLoading) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void refreshWorkflowVersions(workflow.id)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [
+    currentWorkflowSaved,
+    refreshWorkflowVersions,
+    versionsLoading,
+    workflow.id,
+    workflowEditorOpen,
+    workflowVersions.length,
+  ])
 
   useEffect(() => {
     if (!draftHydrated || !hasUnsavedChanges || saveStatus === 'saving') {
@@ -516,6 +656,7 @@ export function useWorkflowWorkspace() {
     canvasApi,
     draftHydrated,
     hasUnsavedChanges,
+    currentWorkflowSaved,
     lastSavedAt,
     leaveDialogSaving,
     localDrafts,
@@ -523,13 +664,22 @@ export function useWorkflowWorkspace() {
     pendingLeaveAction,
     projectsError,
     projectsLoading,
+    restoringVersionId,
     saveMessage,
     saveStatus,
     selectedNode,
     selectedNodeId,
     workflow,
     workflowEditorOpen,
+    workflowProjectFilter,
+    workflowProjectPage,
+    workflowProjectPageSize: WORKFLOW_PROJECT_PAGE_SIZE,
+    workflowProjectQuery,
+    workflowProjectTotal,
     workflowProjects,
+    workflowVersions,
+    versionsError,
+    versionsLoading,
     cancelPendingLeave,
     changeActiveView,
     closeWorkflowEditor,
@@ -542,9 +692,13 @@ export function useWorkflowWorkspace() {
     openLocalWorkflowDraft,
     openWorkflowProject,
     refreshWorkflowProjects,
+    restoreSavedWorkflowVersion,
     saveAndContinuePendingLeave,
     setCanvasApi,
     setSelectedNodeId,
+    setWorkflowProjectFilter,
+    setWorkflowProjectPage,
+    setWorkflowProjectQuery,
     stashAndContinuePendingLeave,
     updateLocalWorkflowProject,
     updateSavedWorkflowProject,

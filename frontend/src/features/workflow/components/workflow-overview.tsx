@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
-import { Filter, Layers3, LoaderCircle, Plus, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronLeft, ChevronRight, Filter, LoaderCircle, Plus, RefreshCw, Search, Sparkles } from 'lucide-react'
 
-import type { WorkflowProjectSummary } from '@/api/workflow'
+import type { WorkflowProjectFilter, WorkflowProjectSummary } from '@/api/workflow'
 import { cn } from '@/lib/utils'
 import type { WorkflowDocument } from '@/types/workflow'
 
-import { EmptySearchCard, ProjectDeleteDialog, ProjectMetadataDialog } from './workflow-overview/project-dialogs'
+import { ProjectDeleteDialog, ProjectMetadataDialog } from './workflow-overview/project-dialogs'
 import { WorkflowProjectCard, WorkflowProjectSummaryCard } from './workflow-overview/project-card'
 import { TemplateCard, workflowTemplateCards } from './workflow-overview/template-card'
 import type { WorkflowProjectActionTarget, WorkflowProjectMetadata } from './workflow-overview/types'
@@ -14,12 +14,21 @@ interface WorkflowOverviewProps {
   workflow: WorkflowDocument
   localDrafts: WorkflowDocument[]
   projects: WorkflowProjectSummary[]
+  projectsFilter: WorkflowProjectFilter
+  projectsPage: number
+  projectsPageSize: number
+  projectsQuery: string
+  projectsTotal: number
+  currentWorkflowSaved: boolean
   hasUnsavedChanges: boolean
   loadingProjects: boolean
   projectsError: string
   openingProjectId: string | null
   className?: string
   onCreateWorkflow: () => void
+  onChangeProjectsFilter: (filter: WorkflowProjectFilter) => void
+  onChangeProjectsPage: (page: number) => void
+  onChangeProjectsQuery: (query: string) => void
   onOpenWorkflow: (workflowId?: string) => void
   onOpenLocalDraft: (workflowId: string) => void
   onRefreshProjects: () => void
@@ -35,12 +44,21 @@ export function WorkflowOverview({
   workflow,
   localDrafts,
   projects,
+  projectsFilter,
+  projectsPage,
+  projectsPageSize,
+  projectsQuery,
+  projectsTotal,
+  currentWorkflowSaved,
   hasUnsavedChanges,
   loadingProjects,
   projectsError,
   openingProjectId,
   className,
   onCreateWorkflow,
+  onChangeProjectsFilter,
+  onChangeProjectsPage,
+  onChangeProjectsQuery,
   onOpenWorkflow,
   onOpenLocalDraft,
   onRefreshProjects,
@@ -51,23 +69,20 @@ export function WorkflowOverview({
   onDeleteProject,
   onDuplicateProject,
 }: WorkflowOverviewProps) {
-  const [query, setQuery] = useState('')
   const [editingProject, setEditingProject] = useState<WorkflowProjectActionTarget | null>(null)
   const [deletingProject, setDeletingProject] = useState<WorkflowProjectActionTarget | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
 
-  const normalizedQuery = query.trim().toLowerCase()
-  const workflowMatchesQuery = useWorkflowQueryMatch(workflow, normalizedQuery)
-  const filteredLocalDrafts = useFilteredLocalDrafts(localDrafts, workflow.id, normalizedQuery)
-  const filteredProjects = useFilteredProjects(projects, localDrafts, workflow.id, normalizedQuery)
+  const localDraftById = useMemo(() => new Map(localDrafts.map((draft) => [draft.id, draft])), [localDrafts])
+  const otherLocalDrafts = useMemo(() => localDrafts.filter((draft) => draft.id !== workflow.id), [localDrafts, workflow.id])
+  const filteredProjects = useFilteredProjects(projects, workflow.id)
 
-  const currentWorkflowSaved = projects.some((project) => project.id === workflow.id)
   const currentWorkflowHasLocalDraft = localDrafts.some((draft) => draft.id === workflow.id)
   const currentWorkflowDirty = hasUnsavedChanges || currentWorkflowHasLocalDraft
   const shouldShowCurrentWorkflow = currentWorkflowSaved || currentWorkflowDirty
-  const visibleProjectCount =
-    (shouldShowCurrentWorkflow && workflowMatchesQuery ? 1 : 0) + filteredLocalDrafts.length + filteredProjects.length
+  const continueProjectCount = (shouldShowCurrentWorkflow ? 1 : 0) + otherLocalDrafts.length
+  const totalPages = Math.max(Math.ceil(projectsTotal / projectsPageSize), 1)
 
   const openEditDialog = (target: WorkflowProjectActionTarget) => {
     setActionError('')
@@ -148,125 +163,194 @@ export function WorkflowOverview({
       <section className="relative min-h-[820px] overflow-hidden rounded-[32px] border border-white/8 bg-slate-950/72 p-5 shadow-[0_28px_90px_rgba(2,6,23,0.32)] lg:p-7">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_8%,rgba(37,99,235,0.22),transparent_30%),radial-gradient(circle_at_86%_12%,rgba(168,85,247,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.2),rgba(2,6,23,0.32))]" />
         <WorkflowOverviewHeader workflow={workflow} />
-        <WorkflowProjectToolbar
-          loadingProjects={loadingProjects}
-          query={query}
-          savedProjectCount={projects.length}
-          visibleProjectCount={visibleProjectCount}
-          onCreateWorkflow={onCreateWorkflow}
-          onQueryChange={setQuery}
-          onRefreshProjects={onRefreshProjects}
-        />
         <WorkflowErrors actionError={actionError} projectsError={projectsError} />
 
-        <div className="relative mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <CreateWorkflowCard onCreateWorkflow={onCreateWorkflow} />
+        <section className="relative mt-5">
+          <SectionTitle
+            title="继续编辑"
+            description="当前项目和本地草稿会固定显示在这里。"
+            aside={`${continueProjectCount} 个快捷入口`}
+          />
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <CreateWorkflowCard onCreateWorkflow={onCreateWorkflow} />
 
-          {shouldShowCurrentWorkflow && workflowMatchesQuery ? (
-            <WorkflowProjectCard
-              workflow={workflow}
-              badge={currentWorkflowDirty ? '本地未保存' : currentWorkflowSaved ? '当前打开' : '本地未保存'}
-              statusText={currentWorkflowDirty ? '本地草稿' : currentWorkflowSaved ? '已保存' : '本地草稿'}
-              onOpen={() => onOpenWorkflow()}
-              onEdit={() =>
-                openEditDialog({
-                  id: workflow.id,
-                  name: workflow.name,
-                  description: workflow.description,
-                  source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
-                })
-              }
-              onDelete={() =>
-                openDeleteDialog({
-                  id: workflow.id,
-                  name: workflow.name,
-                  description: workflow.description,
-                  source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
-                })
-              }
-              onDuplicate={() =>
-                void duplicateProject({
-                  id: workflow.id,
-                  name: workflow.name,
-                  description: workflow.description,
-                  source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
-                })
-              }
-            />
-          ) : normalizedQuery && shouldShowCurrentWorkflow ? (
-            <EmptySearchCard query={query} onCreateWorkflow={onCreateWorkflow} />
-          ) : null}
+            {shouldShowCurrentWorkflow ? (
+              <WorkflowProjectCard
+                workflow={workflow}
+                badge={currentWorkflowDirty ? '本地未保存' : currentWorkflowSaved ? '当前打开' : '本地未保存'}
+                statusText={currentWorkflowDirty ? '本地草稿' : currentWorkflowSaved ? '已保存' : '本地草稿'}
+                onOpen={() => onOpenWorkflow()}
+                onEdit={() =>
+                  openEditDialog({
+                    id: workflow.id,
+                    name: workflow.name,
+                    description: workflow.description,
+                    source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
+                  })
+                }
+                onDelete={() =>
+                  openDeleteDialog({
+                    id: workflow.id,
+                    name: workflow.name,
+                    description: workflow.description,
+                    source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
+                  })
+                }
+                onDuplicate={() =>
+                  void duplicateProject({
+                    id: workflow.id,
+                    name: workflow.name,
+                    description: workflow.description,
+                    source: currentWorkflowSaved && !currentWorkflowDirty ? 'server' : 'local',
+                  })
+                }
+              />
+            ) : null}
 
-          {filteredLocalDrafts.map((draft) => (
-            <WorkflowProjectCard
-              key={draft.id}
-              workflow={draft}
-              badge="本地未保存"
-              statusText="本地草稿"
-              onOpen={() => onOpenLocalDraft(draft.id)}
-              onEdit={() =>
-                openEditDialog({
-                  id: draft.id,
-                  name: draft.name,
-                  description: draft.description,
-                  source: 'local',
-                })
-              }
-              onDelete={() =>
-                openDeleteDialog({
-                  id: draft.id,
-                  name: draft.name,
-                  description: draft.description,
-                  source: 'local',
-                })
-              }
-              onDuplicate={() =>
-                void duplicateProject({
-                  id: draft.id,
-                  name: draft.name,
-                  description: draft.description,
-                  source: 'local',
-                })
-              }
-            />
-          ))}
+            {otherLocalDrafts.map((draft) => (
+              <WorkflowProjectCard
+                key={draft.id}
+                workflow={draft}
+                badge="本地未保存"
+                statusText="本地草稿"
+                onOpen={() => onOpenLocalDraft(draft.id)}
+                onEdit={() =>
+                  openEditDialog({
+                    id: draft.id,
+                    name: draft.name,
+                    description: draft.description,
+                    source: 'local',
+                  })
+                }
+                onDelete={() =>
+                  openDeleteDialog({
+                    id: draft.id,
+                    name: draft.name,
+                    description: draft.description,
+                    source: 'local',
+                  })
+                }
+                onDuplicate={() =>
+                  void duplicateProject({
+                    id: draft.id,
+                    name: draft.name,
+                    description: draft.description,
+                    source: 'local',
+                  })
+                }
+              />
+            ))}
+          </div>
+        </section>
 
-          {loadingProjects && <WorkflowProjectLoadingCard />}
+        <section className="relative mt-8">
+          <SectionTitle
+            title="全部项目"
+            description="已保存的工作流项目，可搜索、筛选和分页查看。"
+            aside={projectsTotal > 0 ? `共 ${projectsTotal} 个` : '暂无服务端项目'}
+          />
+          <WorkflowProjectLibraryToolbar
+            filter={projectsFilter}
+            loadingProjects={loadingProjects}
+            pageSize={projectsPageSize}
+            query={projectsQuery}
+            total={projectsTotal}
+            onFilterChange={onChangeProjectsFilter}
+            onQueryChange={onChangeProjectsQuery}
+            onRefreshProjects={onRefreshProjects}
+          />
 
-          {filteredProjects.map((project) => (
-            <WorkflowProjectSummaryCard
-              key={project.id}
-              project={project}
-              opening={openingProjectId === project.id}
-              onOpen={() => onOpenWorkflow(project.id)}
-              onEdit={() =>
-                openEditDialog({
-                  id: project.id,
-                  name: project.name,
-                  description: project.description,
-                  source: 'server',
-                })
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {loadingProjects && <WorkflowProjectLoadingCard />}
+
+            {!loadingProjects && filteredProjects.length === 0 ? (
+              <EmptyProjectPageCard query={projectsQuery} onCreateWorkflow={onCreateWorkflow} />
+            ) : null}
+
+            {filteredProjects.map((project) => {
+              const localDraft = localDraftById.get(project.id)
+
+              if (localDraft) {
+                return (
+                  <WorkflowProjectCard
+                    key={project.id}
+                    workflow={localDraft}
+                    badge="本地未保存"
+                    statusText="本地草稿"
+                    onOpen={() => onOpenLocalDraft(project.id)}
+                    onEdit={() =>
+                      openEditDialog({
+                        id: project.id,
+                        name: localDraft.name,
+                        description: localDraft.description,
+                        source: 'local',
+                      })
+                    }
+                    onDelete={() =>
+                      openDeleteDialog({
+                        id: project.id,
+                        name: localDraft.name,
+                        description: localDraft.description,
+                        source: 'local',
+                      })
+                    }
+                    onDuplicate={() =>
+                      void duplicateProject({
+                        id: project.id,
+                        name: localDraft.name,
+                        description: localDraft.description,
+                        source: 'local',
+                      })
+                    }
+                  />
+                )
               }
-              onDelete={() =>
-                openDeleteDialog({
-                  id: project.id,
-                  name: project.name,
-                  description: project.description,
-                  source: 'server',
-                })
-              }
-              onDuplicate={() =>
-                void duplicateProject({
-                  id: project.id,
-                  name: project.name,
-                  description: project.description,
-                  source: 'server',
-                })
-              }
-              busy={actionBusy?.endsWith(project.id) ?? false}
-            />
-          ))}
-        </div>
+
+              return (
+                <WorkflowProjectSummaryCard
+                  key={project.id}
+                  project={project}
+                  opening={openingProjectId === project.id}
+                  onOpen={() => onOpenWorkflow(project.id)}
+                  onEdit={() =>
+                    openEditDialog({
+                      id: project.id,
+                      name: project.name,
+                      description: project.description,
+                      source: 'server',
+                    })
+                  }
+                  onDelete={() =>
+                    openDeleteDialog({
+                      id: project.id,
+                      name: project.name,
+                      description: project.description,
+                      source: 'server',
+                    })
+                  }
+                  onDuplicate={() =>
+                    void duplicateProject({
+                      id: project.id,
+                      name: project.name,
+                      description: project.description,
+                      source: 'server',
+                    })
+                  }
+                />
+              )
+            })}
+          </div>
+
+          <ProjectPagination
+            className="mt-4"
+            loading={loadingProjects}
+            page={projectsPage}
+            pageSize={projectsPageSize}
+            total={projectsTotal}
+            totalPages={totalPages}
+            onChangePage={onChangeProjectsPage}
+          />
+        </section>
 
         <WorkflowTemplateSection onCreateWorkflow={onCreateWorkflow} />
 
@@ -293,52 +377,108 @@ export function WorkflowOverview({
   )
 }
 
-function useWorkflowQueryMatch(workflow: WorkflowDocument, normalizedQuery: string) {
-  return useMemo(() => {
-    if (!normalizedQuery) {
-      return true
-    }
-
-    return [workflow.name, workflow.description, workflow.version].some((value) =>
-      value.toLowerCase().includes(normalizedQuery),
-    )
-  }, [normalizedQuery, workflow.description, workflow.name, workflow.version])
+function useFilteredProjects(projects: WorkflowProjectSummary[], currentWorkflowId: string) {
+  return useMemo(
+    () => projects.filter((project) => project.id !== currentWorkflowId),
+    [currentWorkflowId, projects],
+  )
 }
 
-function useFilteredLocalDrafts(localDrafts: WorkflowDocument[], currentWorkflowId: string, normalizedQuery: string) {
-  return useMemo(() => {
-    const otherLocalDrafts = localDrafts.filter((draft) => draft.id !== currentWorkflowId)
-    if (!normalizedQuery) {
-      return otherLocalDrafts
-    }
-
-    return otherLocalDrafts.filter((draft) =>
-      [draft.name, draft.description, draft.version].some((value) =>
-        value.toLowerCase().includes(normalizedQuery),
-      ),
-    )
-  }, [currentWorkflowId, localDrafts, normalizedQuery])
+function SectionTitle({ title, description, aside }: { title: string; description: string; aside: string }) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight text-white">{title}</h2>
+        <p className="mt-1 text-sm text-slate-500">{description}</p>
+      </div>
+      <span className="inline-flex w-fit rounded-full border border-white/8 bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-slate-400">
+        {aside}
+      </span>
+    </div>
+  )
 }
 
-function useFilteredProjects(
-  projects: WorkflowProjectSummary[],
-  localDrafts: WorkflowDocument[],
-  currentWorkflowId: string,
-  normalizedQuery: string,
-) {
-  return useMemo(() => {
-    const localDraftIds = new Set(localDrafts.map((draft) => draft.id))
-    const uniqueProjects = projects.filter((project) => project.id !== currentWorkflowId && !localDraftIds.has(project.id))
-    if (!normalizedQuery) {
-      return uniqueProjects
-    }
+function EmptyProjectPageCard({ query, onCreateWorkflow }: { query: string; onCreateWorkflow: () => void }) {
+  return (
+    <div className="flex min-h-[260px] flex-col justify-between rounded-[24px] border border-white/8 bg-white/[0.04] p-5">
+      <div>
+        <div className="inline-flex rounded-full border border-slate-300/10 bg-slate-400/10 px-3 py-1 text-xs font-medium text-slate-300">
+          无匹配项目
+        </div>
+        <h3 className="mt-5 text-lg font-semibold text-white">{query.trim() ? '没有找到服务端项目' : '还没有已保存项目'}</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-400">
+          {query.trim() ? `没有找到“${query.trim()}”相关项目。` : '保存工作流后，项目会出现在这里。'}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onCreateWorkflow}
+        className="mt-6 inline-flex w-fit items-center gap-2 rounded-2xl border border-blue-300/22 bg-blue-500/16 px-4 py-2 text-sm font-medium text-blue-100 transition hover:border-blue-300/42 hover:bg-blue-500/22"
+      >
+        <Plus className="h-4 w-4" />
+        新建工作流
+      </button>
+    </div>
+  )
+}
 
-    return uniqueProjects.filter((project) =>
-      [project.name, project.description, project.status].some((value) =>
-        value.toLowerCase().includes(normalizedQuery),
-      ),
-    )
-  }, [currentWorkflowId, localDrafts, normalizedQuery, projects])
+function ProjectPagination({
+  className,
+  loading,
+  page,
+  pageSize,
+  total,
+  totalPages,
+  onChangePage,
+}: {
+  className?: string
+  loading: boolean
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  onChangePage: (page: number) => void
+}) {
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const end = Math.min(page * pageSize, total)
+  const canGoPrevious = page > 1 && !loading
+  const canGoNext = page < totalPages && !loading
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-3 rounded-[22px] border border-white/8 bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between',
+        className,
+      )}
+    >
+      <p className="text-sm text-slate-400">
+        {total > 0 ? `显示 ${start}-${end} / ${total} 个服务端项目` : '暂无可分页的服务端项目'}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!canGoPrevious}
+          onClick={() => onChangePage(page - 1)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-2xl border border-white/8 bg-slate-950/56 px-3 text-sm font-medium text-slate-300 transition hover:border-blue-300/28 hover:text-blue-100 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          上一页
+        </button>
+        <span className="min-w-20 rounded-2xl border border-white/8 bg-slate-950/50 px-3 py-2 text-center text-sm text-slate-300">
+          {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={!canGoNext}
+          onClick={() => onChangePage(page + 1)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-2xl border border-white/8 bg-slate-950/56 px-3 text-sm font-medium text-slate-300 transition hover:border-blue-300/28 hover:text-blue-100 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          下一页
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function WorkflowOverviewHeader({ workflow }: { workflow: WorkflowDocument }) {
@@ -351,7 +491,7 @@ function WorkflowOverviewHeader({ workflow }: { workflow: WorkflowDocument }) {
         </div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight text-white lg:text-4xl">工作流设计</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-          先从项目缩略图确认整体链路，点击具体项目或创建项目后再进入画布编辑，避免一进来就被完整画布打断。
+          创建、打开或管理你的工作流。未保存内容会保留在本地草稿中。
         </p>
       </div>
 
@@ -364,70 +504,152 @@ function WorkflowOverviewHeader({ workflow }: { workflow: WorkflowDocument }) {
   )
 }
 
-function WorkflowProjectToolbar({
+const projectFilterOptions: Array<{
+  value: WorkflowProjectFilter
+  label: string
+  description: string
+}> = [
+  { value: 'all', label: '全部', description: '所有已保存项目' },
+  { value: 'simple', label: '结构清晰', description: '节点和连线较少，适合看结构图' },
+  { value: 'complex', label: '复杂流程', description: '节点或连线较多，适合看摘要' },
+]
+
+function WorkflowProjectLibraryToolbar({
+  filter,
   loadingProjects,
+  pageSize,
   query,
-  savedProjectCount,
-  visibleProjectCount,
-  onCreateWorkflow,
+  total,
+  onFilterChange,
   onQueryChange,
   onRefreshProjects,
 }: {
+  filter: WorkflowProjectFilter
   loadingProjects: boolean
+  pageSize: number
   query: string
-  savedProjectCount: number
-  visibleProjectCount: number
-  onCreateWorkflow: () => void
+  total: number
+  onFilterChange: (filter: WorkflowProjectFilter) => void
   onQueryChange: (query: string) => void
   onRefreshProjects: () => void
 }) {
+  const [draftQuery, setDraftQuery] = useState(query)
+
+  useEffect(() => {
+    setDraftQuery(query)
+  }, [query])
+
+  useEffect(() => {
+    const normalizedDraft = draftQuery.trim()
+    const normalizedQuery = query.trim()
+    const timer = window.setTimeout(() => {
+      if (normalizedDraft !== normalizedQuery) {
+        onQueryChange(normalizedDraft)
+      }
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [draftQuery, onQueryChange, query])
+
+  const clearQuery = () => {
+    setDraftQuery('')
+    if (query) {
+      onQueryChange('')
+    }
+  }
+
   return (
-    <div className="relative mt-8 flex flex-col gap-3 rounded-[26px] border border-white/8 bg-white/[0.04] p-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-300/18 bg-blue-400/12 text-blue-100">
-          <Layers3 className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-white">我的工作流</h2>
-          <p className="mt-0.5 text-xs text-slate-500">展示本地未保存内容，以及已经保存的工作流项目。</p>
+    <div className="mt-4 rounded-[24px] border border-white/8 bg-white/[0.035] p-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-300 transition focus-within:border-blue-300/30">
+          <Search className="h-4 w-4 shrink-0 text-slate-500" />
+          <input
+            value={draftQuery}
+            onChange={(event) => setDraftQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                onQueryChange(draftQuery.trim())
+              }
+            }}
+            placeholder="搜索名称或描述"
+            className="min-w-0 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-500"
+          />
+          {draftQuery ? (
+            <button
+              type="button"
+              onClick={clearQuery}
+              className="rounded-xl px-2 py-1 text-xs font-medium text-slate-500 transition hover:bg-white/8 hover:text-slate-200"
+            >
+              清空
+            </button>
+          ) : null}
+        </label>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-white/8 bg-slate-950/60 p-1">
+            <Filter className="mx-1 h-3.5 w-3.5 text-slate-500" />
+            {projectFilterOptions.map((option) => (
+              <ProjectFilterButton
+                key={option.value}
+                active={filter === option.value}
+                label={option.label}
+                title={option.description}
+                onClick={() => onFilterChange(option.value)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onRefreshProjects()}
+            disabled={loadingProjects}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/8 bg-slate-950/60 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-blue-300/28 hover:text-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className={cn('h-4 w-4', loadingProjects && 'animate-spin')} />
+            刷新
+          </button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <label className="flex items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 transition focus-within:border-blue-300/30">
-          <Search className="h-4 w-4 text-slate-500" />
-          <input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="搜索工作流"
-            className="min-w-[140px] bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-500"
-          />
-        </label>
-        <div className="hidden items-center gap-1 rounded-2xl border border-white/8 bg-slate-950/60 p-1 xl:flex">
-          <Filter className="ml-1 h-3.5 w-3.5 text-slate-500" />
-          <FilterChip active label={`全部 ${visibleProjectCount}`} />
-          <FilterChip label={`已保存 ${savedProjectCount}`} />
-          <FilterChip label={`模板 ${workflowTemplateCards.length}`} />
-        </div>
-        <button
-          type="button"
-          onClick={onRefreshProjects}
-          disabled={loadingProjects}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/8 bg-slate-950/60 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-blue-300/28 hover:text-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <RefreshCw className={cn('h-4 w-4', loadingProjects && 'animate-spin')} />
-          刷新
-        </button>
-        <button
-          type="button"
-          onClick={onCreateWorkflow}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/22 bg-blue-500/16 px-4 py-2 text-sm font-medium text-blue-100 transition hover:border-blue-300/42 hover:bg-blue-500/22"
-        >
-          <Plus className="h-4 w-4" />
-          新建工作流
-        </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <span>按最近更新排序</span>
+        <span className="h-1 w-1 rounded-full bg-slate-700" />
+        <span>每页 {pageSize} 个</span>
+        <span className="h-1 w-1 rounded-full bg-slate-700" />
+        <span>{total > 0 ? `共 ${total} 个结果` : '暂无结果'}</span>
+        {draftQuery.trim() !== query.trim() ? (
+          <>
+            <span className="h-1 w-1 rounded-full bg-slate-700" />
+            <span className="text-blue-200">1 秒后查询</span>
+          </>
+        ) : null}
       </div>
     </div>
+  )
+}
+
+function ProjectFilterButton({
+  active,
+  label,
+  title,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  title: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={cn(
+        'rounded-xl px-2.5 py-1.5 text-xs font-medium transition',
+        active ? 'bg-blue-400/16 text-blue-100' : 'text-slate-500 hover:bg-white/6 hover:text-slate-300',
+      )}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -523,7 +745,7 @@ function WorkflowTemplateSection({ onCreateWorkflow }: { onCreateWorkflow: () =>
           <p className="mt-1 text-sm text-slate-500">用于快速进入画布，后续可以替换为真实模板中心数据。</p>
         </div>
         <span className="hidden rounded-full border border-white/8 bg-white/[0.045] px-3 py-1.5 text-xs text-slate-400 sm:inline-flex">
-          点击模板后进入画布
+          点击后进入画布
         </span>
       </div>
 
@@ -533,19 +755,6 @@ function WorkflowTemplateSection({ onCreateWorkflow }: { onCreateWorkflow: () =>
         ))}
       </div>
     </section>
-  )
-}
-
-function FilterChip({ label, active = false }: { label: string; active?: boolean }) {
-  return (
-    <span
-      className={cn(
-        'rounded-xl px-2.5 py-1 text-xs font-medium',
-        active ? 'bg-blue-400/16 text-blue-100' : 'text-slate-500',
-      )}
-    >
-      {label}
-    </span>
   )
 }
 

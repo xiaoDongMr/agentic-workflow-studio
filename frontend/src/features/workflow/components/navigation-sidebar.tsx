@@ -46,21 +46,18 @@ export function NavigationSidebar({
   return (
     <aside
       className={cn(
-        'relative hidden shrink-0 border-r border-white/8 bg-slate-950/90 px-3 py-5 transition-[width] duration-300 ease-out xl:flex xl:flex-col',
+        'sticky top-0 hidden h-screen shrink-0 overflow-visible border-r border-white/8 bg-slate-950/90 px-3 py-5 transition-[width] duration-300 ease-out xl:flex xl:flex-col',
         collapsed ? 'w-[76px]' : 'w-[248px]',
       )}
     >
       <button
         type="button"
         onClick={onToggleCollapsed}
-        className="group absolute right-2 top-[260px] bottom-32 z-20 hidden w-5 items-center justify-center rounded-full transition-colors hover:bg-white/[0.035] xl:flex"
+        className="absolute -right-4 top-1/2 z-20 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/95 text-slate-500 shadow-[0_14px_34px_rgba(2,6,23,0.34)] transition-colors hover:border-blue-300/25 hover:text-blue-100"
         aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
         title={collapsed ? '展开侧边栏' : '收起侧边栏'}
       >
-        <span className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/8 transition-colors group-hover:bg-blue-300/30" />
-        <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/8 bg-slate-950/95 text-slate-500 shadow-[0_12px_28px_rgba(2,6,23,0.28)] transition-colors group-hover:border-blue-300/25 group-hover:text-blue-100">
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-        </span>
+        {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
       </button>
 
       <div
@@ -80,7 +77,7 @@ export function NavigationSidebar({
         )}
       </div>
 
-      <nav className="mt-6 flex flex-1 flex-col gap-2">
+      <nav className="mt-6 flex flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden pr-0.5">
         {navItems.map((item) => {
           const Icon = item.icon
           return (

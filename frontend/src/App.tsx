@@ -26,7 +26,6 @@ function App() {
     allWorkflowEdges,
     allWorkflowNodes,
     canvasApi,
-    currentWorkflowSaved,
     draftHydrated,
     hasUnsavedChanges,
     lastSavedAt,
@@ -194,8 +193,6 @@ function App() {
                 projectsPageSize={workflowProjectPageSize}
                 projectsQuery={workflowProjectQuery}
                 projectsTotal={workflowProjectTotal}
-                currentWorkflowSaved={currentWorkflowSaved}
-                hasUnsavedChanges={hasUnsavedChanges}
                 loadingProjects={projectsLoading}
                 projectsError={projectsError}
                 openingProjectId={openingProjectId}

@@ -3,19 +3,28 @@ import {
   Activity,
   AlertTriangle,
   Box,
+  CheckCircle2,
   Clock3,
+  Code2,
   Cpu,
+  Database,
   ExternalLink,
   Layers3,
   LoaderCircle,
   Network,
+  Package,
+  PlayCircle,
   Plus,
   RefreshCw,
+  Search,
   Server,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Terminal,
   Trash2,
+  UploadCloud,
+  Wrench,
 } from 'lucide-react'
 
 import {
@@ -23,12 +32,18 @@ import {
   deleteSandbox,
   getSandboxPoolHealth,
   listSandboxes,
+  probeSandboxPythonPackages,
   type SandboxPoolHealth,
+  type SandboxPythonProbeResult,
   type SandboxStatus,
   type SandboxSummary,
 } from '@/api/sandbox-pool'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  sandboxImageCapabilities,
+  type SandboxImageCapability,
+} from '@/features/sandbox/sandbox-image-capabilities'
 import { cn } from '@/lib/utils'
 
 function formatDate(value: string): string {
@@ -328,30 +343,49 @@ function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
   const enabled = health?.enabled ?? false
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-white/8 bg-slate-950/70 shadow-[0_24px_80px_rgba(2,6,23,0.32)]">
-      <div className="relative border-b border-white/8 p-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(59,130,246,0.2),transparent_38%),radial-gradient(circle_at_88%_20%,rgba(16,185,129,0.16),transparent_34%)]" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
-                <Layers3 className="h-5 w-5" />
-              </span>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200/80">
-                  Kubernetes Sandbox Pool
-                </p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">沙箱资源池</h1>
-              </div>
+    <section className="overflow-hidden rounded-[24px] border border-white/8 bg-slate-950/64 shadow-[0_18px_56px_rgba(2,6,23,0.22)]">
+      <div className="relative p-4">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(59,130,246,0.16),transparent_34%),radial-gradient(circle_at_94%_12%,rgba(16,185,129,0.12),transparent_30%)]" />
+        <div className="relative grid gap-4 xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.15fr)_auto] xl:items-center">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
+              <Layers3 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200/80">
+                Kubernetes Sandbox Pool
+              </p>
+              <h3 className="mt-1 text-lg font-semibold tracking-tight text-white">资源池连接状态</h3>
             </div>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-              查看当前由本地后端直连 Kubernetes API 管理的 aio-sandbox 实例，包含 Pod、Service、Ingress、节点、运行状态和访问地址。
-            </p>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
+              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <Server className="h-3.5 w-3.5 text-blue-300" />
+                Backend
+              </div>
+              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.backend ?? '-'}</div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
+              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <Network className="h-3.5 w-3.5 text-emerald-300" />
+                Namespace
+              </div>
+              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.namespace ?? '-'}</div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
+              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <Cpu className="h-3.5 w-3.5 text-violet-300" />
+                Client
+              </div>
+              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.client ?? '-'}</div>
+            </div>
           </div>
 
           <Badge
             className={cn(
-              'w-fit rounded-2xl px-3 py-2 text-sm',
+              'w-fit rounded-2xl px-3 py-2 text-sm xl:justify-self-end',
               enabled && !errorText
                 ? 'border-emerald-400/24 bg-emerald-400/10 text-emerald-200'
                 : 'border-amber-400/24 bg-amber-400/10 text-amber-200',
@@ -362,32 +396,8 @@ function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
         </div>
       </div>
 
-      <div className="grid gap-3 p-5 md:grid-cols-3">
-        <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Server className="h-4 w-4 text-blue-300" />
-            Backend
-          </div>
-          <div className="mt-2 text-sm font-medium text-slate-100">{health?.backend ?? '-'}</div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Network className="h-4 w-4 text-emerald-300" />
-            Namespace
-          </div>
-          <div className="mt-2 text-sm font-medium text-slate-100">{health?.namespace ?? '-'}</div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Cpu className="h-4 w-4 text-violet-300" />
-            Client
-          </div>
-          <div className="mt-2 text-sm font-medium text-slate-100">{health?.client ?? '-'}</div>
-        </div>
-      </div>
-
       {errorText && (
-        <div className="mx-5 mb-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+        <div className="mx-4 mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{errorText}</span>
@@ -395,6 +405,329 @@ function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
         </div>
       )}
     </section>
+  )
+}
+
+function CapabilityGroup({
+  icon: Icon,
+  label,
+  items,
+}: {
+  icon: typeof Activity
+  label: string
+  items: string[]
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
+      <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+        <Icon className="h-4 w-4 text-blue-200" />
+        {label}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span
+            key={item}
+            className="rounded-xl border border-white/8 bg-slate-950/42 px-2.5 py-1 text-xs text-slate-200"
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SandboxImageCatalogPanel({
+  images,
+  selectedImageId,
+  runningSandboxes,
+  probeError,
+  probeResult,
+  probing,
+  onSelectImage,
+  onProbe,
+}: {
+  images: SandboxImageCapability[]
+  selectedImageId: string
+  runningSandboxes: SandboxSummary[]
+  probeError: string
+  probeResult: SandboxPythonProbeResult | null
+  probing: boolean
+  onSelectImage: (imageId: string) => void
+  onProbe: (sandboxId: string) => void
+}) {
+  const selectedImage = images.find((image) => image.id === selectedImageId) ?? images[0]
+  const [selectedProbeSandboxId, setSelectedProbeSandboxId] = useState('')
+
+  useEffect(() => {
+    if (selectedProbeSandboxId && runningSandboxes.some((sandbox) => sandbox.sandboxId === selectedProbeSandboxId)) {
+      return
+    }
+    setSelectedProbeSandboxId(runningSandboxes[0]?.sandboxId ?? '')
+  }, [runningSandboxes, selectedProbeSandboxId])
+
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-white/8 bg-slate-950/64 shadow-[0_24px_80px_rgba(2,6,23,0.24)]">
+      <div className="relative border-b border-white/8 p-5">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(14,165,233,0.17),transparent_36%),radial-gradient(circle_at_86%_18%,rgba(34,197,94,0.12),transparent_32%)]" />
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/20 bg-emerald-400/12 text-emerald-200">
+              <Wrench className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
+                Image Capabilities
+              </p>
+              <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">沙箱镜像能力清单</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                维护工作流可选择的沙箱镜像和内置能力。当前默认使用 AioSandbox，后续自定义镜像上传能力在这里扩展。
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="secondary" disabled className="w-fit shrink-0 opacity-70">
+            <UploadCloud className="mr-2 h-4 w-4" />
+            上传自定义镜像
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 p-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="space-y-3">
+          {images.map((image) => {
+            const active = image.id === selectedImage.id
+            return (
+              <button
+                key={image.id}
+                type="button"
+                onClick={() => onSelectImage(image.id)}
+                className={cn(
+                  'w-full rounded-[22px] border p-4 text-left transition',
+                  active
+                    ? 'border-blue-300/30 bg-blue-400/[0.12] shadow-[0_18px_48px_rgba(37,99,235,0.10)]'
+                    : 'border-white/8 bg-white/[0.035] hover:border-blue-300/20 hover:bg-white/[0.055]',
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-white">{image.name}</p>
+                      {image.default ? (
+                        <Badge className="rounded-xl border-emerald-400/18 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-100">
+                          默认
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 truncate font-mono text-xs text-slate-500">{image.image}</p>
+                  </div>
+                  {active ? <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-200" /> : null}
+                </div>
+                <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-400">{image.description}</p>
+              </button>
+            )
+          })}
+
+          <div className="rounded-[22px] border border-dashed border-white/12 bg-white/[0.025] p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+              <UploadCloud className="h-4 w-4 text-violet-200" />
+              自定义镜像
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              预留上传和选择能力。后端接入后，可在这里维护团队镜像、镜像 digest、能力声明和安全扫描状态。
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="rounded-[24px] border border-white/8 bg-slate-950/42 p-4">
+            <div className="flex flex-col gap-3 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h4 className="text-base font-semibold text-white">{selectedImage.name}</h4>
+                <p className="mt-1 break-all font-mono text-xs text-slate-500">{selectedImage.image}</p>
+              </div>
+              <Badge className="w-fit rounded-2xl border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-blue-100">
+                {selectedImage.pythonVersion}
+              </Badge>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <CapabilityGroup icon={Terminal} label="内置工具" items={selectedImage.tools} />
+              <CapabilityGroup icon={Package} label="运行时与接口" items={selectedImage.runtimes} />
+              <CapabilityGroup icon={Code2} label="运行能力" items={selectedImage.capabilities} />
+              <CapabilityGroup icon={ShieldCheck} label="使用约束" items={selectedImage.limits} />
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.035] p-4">
+              <div className="text-xs font-medium text-slate-500">镜像 digest</div>
+              <div className="mt-2 break-all font-mono text-xs text-slate-200">{selectedImage.digest}</div>
+            </div>
+          </div>
+
+          <PythonPackageProbePanel
+            probeError={probeError}
+            probeResult={probeResult}
+            probing={probing}
+            runningSandboxes={runningSandboxes}
+            selectedSandboxId={selectedProbeSandboxId}
+            onChangeSandbox={setSelectedProbeSandboxId}
+            onProbe={() => {
+              if (selectedProbeSandboxId) {
+                onProbe(selectedProbeSandboxId)
+              }
+            }}
+          />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function PythonPackageProbePanel({
+  probeError,
+  probeResult,
+  probing,
+  runningSandboxes,
+  selectedSandboxId,
+  onChangeSandbox,
+  onProbe,
+}: {
+  probeError: string
+  probeResult: SandboxPythonProbeResult | null
+  probing: boolean
+  runningSandboxes: SandboxSummary[]
+  selectedSandboxId: string
+  onChangeSandbox: (sandboxId: string) => void
+  onProbe: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const packages = useMemo(() => {
+    const keyword = query.trim().toLowerCase()
+    if (!probeResult) {
+      return []
+    }
+    if (!keyword) {
+      return probeResult.packages
+    }
+    return probeResult.packages.filter((item) => item.name.toLowerCase().includes(keyword))
+  }, [probeResult, query])
+
+  return (
+    <div className="overflow-hidden rounded-[24px] border border-white/8 bg-slate-950/42">
+      <div className="border-b border-white/8 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Database className="h-4 w-4 text-emerald-200" />
+              Python 依赖探测
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              从运行中的 AioSandbox 执行 `python -m pip list --format=json`，用于确认当前镜像真实内置 Python 包。
+            </p>
+          </div>
+          <Badge className="w-fit rounded-xl border-emerald-400/18 bg-emerald-400/10 px-2.5 py-1 text-emerald-100">
+            运行时结果
+          </Badge>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <select
+            value={selectedSandboxId}
+            onChange={(event) => onChangeSandbox(event.target.value)}
+            disabled={probing || runningSandboxes.length === 0}
+            className={cn(formInputClassName('font-mono text-xs'), 'disabled:cursor-not-allowed disabled:opacity-60')}
+          >
+            {runningSandboxes.length === 0 ? (
+              <option value="">暂无运行中沙箱</option>
+            ) : (
+              runningSandboxes.map((sandbox) => (
+                <option key={sandbox.sandboxId} value={sandbox.sandboxId}>
+                  {sandbox.sandboxId}
+                </option>
+              ))
+            )}
+          </select>
+          <Button
+            type="button"
+            onClick={onProbe}
+            disabled={probing || !selectedSandboxId}
+            className="h-10 shrink-0"
+          >
+            {probing ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
+            {probing ? '探测中' : '探测依赖'}
+          </Button>
+        </div>
+
+        {probeError ? (
+          <div className="mt-3 rounded-2xl border border-rose-400/18 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
+            {probeError}
+          </div>
+        ) : null}
+      </div>
+
+      {probeResult ? (
+        <div className="p-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+              <div className="text-xs text-slate-500">探测沙箱</div>
+              <div className="mt-1 truncate font-mono text-xs text-slate-100">{probeResult.sandboxId}</div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+              <div className="text-xs text-slate-500">Python</div>
+              <div className="mt-1 font-mono text-xs text-slate-100">{probeResult.pythonVersion || '-'}</div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+              <div className="text-xs text-slate-500">Python 包</div>
+              <div className="mt-1 font-mono text-xs text-slate-100">{probeResult.packageCount}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/40 px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-slate-500" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索包名，例如 pandas"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-600"
+            />
+          </div>
+
+          <div className="mt-3 max-h-[260px] overflow-auto rounded-2xl border border-white/8">
+            {packages.length > 0 ? (
+              <table className="w-full border-collapse text-left text-xs">
+                <thead className="sticky top-0 bg-slate-950/95 text-slate-500 backdrop-blur">
+                  <tr>
+                    <th className="border-b border-white/8 px-3 py-2 font-medium">包名</th>
+                    <th className="border-b border-white/8 px-3 py-2 font-medium">版本</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packages.map((item) => (
+                    <tr key={`${item.name}@${item.version}`} className="border-b border-white/[0.04] last:border-0">
+                      <td className="px-3 py-2 font-mono text-slate-200">{item.name}</td>
+                      <td className="px-3 py-2 font-mono text-slate-400">{item.version || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="flex min-h-[160px] items-center justify-center p-6 text-center text-sm text-slate-500">
+                没有匹配的 Python 包
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex min-h-[220px] flex-col items-center justify-center p-6 text-center">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-300/18 bg-emerald-400/10 text-emerald-200">
+            <Package className="h-5 w-5" />
+          </div>
+          <h4 className="mt-3 text-sm font-semibold text-white">尚未探测 Python 依赖</h4>
+          <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
+            选择一个运行中的沙箱后点击探测。探测结果只反映该沙箱当前 Python 环境。
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -492,8 +825,12 @@ export function SandboxPoolPage() {
   const [deletingId, setDeletingId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [probeError, setProbeError] = useState('')
+  const [probeResult, setProbeResult] = useState<SandboxPythonProbeResult | null>(null)
+  const [probing, setProbing] = useState(false)
   const [createForm, setCreateForm] = useState<CreateSandboxFormState>(() => createDefaultForm())
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
+  const [selectedImageId, setSelectedImageId] = useState(() => sandboxImageCapabilities[0]?.id ?? '')
 
   const createDisabled = !health?.enabled || Boolean(health?.extra.error)
 
@@ -504,6 +841,8 @@ export function SandboxPoolPage() {
     const nodes = new Set(sandboxes.map((item) => item.nodeName).filter(Boolean)).size
     return { running, pending, failed, nodes }
   }, [sandboxes])
+
+  const runningSandboxes = useMemo(() => sandboxes.filter((item) => item.status === 'Running'), [sandboxes])
 
   const load = useCallback(async (silent = false) => {
     if (silent) {
@@ -578,6 +917,20 @@ export function SandboxPoolPage() {
     }
   }
 
+  async function handleProbePythonPackages(sandboxId: string) {
+    setProbing(true)
+    setProbeError('')
+    try {
+      const result = await probeSandboxPythonPackages(sandboxId)
+      setProbeResult(result)
+    } catch (currentError) {
+      const message = currentError instanceof Error ? currentError.message : '探测 Python 依赖失败'
+      setProbeError(message)
+    } finally {
+      setProbing(false)
+    }
+  }
+
   return (
     <main className="min-h-0 flex-1 overflow-auto p-4 lg:p-6">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5">
@@ -619,6 +972,17 @@ export function SandboxPoolPage() {
         )}
 
         <HealthPanel health={health} />
+
+        <SandboxImageCatalogPanel
+          images={sandboxImageCapabilities}
+          probeError={probeError}
+          probeResult={probeResult}
+          probing={probing}
+          runningSandboxes={runningSandboxes}
+          selectedImageId={selectedImageId}
+          onSelectImage={setSelectedImageId}
+          onProbe={(sandboxId) => void handleProbePythonPackages(sandboxId)}
+        />
 
         <CreateSandboxPanel
           value={createForm}

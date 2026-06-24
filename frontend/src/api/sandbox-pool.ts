@@ -35,6 +35,20 @@ export interface SandboxCreateRequest {
   labels?: Record<string, string>
 }
 
+export interface SandboxPythonPackage {
+  name: string
+  version: string
+}
+
+export interface SandboxPythonProbeResult {
+  sandboxId: string
+  sandboxUrl: string
+  pythonVersion: string
+  packageCount: number
+  packages: SandboxPythonPackage[]
+  rawOutput: string
+}
+
 interface SandboxSummaryDto {
   sandbox_id: string
   sandbox_url?: string
@@ -68,6 +82,20 @@ interface SandboxCreateRequestDto {
   labels?: Record<string, string>
 }
 
+interface SandboxPythonPackageDto {
+  name: string
+  version: string
+}
+
+interface SandboxPythonProbeResultDto {
+  sandbox_id: string
+  sandbox_url?: string
+  python_version?: string
+  package_count?: number
+  packages?: SandboxPythonPackageDto[]
+  raw_output?: string
+}
+
 function toSandboxSummary(item: SandboxSummaryDto): SandboxSummary {
   return {
     sandboxId: item.sandbox_id,
@@ -91,6 +119,21 @@ function toSandboxPoolHealth(item: SandboxPoolHealthDto): SandboxPoolHealth {
     client: item.client,
     enabled: item.enabled,
     extra: item.extra ?? {},
+  }
+}
+
+function toSandboxPythonProbeResult(item: SandboxPythonProbeResultDto): SandboxPythonProbeResult {
+  const packages = item.packages ?? []
+  return {
+    sandboxId: item.sandbox_id,
+    sandboxUrl: item.sandbox_url ?? '',
+    pythonVersion: item.python_version ?? '',
+    packageCount: item.package_count ?? packages.length,
+    packages: packages.map((packageItem) => ({
+      name: packageItem.name,
+      version: packageItem.version,
+    })),
+    rawOutput: item.raw_output ?? '',
   }
 }
 
@@ -123,4 +166,11 @@ export async function createSandbox(request: SandboxCreateRequest): Promise<Sand
 
 export async function deleteSandbox(sandboxId: string): Promise<void> {
   await http.delete(`/sandboxes/${encodeURIComponent(sandboxId)}`)
+}
+
+export async function probeSandboxPythonPackages(sandboxId: string): Promise<SandboxPythonProbeResult> {
+  const { data } = await http.post<SandboxPythonProbeResultDto>(
+    `/sandboxes/${encodeURIComponent(sandboxId)}/python-packages/probe`,
+  )
+  return toSandboxPythonProbeResult(data)
 }

@@ -39,3 +39,17 @@ class SandboxPoolHealth(BaseModel):
     client: str
     enabled: bool
     extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class SandboxPythonPackage(BaseModel):
+    name: str
+    version: str
+
+
+class SandboxPythonProbeResult(BaseModel):
+    sandbox_id: str
+    sandbox_url: str
+    python_version: str = ""
+    package_count: int = 0
+    packages: list[SandboxPythonPackage] = Field(default_factory=list)
+    raw_output: str = ""

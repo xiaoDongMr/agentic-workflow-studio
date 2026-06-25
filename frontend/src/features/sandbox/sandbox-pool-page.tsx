@@ -1,36 +1,22 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
-  Activity,
   AlertTriangle,
-  Box,
-  CheckCircle2,
   Clock3,
-  Code2,
-  Cpu,
-  Database,
-  ExternalLink,
   Layers3,
   LoaderCircle,
-  Network,
-  Package,
-  PlayCircle,
-  Plus,
   RefreshCw,
   Search,
   Server,
   ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  Terminal,
-  Trash2,
-  UploadCloud,
-  Wrench,
 } from 'lucide-react'
 
 import {
+  createSandboxImage,
   createSandbox,
+  deleteSandboxImage,
   deleteSandbox,
   getSandboxPoolHealth,
+  listSandboxImages,
   listSandboxes,
   probeSandboxPythonPackages,
   type SandboxPoolHealth,
@@ -40,799 +26,74 @@ import {
 } from '@/api/sandbox-pool'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CreateSandboxPanel } from '@/features/sandbox/components/create-sandbox-panel'
+import { CustomImageDeleteDialog } from '@/features/sandbox/components/custom-image-delete-dialog'
+import { FeedbackToast } from '@/features/sandbox/components/feedback-toast'
+import { HealthPanel } from '@/features/sandbox/components/health-panel'
+import { SandboxCard } from '@/features/sandbox/components/sandbox-card'
+import { SandboxImageCatalogPanel } from '@/features/sandbox/components/sandbox-image-catalog-panel'
+import { SearchableSelect } from '@/features/sandbox/components/searchable-select'
+import { StatCard } from '@/features/sandbox/components/stat-card'
+import { useTimedMessages } from '@/features/sandbox/hooks/use-timed-messages'
 import {
   sandboxImageCapabilities,
   type SandboxImageCapability,
 } from '@/features/sandbox/sandbox-image-capabilities'
+import {
+  CUSTOM_IMAGE_DEFAULT_CAPABILITY_MANIFEST,
+  PRELOAD_POLL_INTERVAL_MS,
+  PRELOAD_POLL_MAX_ATTEMPTS,
+  SANDBOX_PAGE_SIZE_OPTIONS,
+  SANDBOX_STATUS_FILTER_OPTIONS,
+} from '@/features/sandbox/sandbox-pool-constants'
+import type {
+  CreateSandboxFormState,
+  CustomImageFormState,
+  SandboxPoolTab,
+} from '@/features/sandbox/sandbox-pool-types'
+import {
+  createDefaultCustomImageForm,
+  createDefaultForm,
+  createSandboxId,
+  parseKeyValueText,
+  toSandboxImageCapability,
+} from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
 
-function formatDate(value: string): string {
-  if (!value) {
-    return '-'
-  }
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
-}
-
-interface CreateSandboxFormState {
-  sandboxId: string
-  image: string
-  envText: string
-  labelsText: string
-}
-
-function createSandboxId(): string {
-  const cryptoApi = globalThis.crypto
-  if (cryptoApi?.randomUUID) {
-    return `sandbox-${cryptoApi.randomUUID().replace(/-/g, '').slice(0, 24)}`
-  }
-
-  if (cryptoApi?.getRandomValues) {
-    const randomPart = Array.from(cryptoApi.getRandomValues(new Uint8Array(12)))
-      .map((value) => value.toString(16).padStart(2, '0'))
-      .join('')
-    return `sandbox-${randomPart}`
-  }
-
-  const fallbackPart = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}${Math.random()
-    .toString(36)
-    .slice(2, 10)}`
-  return `sandbox-${fallbackPart.slice(0, 24)}`
-}
-
-function createDefaultForm(): CreateSandboxFormState {
-  return {
-    sandboxId: createSandboxId(),
-    image: '',
-    envText: '',
-    labelsText: '',
-  }
-}
-
-function parseKeyValueText(value: string, fieldLabel: string): Record<string, string> {
-  const result: Record<string, string> = {}
-  const lines = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  for (const line of lines) {
-    const separatorIndex = line.indexOf('=')
-    if (separatorIndex <= 0) {
-      throw new Error(`${fieldLabel} 请使用 KEY=VALUE 格式，每行一组`)
-    }
-    const key = line.slice(0, separatorIndex).trim()
-    const nextValue = line.slice(separatorIndex + 1).trim()
-    if (!key) {
-      throw new Error(`${fieldLabel} 存在空 Key`)
-    }
-    result[key] = nextValue
-  }
-
-  return result
-}
-
-function formInputClassName(className?: string): string {
-  return cn(
-    'w-full rounded-2xl border border-white/8 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-blue-400/60 focus:bg-slate-950/90',
-    className,
-  )
-}
-
-function statusClassName(status: SandboxStatus): string {
-  switch (status) {
-    case 'Running':
-      return 'border-emerald-400/24 bg-emerald-400/10 text-emerald-200'
-    case 'Pending':
-      return 'border-sky-400/24 bg-sky-400/10 text-sky-200'
-    case 'Failed':
-      return 'border-rose-400/28 bg-rose-400/10 text-rose-200'
-    case 'Succeeded':
-      return 'border-slate-400/18 bg-slate-400/8 text-slate-300'
-    default:
-      return 'border-amber-400/24 bg-amber-400/10 text-amber-200'
-  }
-}
-
-function statusLabel(status: SandboxStatus): string {
-  const labels: Record<SandboxStatus, string> = {
-    Pending: '启动中',
-    Running: '运行中',
-    Succeeded: '已完成',
-    Failed: '异常',
-    Unknown: '未知',
-  }
-  return labels[status]
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  tone = 'blue',
-}: {
-  icon: typeof Activity
-  label: string
-  value: string | number
-  tone?: 'blue' | 'emerald' | 'amber' | 'violet'
-}) {
-  const toneClass = {
-    blue: 'border-blue-400/20 bg-blue-400/10 text-blue-200',
-    emerald: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200',
-    amber: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
-    violet: 'border-violet-400/20 bg-violet-400/10 text-violet-200',
-  }[tone]
-
-  return (
-    <div className="rounded-[22px] border border-white/8 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-      <div className={cn('inline-flex h-10 w-10 items-center justify-center rounded-2xl border', toneClass)}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="mt-4 text-2xl font-semibold tracking-tight text-white">{value}</div>
-      <div className="mt-1 text-xs text-slate-400">{label}</div>
-    </div>
-  )
-}
-
-function CreateSandboxPanel({
-  value,
-  creating,
-  disabled,
-  showAdvanced,
-  onChange,
-  onSubmit,
-  onGenerateId,
-  onToggleAdvanced,
-}: {
-  value: CreateSandboxFormState
-  creating: boolean
-  disabled: boolean
-  showAdvanced: boolean
-  onChange: (nextValue: CreateSandboxFormState) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onGenerateId: () => void
-  onToggleAdvanced: () => void
-}) {
-  return (
-    <section className="overflow-hidden rounded-[28px] border border-blue-300/14 bg-slate-950/64 shadow-[0_24px_80px_rgba(2,6,23,0.24)]">
-      <div className="relative border-b border-white/8 p-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(59,130,246,0.18),transparent_34%),radial-gradient(circle_at_92%_18%,rgba(168,85,247,0.14),transparent_30%)]" />
-        <div className="relative flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
-              <Plus className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200/80">Create Sandbox</p>
-              <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">创建沙箱</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                一键生成独立 aio-sandbox 实例，默认使用资源池配置。仅在调试或定制运行环境时展开高级配置。
-              </p>
-            </div>
-          </div>
-          <Badge className="w-fit rounded-2xl border-violet-400/18 bg-violet-400/10 px-3 py-1.5 text-violet-100">
-            自动命名
-          </Badge>
-        </div>
-      </div>
-
-      <form onSubmit={onSubmit} className="space-y-4 p-5">
-        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-400">自动生成的沙箱 ID</span>
-              <input
-                value={value.sandboxId}
-                readOnly
-                disabled={disabled}
-                className={cn(
-                  formInputClassName('mt-1.5 cursor-default font-mono text-xs'),
-                  'disabled:cursor-not-allowed disabled:opacity-60',
-                )}
-              />
-            </label>
-            <div className="flex items-end">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onGenerateId}
-                disabled={disabled || creating}
-                className="h-10 w-full md:w-auto"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                重新生成
-              </Button>
-            </div>
-          </div>
-
-          <Button type="submit" disabled={disabled || creating || !value.sandboxId.trim()} className="h-10 shrink-0">
-            {creating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-            {creating ? '创建中' : '创建沙箱'}
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm leading-6 text-slate-400">
-            <span className="font-medium text-slate-200">默认创建：</span>
-            自动生成高熵 ID，使用资源池默认镜像，无需用户填写额外参数。
-          </div>
-          <Button type="button" variant="secondary" onClick={onToggleAdvanced} disabled={disabled || creating} className="shrink-0">
-            <SlidersHorizontal className="mr-2 h-4 w-4" />
-            {showAdvanced ? '收起高级配置' : '高级配置'}
-          </Button>
-        </div>
-
-        {showAdvanced && (
-          <div className="rounded-[24px] border border-white/8 bg-slate-950/45 p-4">
-            <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h4 className="text-sm font-semibold text-white">运行参数</h4>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  仅用于临时调试、验证新镜像或排查运行问题。普通创建建议保持为空。
-                </p>
-              </div>
-              <Badge className="w-fit rounded-xl border-amber-400/18 bg-amber-400/10 px-2.5 py-1 text-amber-100">
-                可选
-              </Badge>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3 lg:col-span-2">
-                <span className="text-xs font-medium text-slate-300">运行镜像</span>
-                <p className="mt-1 text-xs text-slate-500">留空时使用资源池默认 aio-sandbox 镜像。</p>
-                <input
-                  value={value.image}
-                  onChange={(event) => onChange({ ...value, image: event.target.value })}
-                  placeholder="例如：registry.example.com/aio-sandbox:debug"
-                  disabled={disabled || creating}
-                  className={cn(formInputClassName('mt-3 font-mono text-xs'), 'disabled:cursor-not-allowed disabled:opacity-60')}
-                />
-              </label>
-
-              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-                <span className="text-xs font-medium text-slate-300">环境变量</span>
-                <p className="mt-1 text-xs text-slate-500">传入容器启动参数，每行一组 KEY=VALUE。</p>
-                <textarea
-                  rows={4}
-                  value={value.envText}
-                  onChange={(event) => onChange({ ...value, envText: event.target.value })}
-                  placeholder={'LOG_LEVEL=debug\nFEATURE_FLAG=true'}
-                  disabled={disabled || creating}
-                  className={cn(
-                    formInputClassName('mt-3 resize-none font-mono text-xs'),
-                    'disabled:cursor-not-allowed disabled:opacity-60',
-                  )}
-                />
-              </label>
-
-              <label className="block rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-                <span className="text-xs font-medium text-slate-300">资源标签</span>
-                <p className="mt-1 text-xs text-slate-500">追加到 Kubernetes labels，用于筛选和归类。</p>
-                <textarea
-                  rows={4}
-                  value={value.labelsText}
-                  onChange={(event) => onChange({ ...value, labelsText: event.target.value })}
-                  placeholder={'owner=team-a\npurpose=debug'}
-                  disabled={disabled || creating}
-                  className={cn(
-                    formInputClassName('mt-3 resize-none font-mono text-xs'),
-                    'disabled:cursor-not-allowed disabled:opacity-60',
-                  )}
-                />
-              </label>
-            </div>
-          </div>
-        )}
-      </form>
-    </section>
-  )
-}
-
-function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
-  const errorText = health?.extra.error
-  const enabled = health?.enabled ?? false
-
-  return (
-    <section className="overflow-hidden rounded-[24px] border border-white/8 bg-slate-950/64 shadow-[0_18px_56px_rgba(2,6,23,0.22)]">
-      <div className="relative p-4">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(59,130,246,0.16),transparent_34%),radial-gradient(circle_at_94%_12%,rgba(16,185,129,0.12),transparent_30%)]" />
-        <div className="relative grid gap-4 xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.15fr)_auto] xl:items-center">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
-              <Layers3 className="h-5 w-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200/80">
-                Kubernetes Sandbox Pool
-              </p>
-              <h3 className="mt-1 text-lg font-semibold tracking-tight text-white">资源池连接状态</h3>
-            </div>
-          </div>
-
-          <div className="grid gap-2 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
-              <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                <Server className="h-3.5 w-3.5 text-blue-300" />
-                Backend
-              </div>
-              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.backend ?? '-'}</div>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
-              <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                <Network className="h-3.5 w-3.5 text-emerald-300" />
-                Namespace
-              </div>
-              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.namespace ?? '-'}</div>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
-              <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                <Cpu className="h-3.5 w-3.5 text-violet-300" />
-                Client
-              </div>
-              <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.client ?? '-'}</div>
-            </div>
-          </div>
-
-          <Badge
-            className={cn(
-              'w-fit rounded-2xl px-3 py-2 text-sm xl:justify-self-end',
-              enabled && !errorText
-                ? 'border-emerald-400/24 bg-emerald-400/10 text-emerald-200'
-                : 'border-amber-400/24 bg-amber-400/10 text-amber-200',
-            )}
-          >
-            {enabled && !errorText ? '资源池可用' : '等待配置'}
-          </Badge>
-        </div>
-      </div>
-
-      {errorText && (
-        <div className="mx-4 mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{errorText}</span>
-          </div>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function CapabilityGroup({
-  icon: Icon,
-  label,
-  items,
-}: {
-  icon: typeof Activity
-  label: string
-  items: string[]
-}) {
-  return (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-      <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-        <Icon className="h-4 w-4 text-blue-200" />
-        {label}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {items.map((item) => (
-          <span
-            key={item}
-            className="rounded-xl border border-white/8 bg-slate-950/42 px-2.5 py-1 text-xs text-slate-200"
-          >
-            {item}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function SandboxImageCatalogPanel({
-  images,
-  selectedImageId,
-  runningSandboxes,
-  probeError,
-  probeResult,
-  probing,
-  onSelectImage,
-  onProbe,
-}: {
-  images: SandboxImageCapability[]
-  selectedImageId: string
-  runningSandboxes: SandboxSummary[]
-  probeError: string
-  probeResult: SandboxPythonProbeResult | null
-  probing: boolean
-  onSelectImage: (imageId: string) => void
-  onProbe: (sandboxId: string) => void
-}) {
-  const selectedImage = images.find((image) => image.id === selectedImageId) ?? images[0]
-  const [selectedProbeSandboxId, setSelectedProbeSandboxId] = useState('')
-
-  useEffect(() => {
-    if (selectedProbeSandboxId && runningSandboxes.some((sandbox) => sandbox.sandboxId === selectedProbeSandboxId)) {
-      return
-    }
-    setSelectedProbeSandboxId(runningSandboxes[0]?.sandboxId ?? '')
-  }, [runningSandboxes, selectedProbeSandboxId])
-
-  return (
-    <section className="overflow-hidden rounded-[28px] border border-white/8 bg-slate-950/64 shadow-[0_24px_80px_rgba(2,6,23,0.24)]">
-      <div className="relative border-b border-white/8 p-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(14,165,233,0.17),transparent_36%),radial-gradient(circle_at_86%_18%,rgba(34,197,94,0.12),transparent_32%)]" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/20 bg-emerald-400/12 text-emerald-200">
-              <Wrench className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
-                Image Capabilities
-              </p>
-              <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">沙箱镜像能力清单</h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                维护工作流可选择的沙箱镜像和内置能力。当前默认使用 AioSandbox，后续自定义镜像上传能力在这里扩展。
-              </p>
-            </div>
-          </div>
-          <Button type="button" variant="secondary" disabled className="w-fit shrink-0 opacity-70">
-            <UploadCloud className="mr-2 h-4 w-4" />
-            上传自定义镜像
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 p-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <div className="space-y-3">
-          {images.map((image) => {
-            const active = image.id === selectedImage.id
-            return (
-              <button
-                key={image.id}
-                type="button"
-                onClick={() => onSelectImage(image.id)}
-                className={cn(
-                  'w-full rounded-[22px] border p-4 text-left transition',
-                  active
-                    ? 'border-blue-300/30 bg-blue-400/[0.12] shadow-[0_18px_48px_rgba(37,99,235,0.10)]'
-                    : 'border-white/8 bg-white/[0.035] hover:border-blue-300/20 hover:bg-white/[0.055]',
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-semibold text-white">{image.name}</p>
-                      {image.default ? (
-                        <Badge className="rounded-xl border-emerald-400/18 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-100">
-                          默认
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="mt-1 truncate font-mono text-xs text-slate-500">{image.image}</p>
-                  </div>
-                  {active ? <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-200" /> : null}
-                </div>
-                <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-400">{image.description}</p>
-              </button>
-            )
-          })}
-
-          <div className="rounded-[22px] border border-dashed border-white/12 bg-white/[0.025] p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-              <UploadCloud className="h-4 w-4 text-violet-200" />
-              自定义镜像
-            </div>
-            <p className="mt-2 text-xs leading-5 text-slate-500">
-              预留上传和选择能力。后端接入后，可在这里维护团队镜像、镜像 digest、能力声明和安全扫描状态。
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-4">
-          <div className="rounded-[24px] border border-white/8 bg-slate-950/42 p-4">
-            <div className="flex flex-col gap-3 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h4 className="text-base font-semibold text-white">{selectedImage.name}</h4>
-                <p className="mt-1 break-all font-mono text-xs text-slate-500">{selectedImage.image}</p>
-              </div>
-              <Badge className="w-fit rounded-2xl border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-blue-100">
-                {selectedImage.pythonVersion}
-              </Badge>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              <CapabilityGroup icon={Terminal} label="内置工具" items={selectedImage.tools} />
-              <CapabilityGroup icon={Package} label="运行时与接口" items={selectedImage.runtimes} />
-              <CapabilityGroup icon={Code2} label="运行能力" items={selectedImage.capabilities} />
-              <CapabilityGroup icon={ShieldCheck} label="使用约束" items={selectedImage.limits} />
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-              <div className="text-xs font-medium text-slate-500">镜像 digest</div>
-              <div className="mt-2 break-all font-mono text-xs text-slate-200">{selectedImage.digest}</div>
-            </div>
-          </div>
-
-          <PythonPackageProbePanel
-            probeError={probeError}
-            probeResult={probeResult}
-            probing={probing}
-            runningSandboxes={runningSandboxes}
-            selectedSandboxId={selectedProbeSandboxId}
-            onChangeSandbox={setSelectedProbeSandboxId}
-            onProbe={() => {
-              if (selectedProbeSandboxId) {
-                onProbe(selectedProbeSandboxId)
-              }
-            }}
-          />
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function PythonPackageProbePanel({
-  probeError,
-  probeResult,
-  probing,
-  runningSandboxes,
-  selectedSandboxId,
-  onChangeSandbox,
-  onProbe,
-}: {
-  probeError: string
-  probeResult: SandboxPythonProbeResult | null
-  probing: boolean
-  runningSandboxes: SandboxSummary[]
-  selectedSandboxId: string
-  onChangeSandbox: (sandboxId: string) => void
-  onProbe: () => void
-}) {
-  const [query, setQuery] = useState('')
-  const packages = useMemo(() => {
-    const keyword = query.trim().toLowerCase()
-    if (!probeResult) {
-      return []
-    }
-    if (!keyword) {
-      return probeResult.packages
-    }
-    return probeResult.packages.filter((item) => item.name.toLowerCase().includes(keyword))
-  }, [probeResult, query])
-
-  return (
-    <div className="overflow-hidden rounded-[24px] border border-white/8 bg-slate-950/42">
-      <div className="border-b border-white/8 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Database className="h-4 w-4 text-emerald-200" />
-              Python 依赖探测
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              从运行中的 AioSandbox 执行 `python -m pip list --format=json`，用于确认当前镜像真实内置 Python 包。
-            </p>
-          </div>
-          <Badge className="w-fit rounded-xl border-emerald-400/18 bg-emerald-400/10 px-2.5 py-1 text-emerald-100">
-            运行时结果
-          </Badge>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-          <select
-            value={selectedSandboxId}
-            onChange={(event) => onChangeSandbox(event.target.value)}
-            disabled={probing || runningSandboxes.length === 0}
-            className={cn(formInputClassName('font-mono text-xs'), 'disabled:cursor-not-allowed disabled:opacity-60')}
-          >
-            {runningSandboxes.length === 0 ? (
-              <option value="">暂无运行中沙箱</option>
-            ) : (
-              runningSandboxes.map((sandbox) => (
-                <option key={sandbox.sandboxId} value={sandbox.sandboxId}>
-                  {sandbox.sandboxId}
-                </option>
-              ))
-            )}
-          </select>
-          <Button
-            type="button"
-            onClick={onProbe}
-            disabled={probing || !selectedSandboxId}
-            className="h-10 shrink-0"
-          >
-            {probing ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
-            {probing ? '探测中' : '探测依赖'}
-          </Button>
-        </div>
-
-        {probeError ? (
-          <div className="mt-3 rounded-2xl border border-rose-400/18 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
-            {probeError}
-          </div>
-        ) : null}
-      </div>
-
-      {probeResult ? (
-        <div className="p-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-              <div className="text-xs text-slate-500">探测沙箱</div>
-              <div className="mt-1 truncate font-mono text-xs text-slate-100">{probeResult.sandboxId}</div>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-              <div className="text-xs text-slate-500">Python</div>
-              <div className="mt-1 font-mono text-xs text-slate-100">{probeResult.pythonVersion || '-'}</div>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-              <div className="text-xs text-slate-500">Python 包</div>
-              <div className="mt-1 font-mono text-xs text-slate-100">{probeResult.packageCount}</div>
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/40 px-3 py-2">
-            <Search className="h-4 w-4 shrink-0 text-slate-500" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索包名，例如 pandas"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-600"
-            />
-          </div>
-
-          <div className="mt-3 max-h-[260px] overflow-auto rounded-2xl border border-white/8">
-            {packages.length > 0 ? (
-              <table className="w-full border-collapse text-left text-xs">
-                <thead className="sticky top-0 bg-slate-950/95 text-slate-500 backdrop-blur">
-                  <tr>
-                    <th className="border-b border-white/8 px-3 py-2 font-medium">包名</th>
-                    <th className="border-b border-white/8 px-3 py-2 font-medium">版本</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {packages.map((item) => (
-                    <tr key={`${item.name}@${item.version}`} className="border-b border-white/[0.04] last:border-0">
-                      <td className="px-3 py-2 font-mono text-slate-200">{item.name}</td>
-                      <td className="px-3 py-2 font-mono text-slate-400">{item.version || '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="flex min-h-[160px] items-center justify-center p-6 text-center text-sm text-slate-500">
-                没有匹配的 Python 包
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-[220px] flex-col items-center justify-center p-6 text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-300/18 bg-emerald-400/10 text-emerald-200">
-            <Package className="h-5 w-5" />
-          </div>
-          <h4 className="mt-3 text-sm font-semibold text-white">尚未探测 Python 依赖</h4>
-          <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
-            选择一个运行中的沙箱后点击探测。探测结果只反映该沙箱当前 Python 环境。
-          </p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SandboxCard({
-  sandbox,
-  deleting,
-  onDelete,
-}: {
-  sandbox: SandboxSummary
-  deleting: boolean
-  onDelete: (sandboxId: string) => void
-}) {
-  return (
-    <article className="group overflow-hidden rounded-[24px] border border-white/8 bg-white/[0.045] shadow-[0_18px_48px_rgba(2,6,23,0.24)] transition hover:border-blue-300/18 hover:bg-white/[0.06]">
-      <div className="border-b border-white/8 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-200">
-                <Box className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold text-white">{sandbox.sandboxId}</h3>
-                <p className="mt-0.5 truncate text-xs text-slate-500">{sandbox.podName || '未绑定 Pod'}</p>
-              </div>
-            </div>
-          </div>
-          <Badge className={cn('shrink-0 rounded-xl px-2.5 py-1', statusClassName(sandbox.status))}>
-            {statusLabel(sandbox.status)}
-          </Badge>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-2xl border border-white/8 bg-slate-950/32 p-3">
-            <div className="text-slate-500">命名空间</div>
-            <div className="mt-1 truncate font-medium text-slate-200">{sandbox.namespace || '-'}</div>
-          </div>
-          <div className="rounded-2xl border border-white/8 bg-slate-950/32 p-3">
-            <div className="text-slate-500">节点</div>
-            <div className="mt-1 truncate font-medium text-slate-200">{sandbox.nodeName || '-'}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3 p-4">
-        <div>
-          <div className="mb-1 flex items-center gap-1.5 text-xs text-slate-500">
-            <ExternalLink className="h-3.5 w-3.5" />
-            访问地址
-          </div>
-          <div className="break-all rounded-2xl border border-white/8 bg-slate-950/36 px-3 py-2 font-mono text-xs text-blue-100">
-            {sandbox.sandboxUrl || '-'}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
-          <div className="rounded-2xl bg-white/[0.035] p-3">
-            <div className="text-slate-500">Pod IP</div>
-            <div className="mt-1 font-medium text-slate-200">{sandbox.podIp || '-'}</div>
-          </div>
-          <div className="rounded-2xl bg-white/[0.035] p-3">
-            <div className="text-slate-500">创建时间</div>
-            <div className="mt-1 font-medium text-slate-200">{formatDate(sandbox.createdAt)}</div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-1">
-          <span className="min-w-0 truncate text-xs text-slate-500">
-            Service: {sandbox.serviceName || '-'}
-            {sandbox.ingressName ? ` · Ingress: ${sandbox.ingressName}` : ''}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={deleting}
-            onClick={() => onDelete(sandbox.sandboxId)}
-            className="border-rose-400/10 text-rose-200 hover:bg-rose-400/10"
-          >
-            {deleting ? <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
-            删除
-          </Button>
-        </div>
-      </div>
-    </article>
-  )
-}
-
 export function SandboxPoolPage() {
+  const { error, notice, setError, setNotice, clearError, clearNotice, clearMessages } = useTimedMessages()
   const [health, setHealth] = useState<SandboxPoolHealth | null>(null)
   const [sandboxes, setSandboxes] = useState<SandboxSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [registeringImage, setRegisteringImage] = useState(false)
   const [deletingId, setDeletingId] = useState('')
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [deletingImageId, setDeletingImageId] = useState('')
+  const [pendingDeleteImageId, setPendingDeleteImageId] = useState('')
   const [probeError, setProbeError] = useState('')
   const [probeResult, setProbeResult] = useState<SandboxPythonProbeResult | null>(null)
   const [probing, setProbing] = useState(false)
   const [createForm, setCreateForm] = useState<CreateSandboxFormState>(() => createDefaultForm())
+  const [customImageForm, setCustomImageForm] = useState<CustomImageFormState>(() => createDefaultCustomImageForm())
+  const [images, setImages] = useState<SandboxImageCapability[]>(sandboxImageCapabilities)
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
   const [selectedImageId, setSelectedImageId] = useState(() => sandboxImageCapabilities[0]?.id ?? '')
+  const [activeTab, setActiveTab] = useState<SandboxPoolTab>('images')
+  const [sandboxPageSize, setSandboxPageSize] = useState(SANDBOX_PAGE_SIZE_OPTIONS[0])
+  const [sandboxStatusFilter, setSandboxStatusFilter] = useState<SandboxStatus | ''>('')
+  const [sandboxImageFilter, setSandboxImageFilter] = useState('')
+  const [sandboxIdFilter, setSandboxIdFilter] = useState('')
+  const [sandboxPageIndex, setSandboxPageIndex] = useState(0)
+  const [sandboxPageTokens, setSandboxPageTokens] = useState<string[]>([''])
+  const [sandboxNextContinueToken, setSandboxNextContinueToken] = useState('')
+  const [sandboxRemainingItemCount, setSandboxRemainingItemCount] = useState<number | null>(null)
 
   const createDisabled = !health?.enabled || Boolean(health?.extra.error)
+  const selectedImage = useMemo(
+    () => images.find((image) => image.id === selectedImageId) ?? images[0],
+    [images, selectedImageId],
+  )
 
   const stats = useMemo(() => {
     const running = sandboxes.filter((item) => item.status === 'Running').length
@@ -843,22 +104,63 @@ export function SandboxPoolPage() {
   }, [sandboxes])
 
   const runningSandboxes = useMemo(() => sandboxes.filter((item) => item.status === 'Running'), [sandboxes])
+  const hasSandboxFilter = Boolean(sandboxStatusFilter || sandboxImageFilter || sandboxIdFilter.trim())
+  const currentSandboxContinueToken = sandboxPageTokens[sandboxPageIndex] ?? ''
+  const pendingDeleteImage = useMemo(
+    () => images.find((image) => image.id === pendingDeleteImageId && image.source === 'custom'),
+    [images, pendingDeleteImageId],
+  )
 
-  const load = useCallback(async (silent = false) => {
+  useEffect(() => {
+    if (selectedImageId && images.some((image) => image.id === selectedImageId)) {
+      return
+    }
+    setSelectedImageId(images[0]?.id ?? '')
+    setCreateForm((current) => ({ ...current, image: '' }))
+  }, [images, selectedImageId])
+
+  useEffect(() => {
+    if (!sandboxImageFilter || images.some((image) => image.id === sandboxImageFilter)) {
+      return
+    }
+    setSandboxImageFilter('')
+  }, [images, sandboxImageFilter])
+
+  const load = useCallback(async (silent = false, options?: { continueToken?: string; pageIndex?: number; resetPage?: boolean }) => {
     if (silent) {
       setRefreshing(true)
     } else {
       setLoading(true)
     }
-    setError('')
+    clearError()
 
     try {
-      const [nextHealth, nextSandboxes] = await Promise.all([
+      const pageIndex = options?.resetPage ? 0 : options?.pageIndex ?? 0
+      const continueToken = options?.resetPage ? '' : options?.continueToken ?? ''
+      const [nextHealth, nextSandboxPage] = await Promise.all([
         getSandboxPoolHealth(),
-        listSandboxes(),
+        listSandboxes({
+          limit: sandboxPageSize,
+          continueToken,
+          status: sandboxStatusFilter,
+          imageId: sandboxImageFilter,
+          sandboxId: sandboxIdFilter.trim(),
+        }),
       ])
+      const nextImages = await listSandboxImages()
       setHealth(nextHealth)
-      setSandboxes(nextSandboxes)
+      setSandboxes(nextSandboxPage.sandboxes)
+      setSandboxPageIndex(pageIndex)
+      setSandboxNextContinueToken(nextSandboxPage.continueToken)
+      setSandboxRemainingItemCount(nextSandboxPage.remainingItemCount)
+      setSandboxPageTokens((current) => {
+        const nextTokens = options?.resetPage ? [''] : current.slice(0, pageIndex + 1)
+        if (nextSandboxPage.continueToken) {
+          nextTokens[pageIndex + 1] = nextSandboxPage.continueToken
+        }
+        return nextTokens
+      })
+      setImages(nextImages.map(toSandboxImageCapability))
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '加载沙箱资源池失败'
       setError(message)
@@ -866,35 +168,130 @@ export function SandboxPoolPage() {
       setLoading(false)
       setRefreshing(false)
     }
+  }, [sandboxIdFilter, sandboxImageFilter, sandboxPageSize, sandboxStatusFilter])
+
+  const refreshImages = useCallback(async () => {
+    const nextImages = await listSandboxImages()
+    const nextCapabilities = nextImages.map(toSandboxImageCapability)
+    setImages(nextCapabilities)
+    return nextCapabilities
   }, [])
 
   useEffect(() => {
-    void load()
+    void load(false, { resetPage: true })
   }, [load])
+
+  async function pollImagePreload(imageId: string) {
+    for (let attempt = 0; attempt < PRELOAD_POLL_MAX_ATTEMPTS; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, PRELOAD_POLL_INTERVAL_MS))
+      try {
+        const nextImages = await refreshImages()
+        const image = nextImages.find((item) => item.id === imageId)
+        if (!image || image.preloadStatus === 'ready' || image.preloadStatus === 'unknown') {
+          return
+        }
+      } catch {
+        return
+      }
+    }
+  }
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setCreating(true)
-    setError('')
-    setNotice('')
+    clearMessages()
 
     try {
+      const selectedImageValue = selectedImage && !selectedImage.default ? selectedImage.image : ''
+      const selectedImageIdForCreate =
+        selectedImage && selectedImage.id !== sandboxImageCapabilities[0]?.id ? selectedImage.id : undefined
       const createdSandbox = await createSandbox({
         sandboxId: createForm.sandboxId.trim(),
-        image: createForm.image.trim(),
+        imageId: selectedImageIdForCreate,
+        image: createForm.image.trim() || selectedImageValue,
         env: parseKeyValueText(createForm.envText, '环境变量'),
         labels: parseKeyValueText(createForm.labelsText, '标签'),
       })
       setNotice(`沙箱 ${createdSandbox.sandboxId} 已提交创建，实例状态会在资源池中持续更新。`)
       setCreateForm(createDefaultForm())
       setShowCreateAdvanced(false)
-      await load(true)
+      await load(true, { resetPage: true })
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '创建沙箱失败'
       setError(message)
     } finally {
       setCreating(false)
     }
+  }
+
+  function handleRegisterCustomImage() {
+    void registerCustomImage()
+  }
+
+  async function registerCustomImage() {
+    const image = customImageForm.image.trim()
+    if (!image) {
+      setError('请先填写自定义镜像地址')
+      return
+    }
+    setRegisteringImage(true)
+    clearMessages()
+    try {
+      const nextImages = await createSandboxImage({
+        name: customImageForm.name.trim() || '自定义 AioSandbox 镜像',
+        image,
+        description: customImageForm.description.trim() || '基于 AioSandbox 基础镜像扩展的自定义运行镜像。',
+        capabilityManifest: CUSTOM_IMAGE_DEFAULT_CAPABILITY_MANIFEST,
+      })
+      const nextCapabilities = nextImages.map(toSandboxImageCapability)
+      const nextImage = nextCapabilities.find((item) => item.image === image)
+      setImages(nextCapabilities)
+      if (nextImage) {
+        setSelectedImageId(nextImage.id)
+        setCreateForm((current) => ({ ...current, image: nextImage.image }))
+      }
+      setCustomImageForm(createDefaultCustomImageForm())
+      clearError()
+        setNotice(`自定义镜像已登记，并已提交 Kubernetes 节点预热。页面会自动刷新预热进度。`)
+        if (nextImage) {
+          void pollImagePreload(nextImage.id)
+        }
+    } catch (currentError) {
+      const message = currentError instanceof Error ? currentError.message : '添加自定义镜像失败'
+      setError(message)
+    } finally {
+      setRegisteringImage(false)
+    }
+  }
+
+  function handleRemoveCustomImage(imageId: string) {
+    setPendingDeleteImageId(imageId)
+  }
+
+  async function removeCustomImage(imageId: string) {
+    setDeletingImageId(imageId)
+    clearMessages()
+    try {
+      const nextImages = await deleteSandboxImage(imageId)
+      setImages(nextImages.map(toSandboxImageCapability))
+      setPendingDeleteImageId('')
+      if (selectedImageId === imageId) {
+        setSelectedImageId(sandboxImageCapabilities[0]?.id ?? '')
+        setCreateForm((current) => ({ ...current, image: '' }))
+      }
+      setNotice('自定义镜像已移除，对应的 K8s 预热任务已删除。')
+    } catch (currentError) {
+      const message = currentError instanceof Error ? currentError.message : '移除自定义镜像失败'
+      setError(message)
+    } finally {
+      setDeletingImageId('')
+    }
+  }
+
+  function handleSelectImage(imageId: string) {
+    const nextImage = images.find((image) => image.id === imageId)
+    setSelectedImageId(imageId)
+    setCreateForm((current) => ({ ...current, image: nextImage?.default ? '' : nextImage?.image ?? '' }))
   }
 
   async function handleDelete(sandboxId: string) {
@@ -904,11 +301,11 @@ export function SandboxPoolPage() {
     }
 
     setDeletingId(sandboxId)
-    setError('')
+    clearError()
     try {
       await deleteSandbox(sandboxId)
       setSandboxes((current) => current.filter((item) => item.sandboxId !== sandboxId))
-      await load(true)
+      await load(true, { continueToken: currentSandboxContinueToken, pageIndex: sandboxPageIndex })
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '删除沙箱失败'
       setError(message)
@@ -931,6 +328,27 @@ export function SandboxPoolPage() {
     }
   }
 
+  function handleNextSandboxPage() {
+    if (!sandboxNextContinueToken) {
+      return
+    }
+    void load(true, { continueToken: sandboxNextContinueToken, pageIndex: sandboxPageIndex + 1 })
+  }
+
+  function handlePreviousSandboxPage() {
+    if (sandboxPageIndex <= 0) {
+      return
+    }
+    const previousPageIndex = sandboxPageIndex - 1
+    void load(true, { continueToken: sandboxPageTokens[previousPageIndex] ?? '', pageIndex: previousPageIndex })
+  }
+
+  function handleResetSandboxFilters() {
+    setSandboxStatusFilter('')
+    setSandboxImageFilter('')
+    setSandboxIdFilter('')
+  }
+
   return (
     <main className="min-h-0 flex-1 overflow-auto p-4 lg:p-6">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5">
@@ -943,7 +361,7 @@ export function SandboxPoolPage() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => void load(true)}
+              onClick={() => void load(true, { continueToken: currentSandboxContinueToken, pageIndex: sandboxPageIndex })}
               disabled={refreshing || loading}
               className="w-fit"
             >
@@ -953,95 +371,262 @@ export function SandboxPoolPage() {
           </div>
         </div>
 
-        {error && (
-          <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          </div>
-        )}
+        <FeedbackToast
+          error={error}
+          notice={notice}
+          onClearError={clearError}
+          onClearNotice={clearNotice}
+        />
 
-        {notice && (
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
-            <div className="flex items-start gap-2">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{notice}</span>
-            </div>
-          </div>
-        )}
+        {pendingDeleteImage ? (
+          <CustomImageDeleteDialog
+            busy={deletingImageId === pendingDeleteImage.id}
+            image={pendingDeleteImage}
+            onCancel={() => {
+              if (!deletingImageId) {
+                setPendingDeleteImageId('')
+              }
+            }}
+            onConfirm={() => void removeCustomImage(pendingDeleteImage.id)}
+          />
+        ) : null}
 
         <HealthPanel health={health} />
 
-        <SandboxImageCatalogPanel
-          images={sandboxImageCapabilities}
-          probeError={probeError}
-          probeResult={probeResult}
-          probing={probing}
-          runningSandboxes={runningSandboxes}
-          selectedImageId={selectedImageId}
-          onSelectImage={setSelectedImageId}
-          onProbe={(sandboxId) => void handleProbePythonPackages(sandboxId)}
-        />
-
-        <CreateSandboxPanel
-          value={createForm}
-          creating={creating}
-          disabled={createDisabled}
-          showAdvanced={showCreateAdvanced}
-          onChange={setCreateForm}
-          onSubmit={handleCreate}
-          onGenerateId={() => setCreateForm((current) => ({ ...current, sandboxId: createSandboxId() }))}
-          onToggleAdvanced={() => setShowCreateAdvanced((current) => !current)}
-        />
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard icon={ShieldCheck} label="运行中沙箱" value={stats.running} tone="emerald" />
-          <StatCard icon={LoaderCircle} label="启动中沙箱" value={stats.pending} tone="blue" />
-          <StatCard icon={AlertTriangle} label="异常沙箱" value={stats.failed} tone="amber" />
-          <StatCard icon={Server} label="承载节点" value={stats.nodes} tone="violet" />
-        </div>
-
-        <section className="rounded-[28px] border border-white/8 bg-slate-950/62 p-5 shadow-[0_24px_80px_rgba(2,6,23,0.24)]">
-          <div className="flex flex-col gap-3 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-white">沙箱实例</h3>
-              <p className="mt-1 text-sm text-slate-400">展示当前资源池内可见的 aio-sandbox Pod、Service 和 Ingress。</p>
+        <section className="rounded-3xl border border-white/8 bg-slate-950/42 p-4">
+          <div className="mb-4">
+            <div className="inline-grid w-full gap-1 rounded-2xl border border-white/8 bg-slate-950/50 p-1 md:w-auto md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('images')}
+                className={cn(
+                  'rounded-xl px-4 py-2.5 text-left transition md:min-w-[220px]',
+                  activeTab === 'images'
+                    ? 'bg-white/[0.09] text-white'
+                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200',
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-200">
+                    <Layers3 className="h-4 w-4" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-semibold">镜像管理</span>
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('sandboxes')}
+                className={cn(
+                  'rounded-xl px-4 py-2.5 text-left transition md:min-w-[220px]',
+                  activeTab === 'sandboxes'
+                    ? 'bg-white/[0.09] text-white'
+                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200',
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-400/10 text-blue-200">
+                    <Server className="h-4 w-4" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-semibold">沙箱实例</span>
+                  </span>
+                </div>
+              </button>
             </div>
-            <Badge className="w-fit rounded-2xl border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-blue-100">
-              共 {sandboxes.length} 个实例
-            </Badge>
           </div>
 
-          {loading ? (
-            <div className="flex min-h-[280px] items-center justify-center">
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-300">
-                <LoaderCircle className="h-4 w-4 animate-spin text-blue-300" />
-                加载沙箱资源池中
+          <div>
+            {activeTab === 'images' ? (
+              <SandboxImageCatalogPanel
+                images={images}
+                customImageForm={customImageForm}
+                registeringImage={registeringImage}
+                probeError={probeError}
+                probeResult={probeResult}
+                probing={probing}
+                runningSandboxes={runningSandboxes}
+                selectedImageId={selectedImageId}
+                onChangeCustomImageForm={setCustomImageForm}
+                onRegisterCustomImage={handleRegisterCustomImage}
+                onRemoveCustomImage={handleRemoveCustomImage}
+                onSelectImage={handleSelectImage}
+                onProbe={(sandboxId) => void handleProbePythonPackages(sandboxId)}
+              />
+            ) : (
+              <div className="space-y-5">
+                <div className="grid gap-5 2xl:grid-cols-[420px_minmax(0,1fr)] 2xl:items-start">
+                  <CreateSandboxPanel
+                    value={createForm}
+                    images={images}
+                    selectedImageId={selectedImageId}
+                    creating={creating}
+                    disabled={createDisabled}
+                    showAdvanced={showCreateAdvanced}
+                    onChange={setCreateForm}
+                    onSelectImage={handleSelectImage}
+                    onSubmit={handleCreate}
+                    onGenerateId={() => setCreateForm((current) => ({ ...current, sandboxId: createSandboxId() }))}
+                    onToggleAdvanced={() => setShowCreateAdvanced((current) => !current)}
+                  />
+
+                  <div className="space-y-5">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <StatCard icon={ShieldCheck} label="本页运行中" value={stats.running} tone="emerald" />
+                      <StatCard icon={LoaderCircle} label="本页启动中" value={stats.pending} tone="blue" />
+                      <StatCard icon={AlertTriangle} label="本页异常" value={stats.failed} tone="amber" />
+                      <StatCard icon={Server} label="本页承载节点" value={stats.nodes} tone="violet" />
+                    </div>
+
+                    <section className="rounded-[28px] border border-white/8 bg-slate-950/62 p-5">
+                      <div className="flex flex-col gap-3 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">沙箱实例</h3>
+                          <p className="mt-1 text-sm text-slate-400">展示当前资源池内可见的 aio-sandbox Pod、Service 和 Ingress。</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className="w-fit rounded-2xl border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-blue-100">
+                            本页 {sandboxes.length} 个实例
+                          </Badge>
+                          {sandboxRemainingItemCount !== null ? (
+                            <Badge className="w-fit rounded-2xl border-slate-400/14 bg-slate-400/8 px-3 py-1.5 text-slate-300">
+                              后续约 {sandboxRemainingItemCount} 个
+                            </Badge>
+                          ) : null}
+                            <SearchableSelect
+                              value={String(sandboxPageSize)}
+                              onChange={(nextValue) => setSandboxPageSize(Number(nextValue))}
+                              className="w-[118px]"
+                              searchPlaceholder="搜索数量"
+                              options={SANDBOX_PAGE_SIZE_OPTIONS.map((pageSize) => ({
+                                value: String(pageSize),
+                                label: `每页 ${pageSize}`,
+                              }))}
+                            />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-4 xl:grid-cols-[160px_220px_minmax(0,1fr)_auto] xl:items-end">
+                        <label className="block">
+                          <span className="text-xs font-medium text-slate-400">状态筛选</span>
+                            <SearchableSelect
+                            value={sandboxStatusFilter}
+                              onChange={(nextValue) => setSandboxStatusFilter(nextValue as SandboxStatus | '')}
+                              className="mt-1.5"
+                              searchPlaceholder="搜索状态"
+                              options={SANDBOX_STATUS_FILTER_OPTIONS.map((item) => ({
+                                value: item.value,
+                                label: item.label,
+                              }))}
+                            />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-medium text-slate-400">镜像筛选</span>
+                            <SearchableSelect
+                            value={sandboxImageFilter}
+                              onChange={setSandboxImageFilter}
+                              className="mt-1.5"
+                              searchPlaceholder="搜索镜像名称或地址"
+                              options={[
+                                { value: '', label: '全部镜像' },
+                                ...images.map((image) => ({
+                                  value: image.id,
+                                  label: image.name,
+                                  description: image.image,
+                                })),
+                              ]}
+                            />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-medium text-slate-400">沙箱 ID 查询</span>
+                          <div className="mt-1.5 flex items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/70 px-3.5">
+                            <Search className="h-4 w-4 shrink-0 text-slate-500" />
+                            <input
+                              value={sandboxIdFilter}
+                              onChange={(event) => setSandboxIdFilter(event.target.value)}
+                              placeholder="精确匹配 sandbox id"
+                              className="h-10 min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-100 outline-none placeholder:text-slate-600"
+                            />
+                          </div>
+                        </label>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={!hasSandboxFilter}
+                          onClick={handleResetSandboxFilters}
+                          className="h-10"
+                        >
+                          重置筛选
+                        </Button>
+                      </div>
+
+                      {loading ? (
+                        <div className="flex min-h-[280px] items-center justify-center">
+                          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-300">
+                            <LoaderCircle className="h-4 w-4 animate-spin text-blue-300" />
+                            加载沙箱资源池中
+                          </div>
+                        </div>
+                      ) : sandboxes.length > 0 ? (
+                        <>
+                          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                            {sandboxes.map((sandbox) => (
+                              <SandboxCard
+                                key={sandbox.sandboxId}
+                                sandbox={sandbox}
+                                deleting={deletingId === sandbox.sandboxId}
+                                onDelete={handleDelete}
+                              />
+                            ))}
+                          </div>
+                          <div className="mt-5 flex flex-col gap-3 border-t border-white/8 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="text-xs text-slate-500">
+                              第 {sandboxPageIndex + 1} 页，当前返回 {sandboxes.length} 个实例
+                              {sandboxRemainingItemCount !== null ? `，后续约 ${sandboxRemainingItemCount} 个` : ''}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={sandboxPageIndex <= 0 || refreshing}
+                                onClick={handlePreviousSandboxPage}
+                              >
+                                上一页
+                              </Button>
+                              <span className="rounded-xl border border-white/8 bg-slate-950/48 px-3 py-1.5 text-xs text-slate-300">
+                                第 {sandboxPageIndex + 1} 页
+                              </span>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={!sandboxNextContinueToken || refreshing}
+                                onClick={handleNextSandboxPage}
+                              >
+                                下一页
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="mt-5 flex min-h-[280px] flex-col items-center justify-center rounded-[24px] border border-dashed border-blue-300/18 bg-blue-400/[0.035] p-8 text-center">
+                          <div className="inline-flex h-14 w-14 items-center justify-center rounded-3xl border border-blue-300/20 bg-blue-400/10 text-blue-200">
+                            <Clock3 className="h-6 w-6" />
+                          </div>
+                          <h4 className="mt-4 text-base font-semibold text-white">暂无沙箱实例</h4>
+                          <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
+                            资源池已连接但当前没有由 `agentic-workflow-studio` 管理的沙箱。选择镜像并创建后会显示在这里。
+                          </p>
+                        </div>
+                      )}
+                    </section>
+                  </div>
+                </div>
               </div>
-            </div>
-          ) : sandboxes.length > 0 ? (
-            <div className="mt-5 grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-              {sandboxes.map((sandbox) => (
-                <SandboxCard
-                  key={sandbox.sandboxId}
-                  sandbox={sandbox}
-                  deleting={deletingId === sandbox.sandboxId}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="mt-5 flex min-h-[280px] flex-col items-center justify-center rounded-[24px] border border-dashed border-blue-300/18 bg-blue-400/[0.035] p-8 text-center">
-              <div className="inline-flex h-14 w-14 items-center justify-center rounded-3xl border border-blue-300/20 bg-blue-400/10 text-blue-200">
-                <Clock3 className="h-6 w-6" />
-              </div>
-              <h4 className="mt-4 text-base font-semibold text-white">暂无沙箱实例</h4>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
-                资源池已连接但当前没有由 `agentic-workflow-studio` 管理的沙箱。运行工作流或调用创建接口后会显示在这里。
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </section>
       </div>
     </main>

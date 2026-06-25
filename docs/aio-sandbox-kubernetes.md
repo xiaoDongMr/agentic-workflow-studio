@@ -1,13 +1,13 @@
-# AIO Sandbox Kubernetes 接入
+# aio-sandbox Kubernetes 接入
 
-本文档说明如何按当前方案接入 `aio-sandbox`：项目后端直接调用 Kubernetes API Server 创建和管理沙箱资源。
+本文档说明如何把 `aio-sandbox` 接入本项目的沙箱资源池。后端通过 Kubernetes API 创建 Pod 和 Service，为工作流代码节点提供隔离运行环境。
 
 ## 适用范围
 
-本文档面向需要把 `aio-sandbox` 接入沙箱资源池的部署者和开发者。当前项目只保留 `kubernetes_api` 接入方式：
+当前项目使用 `kubernetes_api` 接入方式：
 
-- 不需要在集群节点上部署本项目后端。
-- 不需要本地安装或调用 `kubectl`。
+- 不需要把本项目后端部署到 Kubernetes 集群内。
+- 后端运行时不依赖 `kubectl`。
 - 后端通过 Kubernetes Python Client 直接调用 Kubernetes API Server。
 - 沙箱实例由后端创建为 Kubernetes Pod 和 Service。
 
@@ -46,8 +46,22 @@ DELETE /api/sandboxes/{sandbox_id}
 
 - 已有可访问的 Kubernetes 集群。
 - 本地后端机器可以访问 Kubernetes API Server。
-- 集群可以拉取 `aio-sandbox` 镜像。
+- 集群可以拉取所配置的沙箱镜像。
 - 本地后端已安装 Python 依赖中的 `kubernetes` client。
+
+## 镜像选择
+
+项目默认使用官方 `aio-sandbox` 镜像：
+
+```text
+enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+```
+
+如果代码节点需要 Python Playwright 依赖，可以直接使用已发布的公共镜像：
+
+```text
+ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest
+```
 
 ## 集群准备
 
@@ -152,7 +166,7 @@ sandbox_pool:
   provider: kubernetes_api
   kubernetes_api:
     namespace: aio-sandbox
-    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    image: ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest
     service_type: NodePort
     connection:
       kubeconfig: ./kubeconfig.yaml
@@ -178,14 +192,14 @@ curl http://127.0.0.1:8000/api/sandboxes
 
 ## 配置资源池
 
-在 `config.yaml` 中配置：
+在 `config.yaml` 中配置沙箱资源池。`image` 可以替换为任意兼容 `aio-sandbox` 的公共镜像或集群可拉取的私有镜像：
 
 ```yaml
 sandbox_pool:
   provider: kubernetes_api
   kubernetes_api:
     namespace: aio-sandbox
-    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    image: ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest
     image_pull_policy: IfNotPresent
     service_type: NodePort
     cpu_request: 250m
@@ -201,10 +215,12 @@ sandbox_pool:
 字段说明：
 
 - `namespace`：沙箱资源所在命名空间。
-- `image`：`aio-sandbox` 镜像。
+- `image`：沙箱镜像。默认官方镜像可用 `enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest`；需要 Python Playwright 时可用 `ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest`。
 - `service_type`：当前默认推荐 `NodePort`，不需要网关，沙箱 URL 会自动生成为 `http://<node-ip>:<node-port>`。
 - `port`：可选，默认 `8080`，只有 aio-sandbox 镜像监听端口变化时才需要配置。
 - `connection`：本地后端连接 Kubernetes API 的认证配置。
+
+如果使用私有镜像，需要确保 Kubernetes 命名空间中的 Pod 可以拉取该镜像，例如为默认 ServiceAccount 配置 `imagePullSecret`。公共 GHCR 镜像不需要这一步。
 
 ## NodePort 访问地址
 
@@ -243,7 +259,7 @@ sandbox_pool:
   provider: kubernetes_api
   kubernetes_api:
     namespace: aio-sandbox
-    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    image: ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest
     service_type: ClusterIP
     connection:
       kubeconfig: ./kubeconfig.yaml
@@ -278,7 +294,7 @@ sandbox_pool:
   provider: kubernetes_api
   kubernetes_api:
     namespace: aio-sandbox
-    image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    image: ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest
     service_type: ClusterIP
     connection:
       kubeconfig: ./kubeconfig.yaml

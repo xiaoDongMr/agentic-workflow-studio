@@ -110,3 +110,29 @@ class WorkflowEdgeRow(Base):
         Index("idx_workflow_edges_version_target", "workflow_version_id", "target_node_key"),
         Index("idx_workflow_edges_parent", "workflow_version_id", "parent_node_key"),
     )
+
+
+class SandboxImageRow(Base):
+    __tablename__ = "sandbox_images"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    image: Mapped[str] = mapped_column(String(512), nullable=False)
+    digest: Mapped[str] = mapped_column(String(256), default="")
+    source: Mapped[str] = mapped_column(String(32), default="custom")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    description: Mapped[str] = mapped_column(Text, default="")
+    python_version: Mapped[str] = mapped_column(String(64), default="")
+    capability_manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_default: Mapped[bool] = mapped_column(default=False)
+    created_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    updated_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("image", name="uq_sandbox_images_image"),
+        Index("idx_sandbox_images_source_status", "source", "status", "updated_at"),
+        Index("idx_sandbox_images_name", "name"),
+    )

@@ -13,6 +13,10 @@ export interface SandboxImageCapability {
   runtimes: string[]
   capabilities: string[]
   limits: string[]
+  preloadStatus: string
+  preloadReady: number
+  preloadDesired: number
+  preloadMessage: string
 }
 
 export const sandboxImageCapabilities: SandboxImageCapability[] = [
@@ -29,5 +33,9 @@ export const sandboxImageCapabilities: SandboxImageCapability[] = [
     runtimes: ['Python', 'JavaScript/Node.js', 'Jupyter Notebook', 'Code API', 'Browser CDP', '代理预览'],
     capabilities: ['统一文件系统', '命令执行', '代码执行', '浏览器自动化', '端口代理预览', '人类接管调试'],
     limits: ['Python 包清单需从运行中沙箱探测', '额外依赖需通过自定义镜像提供', '终端内手动安装仅对当前沙箱临时生效', '正式运行会固定镜像 digest'],
+    preloadStatus: 'builtin',
+    preloadReady: 0,
+    preloadDesired: 0,
+    preloadMessage: '默认镜像由资源池配置提供，通常已在集群节点缓存',
   },
 ]

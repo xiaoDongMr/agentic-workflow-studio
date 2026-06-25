@@ -17,6 +17,25 @@ DEFAULT_NAMESPACE = "aio-sandbox"
 DEFAULT_PORT = 8080
 MANAGED_BY_LABEL = "agentic-workflow-studio"
 SANDBOX_ID_LABEL = "sandbox.agentic-workflow-studio/id"
+SANDBOX_IMAGE_ID_LABEL = "sandbox.agentic-workflow-studio/image-id"
+SANDBOX_COMPONENT_LABEL = "sandbox"
+IMAGE_CACHE_COMPONENT_LABEL = "sandbox-image-cache"
+
+
+@dataclass(frozen=True)
+class SandboxListResult:
+    items: list[SandboxSummary]
+    continue_token: str = ""
+    remaining_item_count: int | None = None
+
+
+@dataclass(frozen=True)
+class SandboxImagePreloadStatus:
+    name: str = ""
+    status: str = "not_configured"
+    desired: int = 0
+    ready: int = 0
+    message: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,6 +132,7 @@ class KubernetesApiSandboxPool:
         self.settings = KubernetesApiSandboxPoolSettings.from_app_config(app_config)
         api_client = self._build_api_client()
         self.core_api = client.CoreV1Api(api_client)
+        self.apps_api = client.AppsV1Api(api_client)
         self.networking_api = client.NetworkingV1Api(api_client)
         self.version_api = client.VersionApi(api_client)
 
@@ -136,16 +156,43 @@ class KubernetesApiSandboxPool:
             "extra": extra,
         }
 
-    def list(self) -> list[SandboxSummary]:
+    def list(
+        self,
+        *,
+        limit: int | None = None,
+        continue_token: str = "",
+        status: str = "",
+        image_id: str = "",
+        sandbox_id: str = "",
+    ) -> SandboxListResult:
+        label_selector = (
+            f"app.kubernetes.io/managed-by={MANAGED_BY_LABEL},"
+            f"{SANDBOX_ID_LABEL}"
+        )
+        if image_id:
+            label_selector = f"{label_selector},{SANDBOX_IMAGE_ID_LABEL}={image_id}"
+        if sandbox_id:
+            label_selector = f"{label_selector},{SANDBOX_ID_LABEL}={_normalize_name(sandbox_id)}"
+
+        field_selector = f"status.phase={status}" if status else ""
         pods = self.core_api.list_namespaced_pod(
             namespace=self.settings.namespace,
-            label_selector=f"app.kubernetes.io/managed-by={MANAGED_BY_LABEL}",
+            label_selector=label_selector,
+            field_selector=field_selector or None,
+            limit=limit,
+            _continue=continue_token or None,
         )
-        return [
+        items = [
             self._summary_from_pod(item)
             for item in pods.items
             if not (item.metadata and item.metadata.deletion_timestamp)
         ]
+        metadata = pods.metadata or client.V1ListMeta()
+        return SandboxListResult(
+            items=items,
+            continue_token=getattr(metadata, "_continue", "") or "",
+            remaining_item_count=getattr(metadata, "remaining_item_count", None),
+        )
 
     def create(self, request: SandboxCreateRequest) -> SandboxSummary:
         sandbox_id = _normalize_name(request.sandbox_id)
@@ -179,6 +226,56 @@ class KubernetesApiSandboxPool:
             except ApiException as exc:
                 if exc.status != 404:
                     raise
+
+    def preload_image(self, image_id: str, image: str) -> SandboxImagePreloadStatus:
+        image_id = _normalize_name(image_id)
+        daemonset = self._image_preload_daemonset_manifest(image_id, image)
+        try:
+            self.apps_api.patch_namespaced_daemon_set(
+                name=daemonset.metadata.name,
+                namespace=self.settings.namespace,
+                body=daemonset,
+            )
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+            self.apps_api.create_namespaced_daemon_set(namespace=self.settings.namespace, body=daemonset)
+        return self.get_image_preload_status(image_id)
+
+    def get_image_preload_status(self, image_id: str) -> SandboxImagePreloadStatus:
+        image_id = _normalize_name(image_id)
+        name = self._image_preload_daemonset_name(image_id)
+        try:
+            daemonset = self.apps_api.read_namespaced_daemon_set(name=name, namespace=self.settings.namespace)
+        except ApiException as exc:
+            if exc.status == 404:
+                return SandboxImagePreloadStatus(name=name, status="not_configured", message="镜像尚未预热到集群节点")
+            raise
+
+        status = daemonset.status or client.V1DaemonSetStatus()
+        desired = int(status.desired_number_scheduled or 0)
+        ready = int(status.number_ready or 0)
+        if desired == 0:
+            preload_status = "pending"
+            message = "等待 Kubernetes 调度镜像预热任务"
+        elif ready >= desired:
+            preload_status = "ready"
+            message = "镜像已预热到当前可调度节点"
+        else:
+            preload_status = "warming"
+            message = f"镜像预热中：{ready}/{desired} 个节点就绪"
+        return SandboxImagePreloadStatus(name=name, status=preload_status, desired=desired, ready=ready, message=message)
+
+    def delete_image_preload(self, image_id: str) -> None:
+        image_id = _normalize_name(image_id)
+        try:
+            self.apps_api.delete_namespaced_daemon_set(
+                name=self._image_preload_daemonset_name(image_id),
+                namespace=self.settings.namespace,
+            )
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
 
     def _build_api_client(self) -> ApiClient:
         connection = self.settings.connection
@@ -257,6 +354,42 @@ class KubernetesApiSandboxPool:
             ),
         )
 
+    def _image_preload_daemonset_manifest(self, image_id: str, image: str) -> client.V1DaemonSet:
+        labels = {
+            "app.kubernetes.io/name": "aio-sandbox-image-cache",
+            "app.kubernetes.io/managed-by": MANAGED_BY_LABEL,
+            "app.kubernetes.io/component": IMAGE_CACHE_COMPONENT_LABEL,
+            SANDBOX_IMAGE_ID_LABEL: image_id,
+        }
+        return client.V1DaemonSet(
+            metadata=client.V1ObjectMeta(
+                name=self._image_preload_daemonset_name(image_id),
+                namespace=self.settings.namespace,
+                labels=labels,
+            ),
+            spec=client.V1DaemonSetSpec(
+                selector=client.V1LabelSelector(match_labels=labels),
+                template=client.V1PodTemplateSpec(
+                    metadata=client.V1ObjectMeta(labels=labels),
+                    spec=client.V1PodSpec(
+                        tolerations=[client.V1Toleration(operator="Exists")],
+                        containers=[
+                            client.V1Container(
+                                name="image-cache",
+                                image=image,
+                                image_pull_policy="IfNotPresent",
+                                command=["/bin/sh", "-c", "trap : TERM INT; sleep infinity & wait"],
+                                resources=client.V1ResourceRequirements(
+                                    requests={"cpu": "10m", "memory": "32Mi"},
+                                    limits={"cpu": "100m", "memory": "128Mi"},
+                                ),
+                            )
+                        ],
+                    ),
+                ),
+            ),
+        )
+
     def _ingress_manifest(self, sandbox_id: str) -> client.V1Ingress:
         path = self._gateway_ingress_path(sandbox_id)
         path_type = "ImplementationSpecific" if self._is_path_gateway() else "Prefix"
@@ -305,11 +438,15 @@ class KubernetesApiSandboxPool:
         spec = pod.spec or client.V1PodSpec(containers=[])
         labels = metadata.labels or {}
         sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
+        containers = spec.containers or []
+        image = containers[0].image if containers else ""
         node_name = spec.node_name or ""
         return SandboxSummary(
             sandbox_id=sandbox_id,
             sandbox_url=self._sandbox_url(sandbox_id, node_name),
             status=getattr(status, "phase", "Unknown") or "Unknown",
+            image_id=labels.get(SANDBOX_IMAGE_ID_LABEL, ""),
+            image=image or "",
             pod_name=metadata.name or "",
             service_name=self._service_name(sandbox_id) if sandbox_id else "",
             ingress_name=self._ingress_name(sandbox_id) if sandbox_id and self.settings.gateway.enabled else "",
@@ -398,6 +535,7 @@ class KubernetesApiSandboxPool:
             **labels,
             "app.kubernetes.io/name": "aio-sandbox",
             "app.kubernetes.io/managed-by": MANAGED_BY_LABEL,
+            "app.kubernetes.io/component": SANDBOX_COMPONENT_LABEL,
             SANDBOX_ID_LABEL: sandbox_id,
         }
 
@@ -409,6 +547,9 @@ class KubernetesApiSandboxPool:
 
     def _ingress_name(self, sandbox_id: str) -> str:
         return f"aio-sandbox-{sandbox_id}"
+
+    def _image_preload_daemonset_name(self, image_id: str) -> str:
+        return f"aio-sandbox-image-cache-{image_id[:32]}".strip("-")
 
     def _connection_health(self) -> dict[str, Any]:
         connection = self.settings.connection

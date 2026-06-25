@@ -24,6 +24,9 @@ agentic-workflow-studio/
     src/features/               # 工作流与沙箱资源池页面
   docs/
     aio-sandbox-kubernetes.md   # aio-sandbox Kubernetes 接入说明
+    ghcr-aio-sandbox-browser-python.md # GHCR 自定义沙箱镜像构建说明
+  docker/
+    aio-sandbox-browser-python.Dockerfile # aio-sandbox Python 浏览器自动化基础镜像
   config.example.yaml            # 后端配置示例
   kubeconfig.example.yaml        # kubeconfig 示例，不含真实凭证
   config.yaml                   # 后端配置
@@ -90,6 +93,8 @@ sandbox_pool:
 可参考 `kubeconfig.example.yaml` 创建本地运行用的 `kubeconfig.yaml`。真实 kubeconfig、token 和证书不要提交到仓库。
 
 更多配置模式，包括 `NodePort`、`ClusterIP`、`ClusterIP + Gateway/Ingress`、RBAC 和排障说明，见 [aio-sandbox Kubernetes 接入文档](docs/aio-sandbox-kubernetes.md)。
+
+如果需要 Python Playwright 依赖，可以使用公共镜像 `ghcr.io/xiaodongmr/aio-sandbox-browser-python:latest`，或参考 [GHCR aio-sandbox Playwright 镜像](docs/ghcr-aio-sandbox-browser-python.md) 发布新版本。
 
 ## 常用接口
 

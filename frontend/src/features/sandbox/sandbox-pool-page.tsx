@@ -33,7 +33,6 @@ import { HealthPanel } from '@/features/sandbox/components/health-panel'
 import { SandboxCard } from '@/features/sandbox/components/sandbox-card'
 import { SandboxImageCatalogPanel } from '@/features/sandbox/components/sandbox-image-catalog-panel'
 import { SearchableSelect } from '@/features/sandbox/components/searchable-select'
-import { StatCard } from '@/features/sandbox/components/stat-card'
 import { useTimedMessages } from '@/features/sandbox/hooks/use-timed-messages'
 import {
   sandboxImageCapabilities,
@@ -456,36 +455,43 @@ export function SandboxPoolPage() {
               />
             ) : (
               <div className="space-y-5">
-                <div className="grid gap-5 2xl:grid-cols-[420px_minmax(0,1fr)] 2xl:items-start">
-                  <CreateSandboxPanel
-                    value={createForm}
-                    images={images}
-                    selectedImageId={selectedImageId}
-                    creating={creating}
-                    disabled={createDisabled}
-                    showAdvanced={showCreateAdvanced}
-                    onChange={setCreateForm}
-                    onSelectImage={handleSelectImage}
-                    onSubmit={handleCreate}
-                    onGenerateId={() => setCreateForm((current) => ({ ...current, sandboxId: createSandboxId() }))}
-                    onToggleAdvanced={() => setShowCreateAdvanced((current) => !current)}
-                  />
+                <CreateSandboxPanel
+                  value={createForm}
+                  images={images}
+                  selectedImageId={selectedImageId}
+                  creating={creating}
+                  disabled={createDisabled}
+                  showAdvanced={showCreateAdvanced}
+                  onChange={setCreateForm}
+                  onSelectImage={handleSelectImage}
+                  onSubmit={handleCreate}
+                  onGenerateId={() => setCreateForm((current) => ({ ...current, sandboxId: createSandboxId() }))}
+                  onToggleAdvanced={() => setShowCreateAdvanced((current) => !current)}
+                />
 
-                  <div className="space-y-5">
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <StatCard icon={ShieldCheck} label="本页运行中" value={stats.running} tone="emerald" />
-                      <StatCard icon={LoaderCircle} label="本页启动中" value={stats.pending} tone="blue" />
-                      <StatCard icon={AlertTriangle} label="本页异常" value={stats.failed} tone="amber" />
-                      <StatCard icon={Server} label="本页承载节点" value={stats.nodes} tone="violet" />
-                    </div>
-
-                    <section className="rounded-[28px] border border-white/8 bg-slate-950/62 p-5">
+                <section className="rounded-[28px] border border-white/8 bg-slate-950/62 p-5">
                       <div className="flex flex-col gap-3 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
                           <h3 className="text-lg font-semibold text-white">沙箱实例</h3>
                           <p className="mt-1 text-sm text-slate-400">展示当前资源池内可见的 aio-sandbox Pod、Service 和 Ingress。</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
+                          <Badge className="w-fit gap-1.5 rounded-2xl border-emerald-400/18 bg-emerald-400/10 px-3 py-1.5 text-emerald-100">
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            运行 {stats.running}
+                          </Badge>
+                          <Badge className="w-fit gap-1.5 rounded-2xl border-blue-400/18 bg-blue-400/10 px-3 py-1.5 text-blue-100">
+                            <LoaderCircle className="h-3.5 w-3.5" />
+                            启动 {stats.pending}
+                          </Badge>
+                          <Badge className="w-fit gap-1.5 rounded-2xl border-amber-400/18 bg-amber-400/10 px-3 py-1.5 text-amber-100">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            异常 {stats.failed}
+                          </Badge>
+                          <Badge className="w-fit gap-1.5 rounded-2xl border-violet-400/18 bg-violet-400/10 px-3 py-1.5 text-violet-100">
+                            <Server className="h-3.5 w-3.5" />
+                            节点 {stats.nodes}
+                          </Badge>
                           <Badge className="w-fit rounded-2xl border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-blue-100">
                             本页 {sandboxes.length} 个实例
                           </Badge>
@@ -570,7 +576,7 @@ export function SandboxPoolPage() {
                         </div>
                       ) : sandboxes.length > 0 ? (
                         <>
-                          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                          <div className="mt-5 grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                             {sandboxes.map((sandbox) => (
                               <SandboxCard
                                 key={sandbox.sandboxId}
@@ -622,8 +628,6 @@ export function SandboxPoolPage() {
                         </div>
                       )}
                     </section>
-                  </div>
-                </div>
               </div>
             )}
           </div>

@@ -34,56 +34,61 @@ export function CreateSandboxPanel({
   onGenerateId: () => void
   onToggleAdvanced: () => void
 }) {
-  const customImages = images.filter((image) => image.source === 'custom' && !image.default)
-  const selectedImage = customImages.find((image) => image.id === selectedImageId) ?? customImages[0]
+  const selectedImage = images.find((image) => image.id === selectedImageId) ?? images[0]
 
   return (
-    <section className="rounded-3xl border border-white/8 bg-white/[0.035] p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-base font-semibold text-white">创建沙箱</h3>
-          <p className="mt-1 text-sm text-slate-500">基于选中的运行镜像创建一个 AioSandbox 实例。</p>
-        </div>
-        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-blue-300/18 bg-blue-400/10 text-blue-200">
-          <Plus className="h-4 w-4" />
-        </span>
-      </div>
-
-      <form onSubmit={onSubmit} className="mt-5 space-y-4">
-        <label className="block">
-          <span className="text-xs font-medium text-slate-400">运行镜像</span>
-          <SearchableSelect
-            value={selectedImageId}
-            onChange={(imageId) => {
-              const nextImage = images.find((item) => item.id === imageId)
-              onSelectImage(imageId)
-              onChange({ ...value, image: nextImage?.default ? '' : nextImage?.image ?? '' })
-            }}
-            disabled={disabled || creating}
-            className="mt-1.5"
-            searchPlaceholder="搜索镜像名称或地址"
-            options={images.map((image) => ({
-              value: image.id,
-              label: `${image.name} ${image.default ? '(默认)' : image.source === 'custom' ? '(自定义)' : ''}`,
-              description: image.image,
-            }))}
-          />
-        </label>
-
-        <div className="rounded-2xl border border-white/8 bg-slate-950/42 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-100">{selectedImage?.name ?? '资源池默认镜像'}</div>
-              <div className="mt-1 break-all font-mono text-xs text-slate-500">{selectedImage?.image ?? '-'}</div>
-            </div>
-            <Badge className="shrink-0 rounded-xl border-blue-300/18 bg-blue-400/10 px-2.5 py-1 text-blue-100">
-              {selectedImage?.default ? '默认' : '自定义'}
-            </Badge>
+    <section className="rounded-[28px] border border-blue-300/12 bg-[linear-gradient(135deg,rgba(59,130,246,0.10),rgba(15,23,42,0.68)_42%,rgba(2,6,23,0.78))] p-4 shadow-[0_18px_54px_rgba(2,6,23,0.22)]">
+      <div className="flex flex-col gap-2 border-b border-white/8 pb-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-blue-300/18 bg-blue-400/10 text-blue-200">
+            <Plus className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-white">快速创建沙箱</h3>
+            <p className="mt-1 truncate text-sm text-slate-500">选择镜像、确认 ID 后提交，实例会进入下方列表。</p>
           </div>
         </div>
+        <Badge className="w-fit rounded-2xl border-blue-300/18 bg-blue-400/10 px-3 py-1.5 text-blue-100">
+          AioSandbox
+        </Badge>
+      </div>
 
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-          <label className="block">
+      <form onSubmit={onSubmit} className="mt-4 space-y-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.35fr)_minmax(260px,0.85fr)_auto] xl:items-end">
+          <div className="min-w-0">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">运行镜像</span>
+              <SearchableSelect
+                value={selectedImageId}
+                onChange={(imageId) => {
+                  const nextImage = images.find((item) => item.id === imageId)
+                  onSelectImage(imageId)
+                  onChange({ ...value, image: nextImage?.default ? '' : nextImage?.image ?? '' })
+                }}
+                disabled={disabled || creating}
+                className="mt-1.5"
+                searchPlaceholder="搜索镜像名称或地址"
+                options={images.map((image) => ({
+                  value: image.id,
+                  label: `${image.name} ${image.default ? '(默认)' : image.source === 'custom' ? '(自定义)' : ''}`,
+                  description: image.image,
+                }))}
+              />
+            </label>
+
+            <div className="mt-2 flex min-w-0 items-center gap-2 rounded-2xl border border-white/8 bg-slate-950/30 px-3 py-2">
+              <div className="min-w-0 flex-1 truncate">
+                <span className="text-xs font-medium text-slate-300">{selectedImage?.name ?? '资源池默认镜像'}</span>
+                <span className="mx-2 text-slate-600">/</span>
+                <span className="font-mono text-xs text-slate-500">{selectedImage?.image ?? '-'}</span>
+              </div>
+              <Badge className="shrink-0 rounded-xl border-blue-300/18 bg-blue-400/10 px-2.5 py-1 text-blue-100">
+                {selectedImage?.default ? '默认' : '自定义'}
+              </Badge>
+            </div>
+          </div>
+
+          <label className="block min-w-0">
             <span className="text-xs font-medium text-slate-400">沙箱 ID</span>
             <input
               value={value.sandboxId}
@@ -95,27 +100,21 @@ export function CreateSandboxPanel({
               )}
             />
           </label>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onGenerateId}
-            disabled={disabled || creating}
-            className="h-10 w-full md:w-auto"
-          >
-            <Sparkles className="mr-2 h-4 w-4" />
-            重生成
-          </Button>
-        </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Button type="button" variant="secondary" onClick={onToggleAdvanced} disabled={disabled || creating} className="shrink-0">
-            <SlidersHorizontal className="mr-2 h-4 w-4" />
-            {showAdvanced ? '收起高级配置' : '高级配置'}
-          </Button>
-          <Button type="submit" disabled={disabled || creating || !value.sandboxId.trim()} className="h-10 shrink-0">
-            {creating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-            {creating ? '创建中' : '创建沙箱'}
-          </Button>
+          <div className="grid gap-2 sm:grid-cols-3 xl:w-[300px]">
+            <Button type="button" variant="secondary" onClick={onGenerateId} disabled={disabled || creating} className="h-10">
+              <Sparkles className="mr-2 h-4 w-4" />
+              生成
+            </Button>
+            <Button type="button" variant="secondary" onClick={onToggleAdvanced} disabled={disabled || creating} className="h-10">
+              <SlidersHorizontal className="mr-2 h-4 w-4" />
+              {showAdvanced ? '收起' : '高级'}
+            </Button>
+            <Button type="submit" disabled={disabled || creating || !value.sandboxId.trim()} className="h-10 shadow-[0_10px_30px_rgba(37,99,235,0.28)]">
+              {creating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+              {creating ? '创建中' : '创建'}
+            </Button>
+          </div>
         </div>
 
         {showAdvanced ? (

@@ -1,10 +1,22 @@
 # 工作流编码节点与沙箱设计
 
-## 设计原则
+## 目标
 
-编码节点的代码和运行配置应该保存在 workflow 的代码资产中，沙箱只作为临时编辑、调试和运行环境。
+沙箱是工作流的临时调试环境，用于编码节点的代码调试、文件查看、终端操作和全局调试。沙箱不作为 workflow 的长期数据源，workflow 必须能从代码资产和运行镜像恢复。
 
-不要把某个沙箱当成 workflow 的长期数据源。沙箱可以被销毁、重建或替换，workflow 仍然应该能从代码资产和运行镜像恢复。
+当前阶段暂不接入 AI 助手触发，先完成编码节点、手动关联、单节点调试和全局调试链路。
+
+## 核心原则
+
+1. 编码节点代码编辑复用沙箱的 code 能力，用户在沙箱 code 中编辑、保存、运行。
+2. 编码节点代码、入口文件、输出配置最终需要同步保存到服务端代码资产中。
+3. 沙箱关联粒度是 `workflowId + workflowVersionId`，同一个 workflow 的不同版本可以有不同调试沙箱关系。
+4. 只要 workflow 已经保存过并拥有稳定 `workflowId` 和基准版本，就允许关联 `SandboxSession`。
+5. 未保存变更不阻塞沙箱关联；未保存变更继续使用当前基准版本的 session，并让代码保存状态变为 `dirty`。
+6. 普通打开 workflow 不强制创建真实沙箱，但用户可以手动创建或关联沙箱。
+7. 创建编码节点后，应引导用户关联已有沙箱或创建新沙箱，因为代码需要写入沙箱。
+8. 单节点调试和全局调试只检查沙箱是否已绑定、状态是否正常；异常时提醒替换或重建。
+9. 镜像选择、沙箱创建、沙箱状态展示、沙箱 code 编辑入口应复用同一套组件。
 
 ## 核心对象
 
@@ -12,127 +24,102 @@
 Workflow
   工作流草稿、版本和运行快照。
 
+WorkflowVersion
+  workflow 的保存版本，是调试沙箱关联的版本维度。
+
 CodeArtifact
-  编码节点的代码文件、入口文件、输出配置等。
+  服务端保存的编码节点代码资产，包含代码文件、入口文件、输出配置、代码签名。
 
 CodeVersion
-  CodeArtifact 的历史版本，可回退某个历史版本为当前版本。
+  CodeArtifact 的历史版本，用于审计和回退。
 
 SandboxSession
-  当前用户编辑某个 workflow 时的临时沙箱会话。
+  workflow 某个版本的调试沙箱会话，保存当前关联、镜像、code 保存状态和 TTL 信息。
 
 AioSandbox
-  实际执行代码的沙箱实例，由基础镜像或自定义镜像创建。
+  实际执行代码的沙箱实例。
 
 RuntimeImage
-  AioSandbox 镜像。标准镜像包含常用工具和依赖，额外依赖通过自定义镜像解决。
+  AioSandbox 镜像，包含镜像 id、地址、digest、能力清单和预热状态。
 ```
 
-## 什么时候关联沙箱
+## 关联沙箱
 
-打开或新建 workflow 时，只关联 `SandboxSession`，不立即创建真实沙箱。
-
-步骤：
-
-1. 用户新建或打开 workflow。
-2. 前端加载 workflow 草稿和编码节点代码资产。
-3. 前端请求当前 workflow 的 `SandboxSession`。
-4. 后端返回已有 session，或者创建一个新的 session 记录。
-5. 页面展示当前沙箱状态：未启动、已就绪、待同步、已过期等。
-
-此时只是建立“当前 workflow 编辑会话可能使用哪个沙箱”的关系，不启动 AioSandbox。
-
-## 什么时候创建沙箱
-
-只有用户触发需要真实文件系统或命令执行的能力时，才创建或复用 AioSandbox。
+关联的是某个 `workflowId + workflowVersionId` 下的 `SandboxSession`，不是立即创建真实 AioSandbox。
 
 触发场景：
 
-1. 用户点击编码节点“单节点调试”。
-2. 用户点击“打开沙箱终端”或“查看沙箱文件”。
-3. AI 助手需要读写文件、执行命令、运行测试或验证代码。
-4. 全局调试执行到编码节点，并且选择使用编辑沙箱。
-5. 用户手动点击“创建沙箱”。
+1. 进入已保存 workflow 版本后，加载或创建对应版本的 `SandboxSession` 记录。
+2. 用户可在画布顶部手动关联已有沙箱，或创建新沙箱。
+3. 创建编码节点后，如果当前 workflow 已保存过，则展示“关联已有沙箱 / 创建新沙箱”入口。
+4. 用户在编码节点面板点击“打开代码”时，如果没有可用沙箱，则先引导关联或创建。
 
-普通打开 workflow、编辑节点配置、调整画布、查看历史版本，不创建沙箱。
+规则：
 
-## 什么时候同步代码到沙箱
+1. 新建 workflow 尚未保存、没有稳定 `workflowId` 和基准版本时，提示先保存一次。
+2. 已保存过的 workflow 即使有未保存变更，也可以基于当前打开的版本关联或创建沙箱。
+3. 关联 session 时记录 `workflowId`、`workflowVersionId`、`imageId`、`imageDigest`、`idleTtlSeconds`、`status`。
+4. session 可以处于 `not_started`、`pending`、`ready`、`dirty`、`expired`、`failed` 状态，其中 `dirty` 表示沙箱 code 有未保存到服务端的改动。
+5. 用户恢复历史版本时，应切换到该历史版本对应的 session；没有则新建 session。
+6. 用户保存当前草稿生成新版本时，当前调试 session 应迁移到新 `workflowVersionId`，并按代码保存结果更新状态。
 
-同步发生在“即将使用沙箱”之前，而不是每次打开 workflow 或每次编辑代码时。
+## 创建沙箱
 
-同步步骤：
+进入工作流后不强制创建 AioSandbox，但用户可以主动创建。创建编码节点后也应提供创建入口，因为代码编辑依赖沙箱 code 能力。
 
-1. 后端检查当前 `CodeArtifact` 的代码签名。
-2. 后端检查 `SandboxSession` 上一次同步的代码签名。
-3. 如果签名一致，直接使用沙箱。
-4. 如果签名不一致，先把编码节点代码同步到沙箱。
-5. 同步成功后更新 `lastSyncedCodeSignature`。
-6. 沙箱状态变为 `ready`。
+触发场景：
 
-触发同步的场景：
+1. 用户在画布顶部手动点击“创建沙箱”。
+2. 用户创建编码节点后选择“创建新沙箱”。
+3. 用户打开编码节点的沙箱 code 编辑器，但当前没有可用沙箱。
+4. 用户打开沙箱终端或文件视图，但当前没有可用沙箱。
 
-1. 首次创建沙箱后。
-2. 单节点调试开始前。
-3. AI 助手调用文件或命令工具前。
-4. 全局调试执行到编码节点前。
-5. 用户手动点击“同步到沙箱”。
+创建流程：
 
-## 页面编辑代码时怎么处理
+1. 确认 workflow 已有稳定 `workflowId` 和当前基准 `workflowVersionId`。
+2. 获取或创建 `SandboxSession`。
+3. 用户选择 `RuntimeImage` 和 TTL。
+4. 后端创建 AioSandbox，并打上 workflow/session labels。
+5. 后端更新 session 的 `sandboxId`、状态、镜像 digest 和过期时间。
+6. 首次创建成功后，如果服务端已有 `CodeArtifact`，则初始化到沙箱 code 工作区。
 
-用户在页面中编辑编码节点代码时，先更新 workflow 草稿和 `CodeArtifact`。
+建议 labels：
 
-步骤：
+```text
+purpose=workflow-debug
+workflow_id=<workflowId>
+workflow_version_id=<workflowVersionId>
+sandbox_session_id=<sessionId>
+```
 
-1. 用户修改代码。
-2. 前端保存到 workflow 草稿或代码资产。
-3. 后端生成新的代码签名。
-4. 如果当前没有沙箱，不创建沙箱。
-5. 如果当前已有沙箱，把 session 标记为 `dirty`。
-6. 下次调试、AI 执行工具或用户手动同步时，再把最新代码同步到沙箱。
+## 编码节点代码编辑
 
-这样可以避免每次输入都触发文件同步。
+编码节点的代码展示和编辑应复用沙箱 code 能力，不单独再实现一套代码编辑器。
 
-## 代码版本怎么处理
+交互流程：
 
-编码节点代码需要有独立版本。每次保存代码资产时，生成一个新的 `CodeVersion`。
+1. 用户创建编码节点。
+2. 节点面板展示“关联沙箱 / 创建沙箱 / 打开代码”状态区。
+3. 如果已有可用沙箱，用户点击“打开代码”进入沙箱 code。
+4. 如果没有可用沙箱，先引导用户关联已有沙箱或创建新沙箱。
+5. 用户在沙箱 code 中编辑代码、入口文件和必要配置。
+6. 用户点击保存后，前端或后端从沙箱 code 工作区读取最新代码。
+7. 服务端更新 `CodeArtifact`，生成新的代码签名和 `CodeVersion`。
+8. `SandboxSession.lastSavedCodeSignature` 更新为最新签名，状态变为 `ready`。
 
-步骤：
+保存规则：
 
-1. 用户保存编码节点代码。
-2. 后端生成新的 `CodeVersion`。
-3. `CodeArtifact.currentVersionId` 指向最新版本。
-4. 页面展示代码版本历史。
-5. 用户可以选择某个历史版本并点击“恢复为当前版本”。
-6. 后端把 `currentVersionId` 指向该历史版本，或者基于该历史版本生成一个新的当前版本。
-7. 当前 workflow 草稿更新为恢复后的代码。
-8. 如果当前已有沙箱，把 `SandboxSession` 标记为 `dirty`。
-9. 下次调试、AI 执行工具或用户手动同步时，再把恢复后的代码同步到沙箱。
+1. 沙箱 code 中的改动默认是临时改动，只有点击保存后才写回服务端。
+2. 离开编码节点、关闭 code 视图或切换 workflow 时，如果有未保存代码改动，需要提示保存或丢弃。
+3. 如果沙箱异常、过期或被释放，未保存代码需要提示风险；已保存代码以服务端 `CodeArtifact` 为准。
+4. 恢复历史版本时，沙箱 code 工作区应从该版本的 `CodeArtifact` 初始化。
+5. 保存当前 workflow 生成新版本后，当前沙箱 code 保存结果应归属到新的 `workflowVersionId`。
 
-建议采用“基于历史版本生成新当前版本”的方式。这样版本历史是线性的，不会因为回退操作丢失审计信息。
 
-## AI 助手修改代码时怎么处理
 
-AI 助手写入沙箱的内容不能直接作为最终代码。
+## TTL 与回收
 
-步骤：
-
-1. AI 助手需要改代码时，先获取或创建当前 workflow 的沙箱。
-2. 后端确保沙箱中的代码与 `CodeArtifact` 一致。
-3. AI 通过工具在沙箱中修改文件。
-4. 后端生成 diff。
-5. 前端展示待应用变更。
-6. 用户确认后，把 diff 回写到 `CodeArtifact` 和 workflow 草稿。
-7. 用户丢弃后，从 `CodeArtifact` 重新同步覆盖沙箱中的临时修改。
-
-默认不建议 AI 静默修改 workflow 草稿。
-
-## 什么时候销毁沙箱
-
-沙箱不是 workflow 的长期资源，应该按会话和 TTL 管理。
-
-TTL 不是从创建时间开始的固定倒计时，而是基于 `lastUsedAt` 的空闲回收时间。只有沙箱发生明确使用行为时才刷新过期时间。
-
-超时释放时间可以配置，但最长不超过 7 天。用户或系统设置超过 7 天时，后端应按 7 天截断。
+TTL 使用空闲回收模型，不使用创建时间固定倒计时。
 
 建议字段：
 
@@ -144,147 +131,123 @@ activeRunCount
 status
 ```
 
-刷新过期时间的场景：
+规则：
 
-1. 创建沙箱。
-2. 同步代码到沙箱。
-3. 用户打开沙箱终端或文件视图。
-4. 用户点击单节点调试。
-5. 全局调试使用编辑沙箱。
-6. AI 助手调用文件、命令或测试工具。
+1. `idleTtlSeconds` 默认 30-60 分钟，可配置，最长不超过 7 天。
+2. 创建沙箱、打开 code、保存代码、打开终端、查看文件、单节点调试、全局调试都会刷新 `lastUsedAt` 和 `expiresAt`。
+3. 调试或终端命令开始时增加 `activeRunCount`，结束时减少。
+4. 回收任务只释放 `activeRunCount = 0` 且 `expiresAt < now` 的沙箱。
+5. 沙箱释放后保留 `SandboxSession`，状态改为 `expired`。
 
-刷新方式：
-
-1. 操作开始时刷新 `lastUsedAt` 和 `expiresAt`。
-2. 调试、AI 工具调用、终端命令开始时，后端增加 `activeRunCount`。
-3. 调试、AI 工具调用、终端命令结束时，后端减少 `activeRunCount`，并再次刷新 `lastUsedAt` 和 `expiresAt`。
-4. 回收任务只销毁 `activeRunCount = 0` 且 `expiresAt < now` 的沙箱。
-
-`expiresAt` 计算方式：
+计算方式：
 
 ```text
 effectiveTtl = min(configuredIdleTtl, 7 days)
 expiresAt = now + effectiveTtl
 ```
 
-销毁场景：
-
-1. 用户手动点击“释放沙箱”。
-2. 用户切换 workflow，且资源池需要回收。
-3. 沙箱空闲超过 TTL，默认可以是 30-60 分钟，用户可配置，最长 7 天。
-4. workflow 的运行镜像发生变化，需要重建沙箱。
-5. 沙箱异常或健康检查失败。
-6. 服务重启或资源池回收。
-
-沙箱销毁后，`SandboxSession` 可以保留为 `expired` 状态。下次需要执行时，系统重新创建沙箱并从 `CodeArtifact` 同步代码。
-
-如果用户正在调试、AI 正在执行工具、终端命令还在运行，即使超过 `expiresAt` 也不能销毁。此时应等待 `activeRunCount` 归零，或者超过一个更长的最大运行时间后再按异常任务处理。
-
-## 什么时候重建沙箱
-
-重建沙箱通常发生在运行环境变化或沙箱不可用时。
+## 重建沙箱
 
 重建场景：
 
-1. 用户切换 AioSandbox 镜像。
+1. 用户切换 RuntimeImage。
 2. 用户选择自定义镜像。
-3. 当前沙箱状态异常。
-4. 当前沙箱已过期。
+3. 当前沙箱过期。
+4. 当前沙箱异常或健康检查失败。
 5. 用户手动点击“重建沙箱”。
 
-重建步骤：
+重建流程：
 
 1. 标记旧沙箱不可用。
-2. 删除或释放旧沙箱。
-3. 使用当前 workflow 的 `RuntimeImage` 创建新沙箱。
-4. 同步当前 `CodeArtifact`。
-5. 更新 `SandboxSession` 的 sandbox id、镜像 digest 和同步签名。
+2. 释放旧沙箱资源。
+3. 使用当前 session 的 RuntimeImage 创建新沙箱。
+4. 从服务端 `CodeArtifact` 初始化沙箱 code 工作区。
+5. 更新 session 的 `sandboxId`、镜像 digest、代码签名和过期时间。
 
-## Python 依赖怎么处理
+## 镜像与依赖
 
-当前沙箱是 AioSandbox。标准镜像已经包含常用工具和依赖。
+Python 依赖不建议在 workflow 正式运行时动态安装。额外依赖优先通过自定义 AioSandbox 镜像解决。
 
-额外 Python 依赖不建议在 workflow 运行时动态安装。推荐使用自定义 AioSandbox 镜像。
+规则：
 
-步骤：
+1. 页面展示当前 RuntimeImage 的名称、地址、digest、Python 版本和能力清单。
+2. 创建或重建沙箱时必须选择镜像。
+3. 用户可选择已有自定义镜像，或从沙箱资源池登记新镜像。
+4. 切换镜像后当前沙箱标记为需要重建。
+5. 调试和正式运行应使用同一个镜像 digest。
+6. 用户在终端里临时 `pip install` 只视为调试行为，不写回正式运行环境。
 
-1. 页面展示当前 workflow 使用的 AioSandbox 镜像。
-2. 页面展示镜像能力清单，例如 Python 版本、内置工具、常用 Python 包、网络能力、文件能力。
-3. 如果缺少依赖，用户选择已有自定义镜像，或创建新的自定义镜像。
-4. 自定义镜像提前安装额外依赖。
-5. workflow 或编码节点绑定新的 `RuntimeImage`。
-6. 当前编辑沙箱标记为需要重建。
-7. 调试和正式运行都使用同一个镜像 digest。
+## 前端交互
 
-如果用户在沙箱终端里手动执行 `pip install`，只视为临时调试行为，不进入正式运行环境。
+画布顶部增加“调试沙箱”入口。
 
-## 页面需要展示什么
+展示信息：
 
-workflow 编辑器顶部建议展示“当前沙箱”入口。
+1. session 状态：未启动、创建中、就绪、有未保存代码、已过期、失败。
+2. sandbox id 和访问地址。
+3. RuntimeImage 名称、digest、Python 版本和能力清单。
+4. TTL 剩余时间、最近使用时间、最近保存时间。
+5. 操作：创建、关联、打开 code、保存代码、重建、释放、打开终端、查看文件、切换镜像。
 
-展示内容：
+编码节点面板展示：
 
-1. 当前 `SandboxSession` 状态。
-2. 当前真实 sandbox id；未创建时显示“未启动”。
-3. 当前 AioSandbox 镜像名和 digest。
-4. Python 版本。
-5. 沙箱能力清单。
-6. 代码同步状态。
-7. 最近同步时间。
-8. 操作入口：创建沙箱、同步代码、重建沙箱、释放沙箱、打开终端、查看文件、切换镜像。
+1. 当前沙箱绑定状态。
+2. 当前沙箱健康状态和 TTL。
+3. 当前 RuntimeImage。
+4. “关联沙箱 / 创建沙箱 / 替换沙箱”操作。
+5. “打开沙箱 code”入口。
+6. 代码保存状态：未保存、保存中、已保存、保存失败。
+7. 入口文件、输出变量和单节点调试按钮。
 
-编码节点面板建议展示：
+共用组件建议：
 
-1. 代码编辑器。
-2. 入口文件。
-3. 输出变量。
-4. 单节点调试按钮。
-5. 当前沙箱状态。
-6. 当前运行镜像。
-
-AI 助手面板建议展示：
-
-1. 当前 workflow。
-2. 当前选中节点。
-3. 当前沙箱状态。
-4. AI 生成的待应用代码 diff。
+1. `WorkflowSandboxPanel`：画布顶部入口和状态详情。
+2. `WorkflowSandboxDialog`：创建、关联、切换镜像、设置 TTL。
+3. `SandboxImagePicker`：复用现有镜像选择能力。
+4. `WorkflowSandboxStatusBadge`：轻量状态展示。
+5. `SandboxCodeEntry`：复用沙箱 code 的打开、保存和状态展示能力。
+6. `useWorkflowSandboxSession`：统一封装加载、关联、创建、保存代码、重建、释放。
 
 ## 调试和运行
 
 单节点调试：
 
-1. 检查是否有 AI 未应用 diff。
-2. 获取或创建编辑沙箱。
-3. 如果代码 dirty，先同步代码。
-4. 在编辑沙箱中执行编码节点。
+1. 检查编码节点是否已绑定可用 `SandboxSession`。
+2. 检查真实沙箱是否存在且状态正常。
+3. 如果未绑定、已过期、失败或健康检查异常，提醒用户关联、替换或重建沙箱。
+4. 状态正常时，直接在绑定沙箱中执行编码节点。
 5. 返回 stdout、stderr、exit code、输出 JSON 和错误信息。
 
 全局调试：
 
 1. 创建临时运行快照。
-2. 固定 workflow、代码版本和 runtime image digest。
-3. 可以选择复用编辑沙箱，或创建临时运行沙箱。
-4. 执行到编码节点时，在沙箱中运行代码。
+2. 固定 workflow version、CodeVersion 和 RuntimeImage digest。
+3. 执行到编码节点时，检查该版本绑定的沙箱状态。
+4. 如果沙箱未绑定或状态异常，提醒用户替换或重建。
+5. 状态正常时，在绑定沙箱中运行代码。
 
 正式运行：
 
 1. 固定 workflow version。
 2. 固定 CodeVersion。
-3. 固定 runtime image digest。
-4. 创建一个或多个运行沙箱。
-5. 从快照同步代码。
-6. 并行执行时，每个沙箱都从同一份快照初始化。
+3. 固定 RuntimeImage digest。
+4. 创建运行沙箱并从快照同步代码。
+5. 并行执行时，每个沙箱都从同一份快照初始化。
 
-## 推荐落地顺序
+## 实现步骤
 
-1. 页面先展示当前 workflow 的沙箱状态和 AioSandbox 能力清单。
-2. 新增 `SandboxSession`，打开 workflow 时只关联 session，不创建沙箱。
-3. 新增 `CodeArtifact` 和 `CodeVersion`，把编码节点代码从 `config.prompt` 迁移为可版本化代码资产。
-4. 支持代码版本历史和“恢复历史版本为当前版本”。
-5. 实现按需创建沙箱。
-6. 实现沙箱 TTL、使用时刷新过期时间和空闲回收。
-7. 实现按代码签名同步代码到沙箱。
-8. 接入单节点调试。
-9. 接入 AI 助手 diff 确认流程。
-10. 接入自定义镜像选择和沙箱重建。
-11. 接入全局调试和正式运行快照。
+1. 后端新增 `SandboxSession` 模型和 API，支持按 `workflowId + workflowVersionId` 查询或创建 session。
+2. 前端新增 `useWorkflowSandboxSession`，在打开已保存 workflow 版本后加载 session。
+3. 画布顶部增加“调试沙箱”入口，支持手动关联已有沙箱或创建新沙箱。
+4. 抽出可复用的镜像选择组件，供资源池页和 workflow 沙箱弹窗共用。
+5. 接入手动创建沙箱：选择镜像和 TTL 后创建 AioSandbox，并更新 session。
+6. 接入编码节点创建后的提示：已保存 workflow 可直接关联或创建沙箱；未保存的新 workflow 提示先保存一次。
+7. 复用沙箱 code 能力，编码节点面板提供“打开沙箱 code”入口。
+8. 实现沙箱 code 保存到服务端 `CodeArtifact`，生成代码签名和 `CodeVersion`。
+9. 实现保存生成新 workflow 版本后的 session 迁移或继承逻辑，确保调试沙箱关系落到新版本。
+10. 实现恢复历史版本时按版本切换 session，并用该版本 `CodeArtifact` 初始化沙箱 code。
+11. 接入单节点调试：只校验绑定沙箱存在且状态正常，异常时提醒替换或重建。
+12. 接入全局调试：执行编码节点前校验绑定沙箱状态。
+13. 实现 TTL 刷新、`activeRunCount` 和空闲回收。
+14. 接入镜像切换和沙箱重建。
+15. 接入正式运行快照。

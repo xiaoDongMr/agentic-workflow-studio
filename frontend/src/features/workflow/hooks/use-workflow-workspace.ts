@@ -504,6 +504,7 @@ export function useWorkflowWorkspace() {
       }
 
       const action: PendingWorkflowLeaveAction = { type: 'changeView', view }
+      const leavingWorkflowEditor = activeView === 'workflow' && workflowEditorOpen && view !== 'workflow'
 
       if (!workflowEditorOpen && hasUnsavedChanges) {
         persistCurrentWorkflowDraft()
@@ -511,7 +512,7 @@ export function useWorkflowWorkspace() {
         return
       }
 
-      if (requestWorkflowLeave(action)) {
+      if (leavingWorkflowEditor && requestWorkflowLeave(action)) {
         return
       }
 

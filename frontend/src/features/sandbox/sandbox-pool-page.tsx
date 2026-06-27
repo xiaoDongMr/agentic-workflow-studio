@@ -59,10 +59,21 @@ import {
 } from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
 
+const PROBE_SANDBOX_LIMIT = 100
+
+async function listProbeSandboxes() {
+  const page = await listSandboxes({
+    limit: PROBE_SANDBOX_LIMIT,
+    status: 'Running',
+  })
+  return page.sandboxes
+}
+
 export function SandboxPoolPage() {
   const { error, notice, setError, setNotice, clearError, clearNotice, clearMessages } = useTimedMessages()
   const [health, setHealth] = useState<SandboxPoolHealth | null>(null)
   const [sandboxes, setSandboxes] = useState<SandboxSummary[]>([])
+  const [probeSandboxes, setProbeSandboxes] = useState<SandboxSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -89,9 +100,15 @@ export function SandboxPoolPage() {
   const [sandboxRemainingItemCount, setSandboxRemainingItemCount] = useState<number | null>(null)
 
   const createDisabled = !health?.enabled || Boolean(health?.extra.error)
+  const effectiveSelectedImageId = images.some((image) => image.id === selectedImageId)
+    ? selectedImageId
+    : images[0]?.id ?? ''
+  const effectiveSandboxImageFilter = sandboxImageFilter && images.some((image) => image.id === sandboxImageFilter)
+    ? sandboxImageFilter
+    : ''
   const selectedImage = useMemo(
-    () => images.find((image) => image.id === selectedImageId) ?? images[0],
-    [images, selectedImageId],
+    () => images.find((image) => image.id === effectiveSelectedImageId) ?? images[0],
+    [effectiveSelectedImageId, images],
   )
 
   const stats = useMemo(() => {
@@ -102,28 +119,12 @@ export function SandboxPoolPage() {
     return { running, pending, failed, nodes }
   }, [sandboxes])
 
-  const runningSandboxes = useMemo(() => sandboxes.filter((item) => item.status === 'Running'), [sandboxes])
-  const hasSandboxFilter = Boolean(sandboxStatusFilter || sandboxImageFilter || sandboxIdFilter.trim())
+  const hasSandboxFilter = Boolean(sandboxStatusFilter || effectiveSandboxImageFilter || sandboxIdFilter.trim())
   const currentSandboxContinueToken = sandboxPageTokens[sandboxPageIndex] ?? ''
   const pendingDeleteImage = useMemo(
     () => images.find((image) => image.id === pendingDeleteImageId && image.source === 'custom'),
     [images, pendingDeleteImageId],
   )
-
-  useEffect(() => {
-    if (selectedImageId && images.some((image) => image.id === selectedImageId)) {
-      return
-    }
-    setSelectedImageId(images[0]?.id ?? '')
-    setCreateForm((current) => ({ ...current, image: '' }))
-  }, [images, selectedImageId])
-
-  useEffect(() => {
-    if (!sandboxImageFilter || images.some((image) => image.id === sandboxImageFilter)) {
-      return
-    }
-    setSandboxImageFilter('')
-  }, [images, sandboxImageFilter])
 
   const load = useCallback(async (silent = false, options?: { continueToken?: string; pageIndex?: number; resetPage?: boolean }) => {
     if (silent) {
@@ -136,19 +137,21 @@ export function SandboxPoolPage() {
     try {
       const pageIndex = options?.resetPage ? 0 : options?.pageIndex ?? 0
       const continueToken = options?.resetPage ? '' : options?.continueToken ?? ''
-      const [nextHealth, nextSandboxPage] = await Promise.all([
+      const [nextHealth, nextSandboxPage, nextProbeSandboxes, nextImages] = await Promise.all([
         getSandboxPoolHealth(),
         listSandboxes({
           limit: sandboxPageSize,
           continueToken,
           status: sandboxStatusFilter,
-          imageId: sandboxImageFilter,
+          imageId: effectiveSandboxImageFilter,
           sandboxId: sandboxIdFilter.trim(),
         }),
+        listProbeSandboxes(),
+        listSandboxImages(),
       ])
-      const nextImages = await listSandboxImages()
       setHealth(nextHealth)
       setSandboxes(nextSandboxPage.sandboxes)
+      setProbeSandboxes(nextProbeSandboxes)
       setSandboxPageIndex(pageIndex)
       setSandboxNextContinueToken(nextSandboxPage.continueToken)
       setSandboxRemainingItemCount(nextSandboxPage.remainingItemCount)
@@ -167,7 +170,7 @@ export function SandboxPoolPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [sandboxIdFilter, sandboxImageFilter, sandboxPageSize, sandboxStatusFilter])
+  }, [clearError, effectiveSandboxImageFilter, sandboxIdFilter, sandboxPageSize, sandboxStatusFilter, setError])
 
   const refreshImages = useCallback(async () => {
     const nextImages = await listSandboxImages()
@@ -177,7 +180,10 @@ export function SandboxPoolPage() {
   }, [])
 
   useEffect(() => {
-    void load(false, { resetPage: true })
+    const timer = window.setTimeout(() => {
+      void load(false, { resetPage: true })
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [load])
 
   async function pollImagePreload(imageId: string) {
@@ -278,6 +284,9 @@ export function SandboxPoolPage() {
         setSelectedImageId(sandboxImageCapabilities[0]?.id ?? '')
         setCreateForm((current) => ({ ...current, image: '' }))
       }
+      if (sandboxImageFilter === imageId) {
+        setSandboxImageFilter('')
+      }
       setNotice('自定义镜像已移除，对应的 K8s 预热任务已删除。')
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '移除自定义镜像失败'
@@ -304,6 +313,7 @@ export function SandboxPoolPage() {
     try {
       await deleteSandbox(sandboxId)
       setSandboxes((current) => current.filter((item) => item.sandboxId !== sandboxId))
+      setProbeSandboxes((current) => current.filter((item) => item.sandboxId !== sandboxId))
       await load(true, { continueToken: currentSandboxContinueToken, pageIndex: sandboxPageIndex })
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : '删除沙箱失败'
@@ -445,8 +455,8 @@ export function SandboxPoolPage() {
                 probeError={probeError}
                 probeResult={probeResult}
                 probing={probing}
-                runningSandboxes={runningSandboxes}
-                selectedImageId={selectedImageId}
+                runningSandboxes={probeSandboxes}
+                selectedImageId={effectiveSelectedImageId}
                 onChangeCustomImageForm={setCustomImageForm}
                 onRegisterCustomImage={handleRegisterCustomImage}
                 onRemoveCustomImage={handleRemoveCustomImage}
@@ -458,7 +468,7 @@ export function SandboxPoolPage() {
                 <CreateSandboxPanel
                   value={createForm}
                   images={images}
-                  selectedImageId={selectedImageId}
+                    selectedImageId={effectiveSelectedImageId}
                   creating={creating}
                   disabled={createDisabled}
                   showAdvanced={showCreateAdvanced}
@@ -530,7 +540,7 @@ export function SandboxPoolPage() {
                         <label className="block">
                           <span className="text-xs font-medium text-slate-400">镜像筛选</span>
                             <SearchableSelect
-                            value={sandboxImageFilter}
+                              value={effectiveSandboxImageFilter}
                               onChange={setSandboxImageFilter}
                               className="mt-1.5"
                               searchPlaceholder="搜索镜像名称或地址"

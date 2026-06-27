@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CheckCircle2, LoaderCircle, Package, UploadCloud } from 'lucide-react'
 
 import type { SandboxPythonProbeResult, SandboxSummary } from '@/api/sandbox-pool'
@@ -51,26 +51,16 @@ export function SandboxImageCatalogPanel({
   const [customImagePageSize, setCustomImagePageSize] = useState(CUSTOM_IMAGE_PAGE_SIZE_OPTIONS[0])
   const [selectedProbeSandboxId, setSelectedProbeSandboxId] = useState('')
   const customImagePageCount = Math.max(1, Math.ceil(customImages.length / customImagePageSize))
+  const effectiveCustomImagePage = Math.min(customImagePage, customImagePageCount)
+  const effectiveProbeSandboxId = runningSandboxes.some((sandbox) => sandbox.sandboxId === selectedProbeSandboxId)
+    ? selectedProbeSandboxId
+    : runningSandboxes[0]?.sandboxId ?? ''
   const pagedCustomImages = useMemo(() => {
-    const startIndex = (customImagePage - 1) * customImagePageSize
+    const startIndex = (effectiveCustomImagePage - 1) * customImagePageSize
     return customImages.slice(startIndex, startIndex + customImagePageSize)
-  }, [customImages, customImagePage, customImagePageSize])
-  const customImagePageStart = customImages.length === 0 ? 0 : (customImagePage - 1) * customImagePageSize + 1
-  const customImagePageEnd = customImages.length === 0 ? 0 : Math.min(customImagePage * customImagePageSize, customImages.length)
-
-  useEffect(() => {
-    if (selectedProbeSandboxId && runningSandboxes.some((sandbox) => sandbox.sandboxId === selectedProbeSandboxId)) {
-      return
-    }
-    setSelectedProbeSandboxId(runningSandboxes[0]?.sandboxId ?? '')
-  }, [runningSandboxes, selectedProbeSandboxId])
-
-  useEffect(() => {
-    if (customImagePage <= customImagePageCount) {
-      return
-    }
-    setCustomImagePage(customImagePageCount)
-  }, [customImagePage, customImagePageCount])
+  }, [customImages, effectiveCustomImagePage, customImagePageSize])
+  const customImagePageStart = customImages.length === 0 ? 0 : (effectiveCustomImagePage - 1) * customImagePageSize + 1
+  const customImagePageEnd = customImages.length === 0 ? 0 : Math.min(effectiveCustomImagePage * customImagePageSize, customImages.length)
 
   return (
     <div className="space-y-4">
@@ -246,15 +236,15 @@ export function SandboxImageCatalogPanel({
               </div>
               <div className="mt-4 flex flex-col gap-3 border-t border-white/8 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-slate-500">
-                  第 {customImagePage} / {customImagePageCount} 页
+                  第 {effectiveCustomImagePage} / {customImagePageCount} 页
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={customImagePage <= 1}
-                    onClick={() => setCustomImagePage((current) => Math.max(1, current - 1))}
+                    disabled={effectiveCustomImagePage <= 1}
+                    onClick={() => setCustomImagePage(Math.max(1, effectiveCustomImagePage - 1))}
                   >
                     上一页
                   </Button>
@@ -262,8 +252,8 @@ export function SandboxImageCatalogPanel({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={customImagePage >= customImagePageCount}
-                    onClick={() => setCustomImagePage((current) => Math.min(customImagePageCount, current + 1))}
+                    disabled={effectiveCustomImagePage >= customImagePageCount}
+                    onClick={() => setCustomImagePage(Math.min(customImagePageCount, effectiveCustomImagePage + 1))}
                   >
                     下一页
                   </Button>
@@ -278,11 +268,11 @@ export function SandboxImageCatalogPanel({
           probeResult={probeResult}
           probing={probing}
           runningSandboxes={runningSandboxes}
-          selectedSandboxId={selectedProbeSandboxId}
+          selectedSandboxId={effectiveProbeSandboxId}
           onChangeSandbox={setSelectedProbeSandboxId}
           onProbe={() => {
-            if (selectedProbeSandboxId) {
-              onProbe(selectedProbeSandboxId)
+            if (effectiveProbeSandboxId) {
+              onProbe(effectiveProbeSandboxId)
             }
           }}
         />

@@ -124,6 +124,25 @@ CREATE INDEX IF NOT EXISTS idx_workflow_edges_version_target
 CREATE INDEX IF NOT EXISTS idx_workflow_edges_parent
   ON workflow_edges (workflow_version_id, parent_node_key);
 
+CREATE TABLE IF NOT EXISTS workflow_sandbox_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID NOT NULL REFERENCES workflow_projects(id),
+  sandbox_id VARCHAR(128) NOT NULL DEFAULT '',
+  sandbox_url VARCHAR(512) NOT NULL DEFAULT '',
+  image_id VARCHAR(64) NOT NULL DEFAULT '',
+  code_status VARCHAR(32) NOT NULL DEFAULT 'saved',
+  last_saved_code_signature VARCHAR(128) NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (workflow_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_sandbox_sessions_workflow
+  ON workflow_sandbox_sessions (workflow_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_sandbox_sessions_sandbox
+  ON workflow_sandbox_sessions (sandbox_id);
+
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_id UUID NOT NULL REFERENCES workflow_projects(id),

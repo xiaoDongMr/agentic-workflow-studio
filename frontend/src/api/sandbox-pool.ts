@@ -339,6 +339,11 @@ export async function deleteSandbox(sandboxId: string): Promise<void> {
   await http.delete(`/sandboxes/${encodeURIComponent(sandboxId)}`)
 }
 
+export async function getSandbox(sandboxId: string): Promise<SandboxSummary> {
+  const { data } = await http.get<SandboxSummaryDto>(`/sandboxes/${encodeURIComponent(sandboxId)}`)
+  return toSandboxSummary(data)
+}
+
 export async function probeSandboxPythonPackages(sandboxId: string): Promise<SandboxPythonProbeResult> {
   const { data } = await http.post<SandboxPythonProbeResultDto>(
     `/sandboxes/${encodeURIComponent(sandboxId)}/python-packages/probe`,

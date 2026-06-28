@@ -136,3 +136,23 @@ class SandboxImageRow(Base):
         Index("idx_sandbox_images_source_status", "source", "status", "updated_at"),
         Index("idx_sandbox_images_name", "name"),
     )
+
+
+class WorkflowSandboxSessionRow(Base):
+    __tablename__ = "workflow_sandbox_sessions"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("workflow_projects.id"), nullable=False)
+    sandbox_id: Mapped[str] = mapped_column(String(128), default="")
+    sandbox_url: Mapped[str] = mapped_column(String(512), default="")
+    image_id: Mapped[str] = mapped_column(String(64), default="")
+    code_status: Mapped[str] = mapped_column(String(32), default="saved")
+    last_saved_code_signature: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", name="uq_workflow_sandbox_sessions_workflow"),
+        Index("idx_workflow_sandbox_sessions_workflow", "workflow_id", "updated_at"),
+        Index("idx_workflow_sandbox_sessions_sandbox", "sandbox_id"),
+    )

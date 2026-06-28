@@ -10,9 +10,9 @@
 
 1. 编码节点代码编辑复用沙箱的 code 能力，用户在沙箱 code 中编辑、保存、运行。
 2. 编码节点代码、入口文件、输出配置最终需要同步保存到服务端代码资产中。
-3. 沙箱关联粒度是 `workflowId + workflowVersionId`，同一个 workflow 的不同版本可以有不同调试沙箱关系。
-4. 只要 workflow 已经保存过并拥有稳定 `workflowId` 和基准版本，就允许关联 `SandboxSession`。
-5. 未保存变更不阻塞沙箱关联；未保存变更继续使用当前基准版本的 session，并让代码保存状态变为 `dirty`。
+3. 沙箱关联粒度是 `workflowId`，调试沙箱服务当前 workflow 编辑态，不绑定历史版本。
+4. 只要 workflow 已经保存过并拥有稳定 `workflowId`，就允许关联 `SandboxSession`。
+5. 未保存变更不阻塞沙箱关联；代码是否已保存到服务端由代码同步状态表达。
 6. 普通打开 workflow 不强制创建真实沙箱，但用户可以手动创建或关联沙箱。
 7. 创建编码节点后，应引导用户关联已有沙箱或创建新沙箱，因为代码需要写入沙箱。
 8. 单节点调试和全局调试只检查沙箱是否已绑定、状态是否正常；异常时提醒替换或重建。
@@ -25,7 +25,7 @@ Workflow
   工作流草稿、版本和运行快照。
 
 WorkflowVersion
-  workflow 的保存版本，是调试沙箱关联的版本维度。
+  workflow 的保存版本，用于历史回退、全局调试快照和正式运行快照。
 
 CodeArtifact
   服务端保存的编码节点代码资产，包含代码文件、入口文件、输出配置、代码签名。
@@ -34,7 +34,7 @@ CodeVersion
   CodeArtifact 的历史版本，用于审计和回退。
 
 SandboxSession
-  workflow 某个版本的调试沙箱会话，保存当前关联、镜像、code 保存状态和 TTL 信息。
+  workflow 的调试沙箱会话，只保存当前 workflow 关联的 sandbox id、镜像 id 和 code 保存锚点。
 
 AioSandbox
   实际执行代码的沙箱实例。
@@ -45,23 +45,23 @@ RuntimeImage
 
 ## 关联沙箱
 
-关联的是某个 `workflowId + workflowVersionId` 下的 `SandboxSession`，不是立即创建真实 AioSandbox。
+关联的是某个 `workflowId` 下的 `SandboxSession`，不是立即创建真实 AioSandbox。
 
 触发场景：
 
-1. 进入已保存 workflow 版本后，加载或创建对应版本的 `SandboxSession` 记录。
+1. 打开调试沙箱入口时，按 `workflowId` 加载或创建 `SandboxSession` 记录。
 2. 用户可在画布顶部手动关联已有沙箱，或创建新沙箱。
 3. 创建编码节点后，如果当前 workflow 已保存过，则展示“关联已有沙箱 / 创建新沙箱”入口。
 4. 用户在编码节点面板点击“打开代码”时，如果没有可用沙箱，则先引导关联或创建。
 
 规则：
 
-1. 新建 workflow 尚未保存、没有稳定 `workflowId` 和基准版本时，提示先保存一次。
-2. 已保存过的 workflow 即使有未保存变更，也可以基于当前打开的版本关联或创建沙箱。
-3. 关联 session 时记录 `workflowId`、`workflowVersionId`、`imageId`、`imageDigest`、`idleTtlSeconds`、`status`。
-4. session 可以处于 `not_started`、`pending`、`ready`、`dirty`、`expired`、`failed` 状态，其中 `dirty` 表示沙箱 code 有未保存到服务端的改动。
-5. 用户恢复历史版本时，应切换到该历史版本对应的 session；没有则新建 session。
-6. 用户保存当前草稿生成新版本时，当前调试 session 应迁移到新 `workflowVersionId`，并按代码保存结果更新状态。
+1. 新建 workflow 尚未保存、没有稳定 `workflowId` 时，提示先保存一次。
+2. 已保存过的 workflow 即使有未保存变更，也可以关联或创建沙箱。
+3. 关联 session 时记录 `workflowId`、`sandboxId`、`sandboxUrl`、`imageId` 和 `lastSavedCodeSignature`。
+4. 沙箱运行状态、TTL、健康状态从真实 AioSandbox 实例读取，不复制到 `SandboxSession`。
+5. 用户恢复历史版本时，不切换 session；当前 workflow 仍使用同一个调试沙箱。
+6. 保存当前草稿生成新版本时，不迁移 session。
 
 ## 创建沙箱
 
@@ -76,11 +76,11 @@ RuntimeImage
 
 创建流程：
 
-1. 确认 workflow 已有稳定 `workflowId` 和当前基准 `workflowVersionId`。
+1. 确认 workflow 已有稳定 `workflowId`。
 2. 获取或创建 `SandboxSession`。
 3. 用户选择 `RuntimeImage` 和 TTL。
 4. 后端创建 AioSandbox，并打上 workflow/session labels。
-5. 后端更新 session 的 `sandboxId`、状态、镜像 digest 和过期时间。
+5. 后端更新 session 的 `sandboxId`、`sandboxUrl` 和 `imageId`。
 6. 首次创建成功后，如果服务端已有 `CodeArtifact`，则初始化到沙箱 code 工作区。
 
 建议 labels：
@@ -88,7 +88,6 @@ RuntimeImage
 ```text
 purpose=workflow-debug
 workflow_id=<workflowId>
-workflow_version_id=<workflowVersionId>
 sandbox_session_id=<sessionId>
 ```
 
@@ -105,15 +104,15 @@ sandbox_session_id=<sessionId>
 5. 用户在沙箱 code 中编辑代码、入口文件和必要配置。
 6. 用户点击保存后，前端或后端从沙箱 code 工作区读取最新代码。
 7. 服务端更新 `CodeArtifact`，生成新的代码签名和 `CodeVersion`。
-8. `SandboxSession.lastSavedCodeSignature` 更新为最新签名，状态变为 `ready`。
+8. `SandboxSession.lastSavedCodeSignature` 更新为最新签名。
 
 保存规则：
 
 1. 沙箱 code 中的改动默认是临时改动，只有点击保存后才写回服务端。
 2. 离开编码节点、关闭 code 视图或切换 workflow 时，如果有未保存代码改动，需要提示保存或丢弃。
 3. 如果沙箱异常、过期或被释放，未保存代码需要提示风险；已保存代码以服务端 `CodeArtifact` 为准。
-4. 恢复历史版本时，沙箱 code 工作区应从该版本的 `CodeArtifact` 初始化。
-5. 保存当前 workflow 生成新版本后，当前沙箱 code 保存结果应归属到新的 `workflowVersionId`。
+4. 恢复历史版本时，沙箱 code 工作区应从该版本的 `CodeArtifact` 初始化，但沙箱关联仍属于当前 workflow。
+5. 保存当前 workflow 生成新版本后，当前沙箱关联不变。
 
 
 
@@ -236,8 +235,8 @@ Python 依赖不建议在 workflow 正式运行时动态安装。额外依赖优
 
 ## 实现步骤
 
-1. 后端新增 `SandboxSession` 模型和 API，支持按 `workflowId + workflowVersionId` 查询或创建 session。
-2. 前端新增 `useWorkflowSandboxSession`，在打开已保存 workflow 版本后加载 session。
+1. 后端新增 `SandboxSession` 模型和 API，支持按 `workflowId` 查询或创建 session。
+2. 前端新增 `useWorkflowSandboxSession`，在打开调试沙箱入口时按 workflow 加载 session。
 3. 画布顶部增加“调试沙箱”入口，支持手动关联已有沙箱或创建新沙箱。
 4. 抽出可复用的镜像选择组件，供资源池页和 workflow 沙箱弹窗共用。
 5. 接入手动创建沙箱：选择镜像和 TTL 后创建 AioSandbox，并更新 session。

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, or_, select
@@ -277,6 +278,48 @@ class WorkflowStore:
                 )
                 session.add(project)
             else:
+                current_version = (
+                    await session.get(WorkflowVersionRow, project.current_draft_version_id)
+                    if project.current_draft_version_id
+                    else None
+                )
+                if current_version is not None and _workflow_graph_unchanged(current_version.graph_snapshot, workflow):
+                    current_workflow = WorkflowDocument.model_validate(current_version.graph_snapshot).model_copy(
+                        update={
+                            "id": project_id,
+                            "name": workflow.name,
+                            "description": workflow.description,
+                            "version": current_version.version,
+                        }
+                    )
+                    project_changed = (
+                        project.name != workflow.name
+                        or project.description != workflow.description
+                        or project.status != "draft"
+                        or project.updated_by != actor_id
+                    )
+                    version_changed = (
+                        current_version.name != workflow.name
+                        or current_version.description != workflow.description
+                        or current_version.graph_snapshot != current_workflow.model_dump(mode="json")
+                    )
+                    if project_changed or version_changed:
+                        project.name = workflow.name
+                        project.description = workflow.description
+                        project.status = "draft"
+                        project.updated_by = actor_id
+                        project.revision = (project.revision or 0) + 1
+                        current_version.name = workflow.name
+                        current_version.description = workflow.description
+                        current_version.graph_snapshot = current_workflow.model_dump(mode="json")
+                        current_version.revision = (current_version.revision or 0) + 1
+                        await session.commit()
+
+                    return SavedWorkflowDraft(
+                        project=self._to_summary(project, current_version),
+                        workflow=current_workflow,
+                    )
+
                 project.name = workflow.name
                 project.description = workflow.description
                 project.status = "draft"
@@ -285,18 +328,11 @@ class WorkflowStore:
 
             version_label = await self._next_version_label(session, project_id)
             workflow = workflow.model_copy(update={"version": version_label})
-            snapshot = workflow.model_dump(mode="json")
-            version = WorkflowVersionRow(
-                id=str(uuid4()),
+            version = self._create_version_row(
                 workflow_id=project_id,
-                version=version_label,
-                state="draft",
-                name=workflow.name,
-                description=workflow.description,
-                graph_snapshot=snapshot,
-                config={},
-                node_count=len(_flatten_nodes(workflow.nodes)),
-                edge_count=len(_flatten_edges(workflow.nodes, workflow.edges)),
+                version_id=str(uuid4()),
+                version_label=version_label,
+                workflow=workflow,
             )
             session.add(version)
 
@@ -417,6 +453,43 @@ def _normalize_uuid_or_new(value: str) -> str:
         return str(UUID(value))
     except (TypeError, ValueError):
         return str(uuid4())
+
+
+def _workflow_graph_unchanged(snapshot: dict | None, workflow: WorkflowDocument) -> bool:
+    if not snapshot:
+        return False
+
+    try:
+        current = WorkflowDocument.model_validate(snapshot)
+    except Exception:
+        return False
+
+    return _workflow_graph_signature(current) == _workflow_graph_signature(workflow)
+
+
+def _workflow_graph_signature(workflow: WorkflowDocument) -> dict[str, Any]:
+    data = workflow.model_dump(mode="json")
+    return {
+        "nodes": [_normalize_node_for_graph(node) for node in data.get("nodes", [])],
+        "edges": data.get("edges", []),
+    }
+
+
+def _normalize_node_for_graph(node: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(node)
+    # Runtime/UI status should not create a new persisted workflow version.
+    normalized.pop("status", None)
+
+    config = dict(normalized.get("config") or {})
+    loop_body_nodes = config.get("loopBodyNodes")
+    if isinstance(loop_body_nodes, list):
+        config["loopBodyNodes"] = [
+            _normalize_node_for_graph(item)
+            for item in loop_body_nodes
+            if isinstance(item, dict)
+        ]
+    normalized["config"] = config
+    return normalized
 
 
 def _build_project_preview(version: WorkflowVersionRow | None) -> dict:

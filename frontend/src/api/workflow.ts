@@ -68,6 +68,27 @@ export interface WorkflowVersionSummary {
   isCurrent: boolean
 }
 
+export type WorkflowSandboxCodeStatus = 'saved' | 'dirty' | 'saving' | 'failed'
+
+export interface WorkflowSandboxSession {
+  id: string
+  workflowId: string
+  sandboxId: string
+  sandboxUrl: string
+  imageId: string
+  codeStatus: WorkflowSandboxCodeStatus
+  lastSavedCodeSignature: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowSandboxSessionUpdate {
+  sandboxId?: string
+  sandboxUrl?: string
+  imageId?: string
+  codeStatus?: WorkflowSandboxCodeStatus
+}
+
 interface WorkflowSaveDraftResponse {
   project: WorkflowProjectSummary
   workflow: WorkflowDocument
@@ -222,6 +243,21 @@ export async function listWorkflowVersions(workflowId: string): Promise<Workflow
 export async function getWorkflowVersion(workflowId: string, versionId: string): Promise<WorkflowDocument> {
   const { data } = await http.get<WorkflowDocument>(`/workflows/${workflowId}/versions/${versionId}`)
   return sanitizeWorkflowDocument(data)
+}
+
+export async function ensureWorkflowSandboxSession(
+  workflowId: string,
+): Promise<WorkflowSandboxSession> {
+  const { data } = await http.post<WorkflowSandboxSession>(`/workflows/${workflowId}/sandbox-session`)
+  return data
+}
+
+export async function updateWorkflowSandboxSession(
+  workflowId: string,
+  payload: WorkflowSandboxSessionUpdate,
+): Promise<WorkflowSandboxSession> {
+  const { data } = await http.patch<WorkflowSandboxSession>(`/workflows/${workflowId}/sandbox-session`, payload)
+  return data
 }
 
 export async function saveWorkflowDraft(workflow: WorkflowDocument): Promise<WorkflowSaveDraftResponse> {

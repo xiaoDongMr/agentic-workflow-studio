@@ -4,20 +4,17 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
-  Code2,
   History,
   LoaderCircle,
-  Package,
   PencilLine,
   RotateCcw,
   Save,
-  Server,
-  Terminal,
   X,
 } from 'lucide-react'
 
-import type { WorkflowVersionSummary } from '@/api/workflow'
-import { sandboxImageCapabilities } from '@/features/sandbox/sandbox-image-capabilities'
+import type { WorkflowSandboxSession, WorkflowVersionSummary } from '@/api/workflow'
+import type { SandboxImageSummary, SandboxSummary } from '@/api/sandbox-pool'
+import { WorkflowSandboxStatusMenu } from '@/features/workflow/components/workflow-sandbox-status-menu'
 import { cn } from '@/lib/utils'
 
 type WorkflowSaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -34,7 +31,28 @@ interface WorkflowEditorHeaderProps {
   versionsLoading: boolean
   version: string
   restoringVersionId: string | null
+  availableSandboxes: SandboxSummary[]
+  availableSandboxesLoading: boolean
+  availableSandboxesHasNextPage: boolean
+  availableSandboxesHasPreviousPage: boolean
+  availableSandboxesPageIndex: number
+  sandboxImages: SandboxImageSummary[]
+  sandboxImagesLoading: boolean
+  sandboxStatusPolling: boolean
+  sandboxSession: WorkflowSandboxSession | null
+  sandbox: SandboxSummary | null
+  sandboxSessionError: string
+  sandboxSessionLoading: boolean
+  sandboxSessionUpdating: boolean
+  canUseSandboxSession: boolean
   onBack: () => void
+  onAssociateSandbox: (sandboxId: string) => Promise<unknown>
+  onCreateSandbox: (imageId: string) => Promise<unknown>
+  onLoadNextAvailableSandboxes: () => Promise<unknown> | void
+  onLoadPreviousAvailableSandboxes: () => Promise<unknown> | void
+  onRefreshAvailableSandboxes: () => Promise<unknown> | void
+  onRefreshSandboxImages: () => Promise<unknown> | void
+  onRefreshSandboxSession: () => Promise<unknown> | void
   onRestoreVersion: (versionId: string) => void
   onSave: () => void
   onUpdateMetadata: (metadata: { name: string; description: string }) => void
@@ -52,7 +70,28 @@ export function WorkflowEditorHeader({
   versionsLoading,
   version,
   restoringVersionId,
+  availableSandboxes,
+  availableSandboxesLoading,
+  availableSandboxesHasNextPage,
+  availableSandboxesHasPreviousPage,
+  availableSandboxesPageIndex,
+  sandboxImages,
+  sandboxImagesLoading,
+  sandboxStatusPolling,
+  sandboxSession,
+  sandbox,
+  sandboxSessionError,
+  sandboxSessionLoading,
+  sandboxSessionUpdating,
+  canUseSandboxSession,
   onBack,
+  onAssociateSandbox,
+  onCreateSandbox,
+  onLoadNextAvailableSandboxes,
+  onLoadPreviousAvailableSandboxes,
+  onRefreshAvailableSandboxes,
+  onRefreshSandboxImages,
+  onRefreshSandboxSession,
   onRestoreVersion,
   onSave,
   onUpdateMetadata,
@@ -82,7 +121,29 @@ export function WorkflowEditorHeader({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <WorkflowSandboxStatusMenu />
+        <WorkflowSandboxStatusMenu
+          availableSandboxes={availableSandboxes}
+          availableSandboxesHasNextPage={availableSandboxesHasNextPage}
+          availableSandboxesHasPreviousPage={availableSandboxesHasPreviousPage}
+          availableSandboxesLoading={availableSandboxesLoading}
+          availableSandboxesPageIndex={availableSandboxesPageIndex}
+          canUseSandboxSession={canUseSandboxSession}
+          error={sandboxSessionError}
+          loading={sandboxSessionLoading}
+          sandbox={sandbox}
+          sandboxImages={sandboxImages}
+          sandboxImagesLoading={sandboxImagesLoading}
+          session={sandboxSession}
+          statusPolling={sandboxStatusPolling}
+          updating={sandboxSessionUpdating}
+          onAssociateSandbox={onAssociateSandbox}
+          onCreateSandbox={onCreateSandbox}
+          onLoadNextAvailableSandboxes={onLoadNextAvailableSandboxes}
+          onLoadPreviousAvailableSandboxes={onLoadPreviousAvailableSandboxes}
+          onRefreshAvailableSandboxes={onRefreshAvailableSandboxes}
+          onRefreshSandboxImages={onRefreshSandboxImages}
+          onRefresh={onRefreshSandboxSession}
+        />
         <WorkflowSaveStatus
           hasUnsavedChanges={hasUnsavedChanges}
           lastSavedAt={lastSavedAt}
@@ -107,90 +168,6 @@ export function WorkflowEditorHeader({
           {saveStatus === 'saving' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           保存草稿
         </button>
-      </div>
-    </div>
-  )
-}
-
-function WorkflowSandboxStatusMenu() {
-  const [open, setOpen] = useState(false)
-  const defaultImage = sandboxImageCapabilities.find((image) => image.default) ?? sandboxImageCapabilities[0]
-
-  if (!defaultImage) {
-    return null
-  }
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-emerald-300/18 bg-emerald-400/[0.10] px-3 text-sm font-semibold text-emerald-50 shadow-[0_12px_30px_rgba(5,150,105,0.10)] backdrop-blur transition hover:border-emerald-200/34 hover:bg-emerald-400/[0.16]"
-        aria-expanded={open}
-        aria-label="查看当前工作流沙箱状态"
-      >
-        <Server className="h-4 w-4 text-emerald-200" />
-        <span className="hidden 2xl:inline">沙箱</span>
-        <span className="rounded-full border border-white/10 bg-slate-950/36 px-2 py-0.5 text-[11px] text-emerald-100">
-          未启动
-        </span>
-        <ChevronDown className={cn('h-3.5 w-3.5 text-emerald-100/70 transition', open && 'rotate-180')} />
-      </button>
-
-      {open ? (
-        <div className="absolute right-0 top-[calc(100%+10px)] z-40 w-[380px] overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/96 p-3 shadow-[0_24px_80px_rgba(2,6,23,0.48)] backdrop-blur">
-          <div className="rounded-2xl border border-emerald-300/16 bg-emerald-400/[0.08] p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-white">当前 workflow 沙箱</p>
-                <p className="mt-1 text-xs leading-5 text-slate-400">
-                  暂未创建真实沙箱。调试、AI 工具调用或打开终端时，再按需创建并同步代码。
-                </p>
-              </div>
-              <span className="shrink-0 rounded-xl border border-amber-300/20 bg-amber-400/10 px-2.5 py-1 text-xs text-amber-100">
-                未启动
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-100">{defaultImage.name}</p>
-                <p className="mt-1 truncate font-mono text-xs text-slate-500">{defaultImage.image}</p>
-              </div>
-              <span className="shrink-0 rounded-xl border border-blue-300/18 bg-blue-400/10 px-2.5 py-1 text-xs text-blue-100">
-                默认镜像
-              </span>
-            </div>
-
-            <div className="mt-3 grid gap-2">
-              <WorkflowSandboxCapabilityRow icon={Terminal} label="工具" items={defaultImage.tools.slice(0, 5)} />
-              <WorkflowSandboxCapabilityRow icon={Package} label="接口" items={defaultImage.runtimes.slice(0, 4)} />
-              <WorkflowSandboxCapabilityRow icon={Code2} label="能力" items={defaultImage.capabilities.slice(0, 4)} />
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function WorkflowSandboxCapabilityRow({
-  icon: Icon,
-  label,
-  items,
-}: {
-  icon: typeof Server
-  label: string
-  items: string[]
-}) {
-  return (
-    <div className="flex items-start gap-2 rounded-xl bg-slate-950/36 px-3 py-2">
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-200" />
-      <div className="min-w-0">
-        <span className="text-xs text-slate-500">{label}</span>
-        <span className="ml-2 text-xs text-slate-200">{items.join(' / ')}</span>
       </div>
     </div>
   )

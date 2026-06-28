@@ -13,6 +13,7 @@ import { UnsavedWorkflowDialog } from '@/features/workflow/components/unsaved-wo
 import { WorkflowCanvas } from '@/features/workflow/components/workflow-canvas'
 import { WorkflowEditorHeader } from '@/features/workflow/components/workflow-editor-header'
 import { WorkflowOverview } from '@/features/workflow/components/workflow-overview'
+import { useWorkflowSandboxSession } from '@/features/workflow/hooks/use-workflow-sandbox-session'
 import { useWorkflowWorkspace } from '@/features/workflow/hooks/use-workflow-workspace'
 import { SandboxPoolPage } from '@/features/sandbox/sandbox-pool-page'
 import { cn } from '@/lib/utils'
@@ -28,6 +29,7 @@ function App() {
     canvasApi,
     draftHydrated,
     hasUnsavedChanges,
+    currentWorkflowSaved,
     lastSavedAt,
     leaveDialogSaving,
     localDrafts,
@@ -76,6 +78,10 @@ function App() {
     updateSelectedNode,
     updateWorkflowMetadata,
   } = workspace
+  const workflowSandboxSession = useWorkflowSandboxSession({
+    enabled: workflowEditorOpen && currentWorkflowSaved,
+    workflowId: workflow.id,
+  })
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#14203d_0%,#090d18_38%,#05070c_100%)] text-slate-100">
@@ -104,7 +110,28 @@ function App() {
                     versionsLoading={versionsLoading}
                     version={workflow.version}
                     restoringVersionId={restoringVersionId}
+                    availableSandboxes={workflowSandboxSession.availableSandboxes}
+                    availableSandboxesHasNextPage={workflowSandboxSession.availableSandboxesHasNextPage}
+                    availableSandboxesHasPreviousPage={workflowSandboxSession.availableSandboxesHasPreviousPage}
+                    availableSandboxesLoading={workflowSandboxSession.availableSandboxesLoading}
+                    availableSandboxesPageIndex={workflowSandboxSession.availableSandboxesPageIndex}
+                    sandboxImages={workflowSandboxSession.sandboxImages}
+                    sandboxImagesLoading={workflowSandboxSession.sandboxImagesLoading}
+                    sandboxStatusPolling={workflowSandboxSession.sandboxStatusPolling}
+                    sandboxSession={workflowSandboxSession.session}
+                    sandbox={workflowSandboxSession.sandbox}
+                    sandboxSessionError={workflowSandboxSession.error}
+                    sandboxSessionLoading={workflowSandboxSession.loading}
+                    sandboxSessionUpdating={workflowSandboxSession.updating}
+                    canUseSandboxSession={workflowSandboxSession.canLoad}
                     onBack={closeWorkflowEditor}
+                    onAssociateSandbox={workflowSandboxSession.associateSandboxById}
+                    onCreateSandbox={workflowSandboxSession.createAndAssociateSandbox}
+                    onLoadNextAvailableSandboxes={workflowSandboxSession.loadNextAvailableSandboxes}
+                    onLoadPreviousAvailableSandboxes={workflowSandboxSession.loadPreviousAvailableSandboxes}
+                    onRefreshAvailableSandboxes={workflowSandboxSession.refreshAvailableSandboxes}
+                    onRefreshSandboxImages={workflowSandboxSession.refreshSandboxImages}
+                    onRefreshSandboxSession={workflowSandboxSession.refresh}
                     onRestoreVersion={restoreSavedWorkflowVersion}
                     onSave={handleSaveWorkflow}
                     onUpdateMetadata={updateWorkflowMetadata}

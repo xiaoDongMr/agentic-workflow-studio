@@ -1,10 +1,11 @@
 import type { FormEvent } from 'react'
-import { LoaderCircle, Plus, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { Clock3, LoaderCircle, Plus, SlidersHorizontal, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SearchableSelect } from '@/features/sandbox/components/searchable-select'
 import type { SandboxImageCapability } from '@/features/sandbox/sandbox-image-capabilities'
+import { SANDBOX_DEFAULT_TTL_PLACEHOLDER } from '@/features/sandbox/sandbox-pool-constants'
 import type { CreateSandboxFormState } from '@/features/sandbox/sandbox-pool-types'
 import { formInputClassName } from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
@@ -54,7 +55,7 @@ export function CreateSandboxPanel({
       </div>
 
       <form onSubmit={onSubmit} className="mt-4 space-y-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.35fr)_minmax(260px,0.85fr)_auto] xl:items-end">
+        <div className="grid gap-3 xl:grid-cols-[minmax(360px,1fr)_minmax(240px,0.58fr)_auto] xl:items-end">
           <div className="min-w-0">
             <label className="block">
               <span className="text-xs font-medium text-slate-400">运行镜像</span>
@@ -114,6 +115,34 @@ export function CreateSandboxPanel({
               {creating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               {creating ? '创建中' : '创建'}
             </Button>
+          </div>
+
+          <div className="xl:col-span-3">
+            <label className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-slate-950/42 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-300/16 bg-amber-400/10 text-amber-100">
+                  <Clock3 className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold text-slate-200">生命周期</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                    为空使用默认 TTL，填 0 表示不过期，实例到期后会自动清理。
+                  </span>
+                </span>
+              </span>
+              <span className="flex h-10 shrink-0 items-center rounded-2xl border border-white/8 bg-slate-950/72 pr-3.5 focus-within:border-amber-300/35 focus-within:bg-slate-950/90 sm:w-[220px]">
+                <input
+                  value={value.ttlSeconds}
+                  onChange={(event) => onChange({ ...value, ttlSeconds: event.target.value })}
+                  placeholder={SANDBOX_DEFAULT_TTL_PLACEHOLDER}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  disabled={disabled || creating}
+                  className="h-full min-w-0 flex-1 rounded-l-2xl bg-transparent px-3.5 text-sm text-slate-100 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <span className="shrink-0 text-xs text-slate-500">秒</span>
+              </span>
+            </label>
           </div>
         </div>
 

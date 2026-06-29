@@ -21,6 +21,90 @@ export function formatDate(value: string): string {
   }).format(date)
 }
 
+export function formatDateTime(value: string): string {
+  if (!value) {
+    return '-'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+export function formatDuration(seconds: number): string {
+  if (seconds <= 0) {
+    return '0 秒'
+  }
+
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainingSeconds = Math.floor(seconds % 60)
+
+  if (days > 0) {
+    return `${days} 天 ${hours} 小时`
+  }
+  if (hours > 0) {
+    return `${hours} 小时 ${minutes} 分钟`
+  }
+  if (minutes > 0) {
+    return `${minutes} 分钟 ${remainingSeconds} 秒`
+  }
+  return `${remainingSeconds} 秒`
+}
+
+export function formatExpiresAt(value: string): string {
+  return formatDateTime(value)
+}
+
+export function formatTtlSeconds(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return '未设置'
+  }
+  if (value <= 0) {
+    return '不过期'
+  }
+  return formatDuration(value)
+}
+
+export function formatRemainingTtl(expiresAt: string, expired: boolean): string {
+  if (!expiresAt) {
+    return '不过期'
+  }
+  if (expired) {
+    return '已过期'
+  }
+
+  const expiresAtTime = new Date(expiresAt).getTime()
+  if (Number.isNaN(expiresAtTime)) {
+    return '-'
+  }
+  const remainingSeconds = Math.max(0, Math.ceil((expiresAtTime - Date.now()) / 1000))
+  return formatDuration(remainingSeconds)
+}
+
+export function parseSandboxTtlSeconds(value: string): number | undefined {
+  const normalizedValue = value.trim()
+  if (!normalizedValue) {
+    return undefined
+  }
+
+  const parsedValue = Number(normalizedValue)
+  if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+    throw new Error('过期时间请输入大于等于 0 的整数秒数')
+  }
+  return parsedValue
+}
+
 export function createSandboxId(): string {
   const cryptoApi = globalThis.crypto
   if (cryptoApi?.randomUUID) {
@@ -52,6 +136,7 @@ export function createDefaultForm(): CreateSandboxFormState {
   return {
     sandboxId: createSandboxId(),
     image: '',
+    ttlSeconds: '',
     envText: '',
     labelsText: '',
   }

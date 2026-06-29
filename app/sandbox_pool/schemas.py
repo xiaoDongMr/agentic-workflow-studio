@@ -12,6 +12,7 @@ class SandboxCreateRequest(BaseModel):
     sandbox_id: str = Field(..., min_length=1)
     image_id: str | None = None
     image: str | None = None
+    ttl_seconds: int | None = Field(default=None, ge=0)
     env: dict[str, str] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
 
@@ -29,6 +30,9 @@ class SandboxSummary(BaseModel):
     node_name: str = ""
     pod_ip: str = ""
     created_at: str = ""
+    ttl_seconds: int | None = None
+    expires_at: str = ""
+    expired: bool = False
     labels: dict[str, str] = Field(default_factory=dict)
 
 

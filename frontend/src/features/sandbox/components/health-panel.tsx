@@ -1,12 +1,14 @@
-import { AlertTriangle, Cpu, Layers3, Network, Server } from 'lucide-react'
+import { AlertTriangle, Clock3, Cpu, Layers3, Network, Server } from 'lucide-react'
 
 import type { SandboxPoolHealth } from '@/api/sandbox-pool'
 import { Badge } from '@/components/ui/badge'
+import { formatTtlSeconds } from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
 
 export function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
   const errorText = health?.extra.error
   const enabled = health?.enabled ?? false
+  const ttlConfig = getTtlConfig(health)
 
   return (
     <section className="rounded-3xl border border-white/8 bg-white/[0.035] p-4">
@@ -21,7 +23,7 @@ export function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
           </div>
         </div>
 
-        <div className="grid gap-2 md:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-4">
           <div className="rounded-2xl border border-white/8 bg-slate-950/32 px-3 py-2.5">
             <div className="flex items-center gap-2 text-[11px] text-slate-500">
               <Server className="h-3.5 w-3.5 text-blue-300" />
@@ -42,6 +44,15 @@ export function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
               Client
             </div>
             <div className="mt-1 truncate text-xs font-medium text-slate-100">{health?.client ?? '-'}</div>
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-slate-950/32 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              <Clock3 className="h-3.5 w-3.5 text-amber-300" />
+              默认 TTL
+            </div>
+            <div className="mt-1 truncate text-xs font-medium text-slate-100">
+              {ttlConfig ? formatTtlSeconds(ttlConfig.ttlSeconds) : '-'}
+            </div>
           </div>
         </div>
 
@@ -67,4 +78,23 @@ export function HealthPanel({ health }: { health: SandboxPoolHealth | null }) {
       ) : null}
     </section>
   )
+}
+
+function getTtlConfig(health: SandboxPoolHealth | null): { ttlSeconds: number; cleanupIntervalSeconds: number } | null {
+  const ttl = health?.extra.ttl
+  if (!ttl || typeof ttl !== 'object') {
+    return null
+  }
+
+  const ttlRecord = ttl as Record<string, unknown>
+  const ttlSeconds = ttlRecord.ttlSeconds
+  const cleanupIntervalSeconds = ttlRecord.cleanupIntervalSeconds
+  if (typeof ttlSeconds !== 'number' || typeof cleanupIntervalSeconds !== 'number') {
+    return null
+  }
+
+  return {
+    ttlSeconds,
+    cleanupIntervalSeconds,
+  }
 }

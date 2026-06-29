@@ -10,8 +10,13 @@ import {
 
 import type { SandboxImageSummary, SandboxStatus, SandboxSummary } from '@/api/sandbox-pool'
 import type { WorkflowSandboxSession } from '@/api/workflow'
+import {
+  WorkflowSandboxActionTabs,
+  type WorkflowSandboxActionMode,
+} from '@/features/workflow/components/workflow-sandbox-action-tabs'
 import { WorkflowSandboxCreateSection } from '@/features/workflow/components/workflow-sandbox-create-section'
 import { WorkflowSandboxExistingSection } from '@/features/workflow/components/workflow-sandbox-existing-section'
+import { WorkflowSandboxLifecycleSummary } from '@/features/workflow/components/workflow-sandbox-lifecycle-summary'
 import { cn } from '@/lib/utils'
 
 interface WorkflowSandboxStatusMenuProps {
@@ -30,7 +35,7 @@ interface WorkflowSandboxStatusMenuProps {
   statusPolling: boolean
   updating: boolean
   onAssociateSandbox: (sandboxId: string) => Promise<unknown>
-  onCreateSandbox: (imageId: string) => Promise<unknown>
+  onCreateSandbox: (imageId: string, ttlSeconds: string) => Promise<unknown>
   onLoadNextAvailableSandboxes: () => Promise<unknown> | void
   onLoadPreviousAvailableSandboxes: () => Promise<unknown> | void
   onRefresh: () => Promise<unknown> | void
@@ -62,10 +67,13 @@ export function WorkflowSandboxStatusMenu({
   onRefreshSandboxImages,
 }: WorkflowSandboxStatusMenuProps) {
   const [open, setOpen] = useState(false)
+  const [actionMode, setActionMode] = useState<WorkflowSandboxActionMode>('create')
   const hasBinding = Boolean(session?.sandboxId)
   const busy = loading || updating
   const statusLabel = loading
     ? '加载中'
+    : sandbox?.expired
+      ? '已过期'
     : statusPolling && sandbox?.status !== 'Running'
       ? '刷新中'
     : !canUseSandboxSession
@@ -75,7 +83,13 @@ export function WorkflowSandboxStatusMenu({
         : hasBinding
           ? '状态未知'
           : '未绑定'
-  const statusClassName = sandboxStatusClassName(sandbox?.status, canUseSandboxSession, hasBinding, statusPolling)
+  const statusClassName = sandboxStatusClassName(
+    sandbox?.status,
+    canUseSandboxSession,
+    hasBinding,
+    statusPolling,
+    Boolean(sandbox?.expired),
+  )
 
   const openMenu = useCallback(() => {
     setOpen((value) => {
@@ -87,6 +101,18 @@ export function WorkflowSandboxStatusMenu({
       return nextOpen
     })
   }, [onRefreshAvailableSandboxes, onRefreshSandboxImages])
+
+  const selectActionMode = useCallback(
+    (mode: WorkflowSandboxActionMode) => {
+      setActionMode(mode)
+      if (mode === 'create') {
+        void onRefreshSandboxImages()
+      } else {
+        void onRefreshAvailableSandboxes()
+      }
+    },
+    [onRefreshAvailableSandboxes, onRefreshSandboxImages],
+  )
 
   return (
     <div className="relative">
@@ -146,6 +172,7 @@ export function WorkflowSandboxStatusMenu({
                   </a>
                 ) : null}
               </div>
+              {sandbox ? <WorkflowSandboxLifecycleSummary sandbox={sandbox} /> : null}
               {statusPolling ? (
                 <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-300/18 bg-sky-400/10 px-3 py-2 text-xs text-sky-100">
                   <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -160,33 +187,39 @@ export function WorkflowSandboxStatusMenu({
           ) : null}
           {error ? <WorkflowSandboxNotice tone="error" message={error} /> : null}
 
-          <div className="mt-3 grid gap-2">
-            <WorkflowSandboxCreateSection
-              busy={busy}
-              canUseSandboxSession={canUseSandboxSession}
-              images={sandboxImages}
-              imagesLoading={sandboxImagesLoading}
-              statusPolling={statusPolling}
-              updating={updating}
-              onCreateSandbox={onCreateSandbox}
-              onRefreshImages={onRefreshSandboxImages}
-            />
+          <div className="mt-3 rounded-2xl border border-white/8 bg-slate-950/42 p-2.5">
+            <WorkflowSandboxActionTabs value={actionMode} onChange={selectActionMode} />
 
-            <WorkflowSandboxExistingSection
-              busy={busy}
-              canUseSandboxSession={canUseSandboxSession}
-              hasNextPage={availableSandboxesHasNextPage}
-              hasPreviousPage={availableSandboxesHasPreviousPage}
-              loading={availableSandboxesLoading}
-              pageIndex={availableSandboxesPageIndex}
-              sandboxes={availableSandboxes}
-              session={session}
-              updating={updating}
-              onAssociateSandbox={onAssociateSandbox}
-              onLoadNextPage={onLoadNextAvailableSandboxes}
-              onLoadPreviousPage={onLoadPreviousAvailableSandboxes}
-              onRefresh={onRefreshAvailableSandboxes}
-            />
+            <div className="mt-2">
+              {actionMode === 'create' ? (
+                <WorkflowSandboxCreateSection
+                  busy={busy}
+                  canUseSandboxSession={canUseSandboxSession}
+                  images={sandboxImages}
+                  imagesLoading={sandboxImagesLoading}
+                  statusPolling={statusPolling}
+                  updating={updating}
+                  onCreateSandbox={onCreateSandbox}
+                  onRefreshImages={onRefreshSandboxImages}
+                />
+              ) : (
+                <WorkflowSandboxExistingSection
+                  busy={busy}
+                  canUseSandboxSession={canUseSandboxSession}
+                  hasNextPage={availableSandboxesHasNextPage}
+                  hasPreviousPage={availableSandboxesHasPreviousPage}
+                  loading={availableSandboxesLoading}
+                  pageIndex={availableSandboxesPageIndex}
+                  sandboxes={availableSandboxes}
+                  session={session}
+                  updating={updating}
+                  onAssociateSandbox={onAssociateSandbox}
+                  onLoadNextPage={onLoadNextAvailableSandboxes}
+                  onLoadPreviousPage={onLoadPreviousAvailableSandboxes}
+                  onRefresh={onRefreshAvailableSandboxes}
+                />
+              )}
+            </div>
           </div>
         </div>
       ) : null}
@@ -226,9 +259,13 @@ function sandboxStatusClassName(
   canUseSandboxSession: boolean,
   hasBinding: boolean,
   statusPolling: boolean,
+  expired: boolean,
 ) {
   if (!canUseSandboxSession) {
     return 'border-amber-300/24 bg-amber-400/10 text-amber-100'
+  }
+  if (expired) {
+    return 'border-rose-300/24 bg-rose-400/10 text-rose-100'
   }
   if (statusPolling && status !== 'Running') {
     return 'border-sky-300/24 bg-sky-400/10 text-sky-100'

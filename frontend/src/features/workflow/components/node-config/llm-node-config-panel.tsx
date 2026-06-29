@@ -16,10 +16,10 @@ import {
   EditableArea,
   EditableField,
   IOSection,
-  SelectField,
   SwitchRow,
   type NodeConfigPanelProps,
 } from '@/features/workflow/components/node-config/config-fields'
+import { ErrorStrategyConfig } from '@/features/workflow/components/node-config/error-strategy-config'
 import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
 import {
   getAvailableInputSources,
@@ -37,18 +37,6 @@ const DEFAULT_MODEL_OPTION: ModelOption = {
   supportsVision: false,
   maxTokens: null,
   timeoutSeconds: null,
-}
-
-const ERROR_STRATEGY_OPTIONS: NonNullable<WorkflowNode['config']['errorStrategy']>[] = [
-  'interrupt',
-  'fallback',
-  'ignore',
-]
-
-const ERROR_STRATEGY_LABEL: Record<NonNullable<WorkflowNode['config']['errorStrategy']>, string> = {
-  interrupt: '中断流程',
-  fallback: '使用兜底输出',
-  ignore: '忽略并继续',
 }
 
 type ThinkingLevelOption = {
@@ -151,10 +139,6 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       ? inputSources
       : inputSources.filter((source) => !isVisionValueType(source.type)),
     [inputSources, selectedModel.supportsVision],
-  )
-  const errorStrategyOptions = useMemo(
-    () => ERROR_STRATEGY_OPTIONS.map((item) => ERROR_STRATEGY_LABEL[item]),
-    [],
   )
   const visibleOutputs = useMemo(
     () => selectedModel.supportsThinking
@@ -278,34 +262,12 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       </ConfigSection>
 
       <ConfigSection title="异常处理">
-        <div className="grid gap-3">
-          <EditableField
-            label="重试次数（失败后额外重试，0-10）"
-            type="number"
-            value={String(config.retryCount ?? 1)}
-            onChange={(value) => {
-              const retryCount = Math.min(Math.max(Number(value) || 0, 0), 10)
-              onUpdateNode({ config: { retryCount } })
-            }}
-          />
-        </div>
-        <SelectField
-          label="异常策略"
-          value={ERROR_STRATEGY_LABEL[config.errorStrategy ?? 'ignore']}
-          options={errorStrategyOptions}
-          onChange={(label) => {
-            const strategy = ERROR_STRATEGY_OPTIONS.find((item) => ERROR_STRATEGY_LABEL[item] === label) ?? 'ignore'
-            onUpdateNode({ config: { errorStrategy: strategy } })
-          }}
+        <ErrorStrategyConfig
+          errorStrategy={config.errorStrategy ?? 'ignore'}
+          fallbackOutput={config.fallbackOutput ?? ''}
+          retryCount={config.retryCount ?? 1}
+          onChange={(patch) => onUpdateNode({ config: patch })}
         />
-        {(config.errorStrategy ?? 'ignore') === 'fallback' && (
-          <EditableArea
-            label="兜底输出"
-            value={config.fallbackOutput ?? ''}
-            onChange={(value) => onUpdateNode({ config: { fallbackOutput: value } })}
-            rows={3}
-          />
-        )}
       </ConfigSection>
     </ConfigShell>
   )

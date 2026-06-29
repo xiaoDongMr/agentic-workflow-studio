@@ -3,6 +3,7 @@ import type { SandboxStatus } from '@/api/sandbox-pool'
 export interface CreateSandboxFormState {
   sandboxId: string
   image: string
+  ttlSeconds: string
   envText: string
   labelsText: string
 }

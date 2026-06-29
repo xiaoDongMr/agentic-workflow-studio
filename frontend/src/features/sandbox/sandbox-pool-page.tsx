@@ -54,6 +54,7 @@ import {
   createDefaultCustomImageForm,
   createDefaultForm,
   createSandboxId,
+  parseSandboxTtlSeconds,
   parseKeyValueText,
   toSandboxImageCapability,
 } from '@/features/sandbox/sandbox-pool-utils'
@@ -115,8 +116,9 @@ export function SandboxPoolPage() {
     const running = sandboxes.filter((item) => item.status === 'Running').length
     const pending = sandboxes.filter((item) => item.status === 'Pending').length
     const failed = sandboxes.filter((item) => item.status === 'Failed').length
+    const expired = sandboxes.filter((item) => item.expired).length
     const nodes = new Set(sandboxes.map((item) => item.nodeName).filter(Boolean)).size
-    return { running, pending, failed, nodes }
+    return { running, pending, failed, expired, nodes }
   }, [sandboxes])
 
   const hasSandboxFilter = Boolean(sandboxStatusFilter || effectiveSandboxImageFilter || sandboxIdFilter.trim())
@@ -214,6 +216,7 @@ export function SandboxPoolPage() {
         sandboxId: createForm.sandboxId.trim(),
         imageId: selectedImageIdForCreate,
         image: createForm.image.trim() || selectedImageValue,
+        ttlSeconds: parseSandboxTtlSeconds(createForm.ttlSeconds),
         env: parseKeyValueText(createForm.envText, '环境变量'),
         labels: parseKeyValueText(createForm.labelsText, '标签'),
       })
@@ -497,6 +500,10 @@ export function SandboxPoolPage() {
                           <Badge className="w-fit gap-1.5 rounded-2xl border-amber-400/18 bg-amber-400/10 px-3 py-1.5 text-amber-100">
                             <AlertTriangle className="h-3.5 w-3.5" />
                             异常 {stats.failed}
+                          </Badge>
+                          <Badge className="w-fit gap-1.5 rounded-2xl border-rose-400/18 bg-rose-400/10 px-3 py-1.5 text-rose-100">
+                            <Clock3 className="h-3.5 w-3.5" />
+                            过期 {stats.expired}
                           </Badge>
                           <Badge className="w-fit gap-1.5 rounded-2xl border-violet-400/18 bg-violet-400/10 px-3 py-1.5 text-violet-100">
                             <Server className="h-3.5 w-3.5" />

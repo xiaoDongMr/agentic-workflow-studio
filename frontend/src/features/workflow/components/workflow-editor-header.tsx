@@ -47,7 +47,7 @@ interface WorkflowEditorHeaderProps {
   canUseSandboxSession: boolean
   onBack: () => void
   onAssociateSandbox: (sandboxId: string) => Promise<unknown>
-  onCreateSandbox: (imageId: string) => Promise<unknown>
+  onCreateSandbox: (imageId: string, ttlSeconds: string) => Promise<unknown>
   onLoadNextAvailableSandboxes: () => Promise<unknown> | void
   onLoadPreviousAvailableSandboxes: () => Promise<unknown> | void
   onRefreshAvailableSandboxes: () => Promise<unknown> | void

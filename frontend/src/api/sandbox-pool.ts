@@ -15,6 +15,9 @@ export interface SandboxSummary {
   nodeName: string
   podIp: string
   createdAt: string
+  ttlSeconds: number | null
+  expiresAt: string
+  expired: boolean
   labels: Record<string, string>
 }
 
@@ -34,6 +37,7 @@ export interface SandboxCreateRequest {
   sandboxId: string
   imageId?: string
   image?: string
+  ttlSeconds?: number
   env?: Record<string, string>
   labels?: Record<string, string>
 }
@@ -116,6 +120,9 @@ interface SandboxSummaryDto {
   node_name?: string
   pod_ip?: string
   created_at?: string
+  ttl_seconds?: number | null
+  expires_at?: string
+  expired?: boolean
   labels?: Record<string, string>
 }
 
@@ -138,6 +145,7 @@ interface SandboxCreateRequestDto {
   sandbox_id: string
   image_id?: string
   image?: string
+  ttl_seconds?: number
   env?: Record<string, string>
   labels?: Record<string, string>
 }
@@ -202,6 +210,9 @@ function toSandboxSummary(item: SandboxSummaryDto): SandboxSummary {
     nodeName: item.node_name ?? '',
     podIp: item.pod_ip ?? '',
     createdAt: item.created_at ?? '',
+    ttlSeconds: item.ttl_seconds ?? null,
+    expiresAt: item.expires_at ?? '',
+    expired: Boolean(item.expired),
     labels: item.labels ?? {},
   }
 }
@@ -293,6 +304,9 @@ export async function createSandbox(request: SandboxCreateRequest): Promise<Sand
   }
   if (request.image) {
     payload.image = request.image
+  }
+  if (request.ttlSeconds !== undefined) {
+    payload.ttl_seconds = request.ttlSeconds
   }
   if (request.env && Object.keys(request.env).length > 0) {
     payload.env = request.env

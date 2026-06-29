@@ -487,6 +487,13 @@ export function FlowgramNodeCard({
                 </>
               )}
               {kind === 'llm' && <NodeMetaRow label="模型" value={data?.config.model || '默认模型'} />}
+              {kind === 'code' && (
+                <>
+                  <NodeMetaRow label="语言" value={formatCodeLanguage(data?.config.codeLanguage)} />
+                  <NodeMetaRow label="入口" value={data?.config.codeFilePath || '/workspace/code/main.py'} />
+                  <NodeMetaRow label="同步" value={formatCodeSyncStatus(data?.config.codeSyncStatus)} />
+                </>
+              )}
             </div>
           </>
         )}
@@ -990,6 +997,26 @@ function TokenUsageStat({ label, value }: { label: string; value: number }) {
 
 function formatTokenUsage(usage: NonNullable<TrialRunNodeExecution['tokenUsage']>) {
   return `总量 ${usage.totalTokens}，输入 ${usage.inputTokens}，输出 ${usage.outputTokens}`
+}
+
+function formatCodeLanguage(language?: string) {
+  if (language === 'python' || !language) {
+    return 'Python'
+  }
+  return language
+}
+
+function formatCodeSyncStatus(status?: string) {
+  if (status === 'dirty') {
+    return '待同步'
+  }
+  if (status === 'saving') {
+    return '同步中'
+  }
+  if (status === 'failed') {
+    return '同步失败'
+  }
+  return '已同步'
 }
 
 function NodeMetaRow({ label, value }: { label: string; value: string }) {

@@ -8,13 +8,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.runtime import create_app_runtime
+from app.services.sandbox_ttl_cleanup import SandboxTtlCleanupService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with create_app_runtime() as runtime:
         app.state.runtime = runtime
-        yield
+        sandbox_ttl_cleanup = SandboxTtlCleanupService(runtime.app_config)
+        sandbox_ttl_cleanup.start()
+        app.state.sandbox_ttl_cleanup = sandbox_ttl_cleanup
+        try:
+            yield
+        finally:
+            await sandbox_ttl_cleanup.stop()
 
 
 def _get_cors_origins() -> list[str]:

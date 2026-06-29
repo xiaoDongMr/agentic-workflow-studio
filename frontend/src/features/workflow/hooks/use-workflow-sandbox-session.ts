@@ -11,7 +11,7 @@ import {
   listSandboxes,
   type SandboxSummary,
 } from '@/api/sandbox-pool'
-import { createSandboxId } from '@/features/sandbox/sandbox-pool-utils'
+import { createSandboxId, parseSandboxTtlSeconds } from '@/features/sandbox/sandbox-pool-utils'
 import { useRunningSandboxPages } from '@/features/workflow/hooks/use-running-sandbox-pages'
 import { useSandboxImages } from '@/features/workflow/hooks/use-sandbox-images'
 import { useSandboxStatusPolling } from '@/features/workflow/hooks/use-sandbox-status-polling'
@@ -128,6 +128,10 @@ export function useWorkflowSandboxSession({
           setError(`未找到沙箱 ${normalizedSandboxId}`)
           return null
         }
+        if (sandbox.expired) {
+          setError(`沙箱 ${normalizedSandboxId} 已过期，请重新创建或选择其他沙箱`)
+          return null
+        }
         const nextSession = await persistSandboxBinding(sandbox)
         cancelSandboxPolling()
         setSandbox(sandbox)
@@ -146,7 +150,7 @@ export function useWorkflowSandboxSession({
     [cancelSandboxPolling, persistSandboxBinding, pollSandboxUntilReady, workflowId],
   )
 
-  const createAndAssociateSandbox = useCallback(async (imageId: string) => {
+  const createAndAssociateSandbox = useCallback(async (imageId: string, ttlSecondsValue = '') => {
     if (!workflowId) {
       setError('当前 workflow 未保存，无法创建调试沙箱')
       return null
@@ -156,6 +160,14 @@ export function useWorkflowSandboxSession({
       setError('请选择创建沙箱使用的镜像')
       return null
     }
+    let ttlSeconds: number | undefined
+    try {
+      ttlSeconds = parseSandboxTtlSeconds(ttlSecondsValue)
+    } catch (ttlError) {
+      const message = getErrorMessage(ttlError, '过期时间格式不正确')
+      setError(message)
+      return null
+    }
 
     setUpdating(true)
     setError('')
@@ -163,6 +175,7 @@ export function useWorkflowSandboxSession({
       const created = await createSandbox({
         sandboxId: createSandboxId(),
         imageId: selectedImageId,
+        ttlSeconds,
         labels: {
           purpose: WORKFLOW_SANDBOX_PURPOSE_LABEL,
           workflow_id: workflowId,

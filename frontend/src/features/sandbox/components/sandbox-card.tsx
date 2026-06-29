@@ -4,7 +4,14 @@ import { Box, Clock3, ExternalLink, LoaderCircle, Network, Server, Trash2 } from
 import type { SandboxSummary } from '@/api/sandbox-pool'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDate, statusClassName, statusLabel } from '@/features/sandbox/sandbox-pool-utils'
+import {
+  formatDate,
+  formatExpiresAt,
+  formatRemainingTtl,
+  formatTtlSeconds,
+  statusClassName,
+  statusLabel,
+} from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
 
 export function SandboxCard({
@@ -20,6 +27,11 @@ export function SandboxCard({
     sandbox.serviceName ? `Service: ${sandbox.serviceName}` : '',
     sandbox.ingressName ? `Ingress: ${sandbox.ingressName}` : '',
   ].filter(Boolean).join(' · ') || 'Service: -'
+  const lifecycleTone = sandbox.expired
+    ? 'border-rose-400/20 bg-rose-400/10 text-rose-100'
+    : sandbox.expiresAt
+      ? 'border-emerald-400/18 bg-emerald-400/10 text-emerald-100'
+      : 'border-slate-400/14 bg-slate-400/8 text-slate-300'
 
   return (
     <article className="group overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/54 shadow-[0_18px_52px_rgba(2,6,23,0.24)] transition hover:-translate-y-0.5 hover:border-blue-300/24 hover:bg-slate-950/70">
@@ -39,14 +51,20 @@ export function SandboxCard({
               </p>
             </div>
           </div>
-          <Badge className={cn('shrink-0 rounded-2xl px-3 py-1.5 text-xs font-semibold', statusClassName(sandbox.status))}>
-            {statusLabel(sandbox.status)}
+          <Badge
+            className={cn(
+              'shrink-0 rounded-2xl px-3 py-1.5 text-xs font-semibold',
+              sandbox.expired ? 'border-rose-400/28 bg-rose-400/10 text-rose-100' : statusClassName(sandbox.status),
+            )}
+          >
+            {sandbox.expired ? '已过期' : statusLabel(sandbox.status)}
           </Badge>
         </div>
 
-        <div className="relative mt-4 grid grid-cols-2 gap-2">
+        <div className="relative mt-4 grid gap-2 md:grid-cols-3">
           <SandboxCardMetric label="命名空间" value={sandbox.namespace || '-'} />
           <SandboxCardMetric label="节点" value={sandbox.nodeName || '-'} />
+          <SandboxCardMetric label="剩余时间" value={formatRemainingTtl(sandbox.expiresAt, sandbox.expired)} />
         </div>
       </div>
 
@@ -67,6 +85,30 @@ export function SandboxCard({
         <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
           <SandboxInfoPill icon={<Network className="h-3.5 w-3.5" />} label="Pod IP" value={sandbox.podIp || '-'} />
           <SandboxInfoPill icon={<Clock3 className="h-3.5 w-3.5" />} label="创建时间" value={formatDate(sandbox.createdAt)} />
+        </div>
+
+        <div className={cn('rounded-2xl border p-3', lifecycleTone)}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
+              <Clock3 className="h-3.5 w-3.5 shrink-0" />
+              生命周期
+            </div>
+            <Badge className={cn('shrink-0 rounded-xl px-2.5 py-1 text-[11px]', lifecycleTone)}>
+              {sandbox.expired ? '已过期' : sandbox.expiresAt ? '自动清理' : '不过期'}
+            </Badge>
+          </div>
+          <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+            <div className="min-w-0">
+              <div className="text-slate-500">TTL</div>
+              <div className="mt-1 truncate font-medium text-slate-100">{formatTtlSeconds(sandbox.ttlSeconds)}</div>
+            </div>
+            <div className="min-w-0">
+              <div className="text-slate-500">过期时间</div>
+              <div className="mt-1 truncate font-medium text-slate-100" title={sandbox.expiresAt || '-'}>
+                {formatExpiresAt(sandbox.expiresAt)}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">

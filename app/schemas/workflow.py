@@ -90,6 +90,12 @@ class WorkflowNodeConfig(BaseModel):
     retryCount: int = Field(default=1, ge=0, le=10)
     errorStrategy: Literal["interrupt", "fallback", "ignore"] = "ignore"
     fallbackOutput: str = ""
+    codeLanguage: Literal["python"] = "python"
+    codeSource: Literal["sandbox_file", "inline"] = "sandbox_file"
+    codeFilePath: str = "/workspace/code/main.py"
+    codeEntryFunction: str = "main"
+    codeSyncStatus: Literal["saved", "dirty", "saving", "failed"] = "saved"
+    codeLastSavedSignature: str = ""
     selectorBranches: list[WorkflowSelectorBranch] = Field(default_factory=list)
     selectorElseBranch: str = "default"
     loopMode: Literal["array", "count"] = "array"

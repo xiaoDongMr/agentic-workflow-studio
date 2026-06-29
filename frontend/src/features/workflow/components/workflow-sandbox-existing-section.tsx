@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, LoaderCircle } from 'lucide-react'
 
 import type { SandboxSummary } from '@/api/sandbox-pool'
 import type { WorkflowSandboxSession } from '@/api/workflow'
+import { formatExpiresAt } from '@/features/sandbox/sandbox-pool-utils'
 import { cn } from '@/lib/utils'
 
 interface WorkflowSandboxExistingSectionProps {
@@ -154,7 +155,7 @@ function SandboxPageList({
       {sandboxes.map((sandbox) => (
         <SandboxListItem
           key={sandbox.sandboxId}
-          disabled={busy || !canUseSandboxSession}
+          disabled={busy || !canUseSandboxSession || sandbox.expired}
           sandbox={sandbox}
           selected={sandbox.sandboxId === selectedSandboxId}
           onAssociateSandbox={onAssociateSandbox}
@@ -189,10 +190,14 @@ function SandboxListItem({
     >
       <span className="min-w-0">
         <span className="block truncate font-mono text-xs text-slate-100">{sandbox.sandboxId}</span>
-        <span className="mt-0.5 block truncate text-[11px] text-slate-500">{sandbox.sandboxUrl || sandbox.image || '运行中'}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+          {sandbox.expiresAt
+            ? `过期：${formatExpiresAt(sandbox.expiresAt)}`
+            : sandbox.sandboxUrl || sandbox.image || '运行中'}
+        </span>
       </span>
       <span className="shrink-0 rounded-lg border border-emerald-300/18 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-100">
-        {selected ? '当前' : '选择'}
+        {sandbox.expired ? '过期' : selected ? '当前' : '选择'}
       </span>
     </button>
   )

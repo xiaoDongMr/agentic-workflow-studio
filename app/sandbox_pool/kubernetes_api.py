@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from kubernetes import client, config
@@ -20,6 +21,10 @@ SANDBOX_ID_LABEL = "sandbox.agentic-workflow-studio/id"
 SANDBOX_IMAGE_ID_LABEL = "sandbox.agentic-workflow-studio/image-id"
 SANDBOX_COMPONENT_LABEL = "sandbox"
 IMAGE_CACHE_COMPONENT_LABEL = "sandbox-image-cache"
+SANDBOX_TTL_SECONDS_ANNOTATION = "sandbox.agentic-workflow-studio/ttl-seconds"
+SANDBOX_EXPIRES_AT_ANNOTATION = "sandbox.agentic-workflow-studio/expires-at"
+DEFAULT_SANDBOX_TTL_SECONDS = 60 * 60
+DEFAULT_TTL_CLEANUP_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,8 @@ class KubernetesApiSandboxPoolSettings:
     memory_request: str = "512Mi"
     cpu_limit: str = "2"
     memory_limit: str = "4Gi"
+    ttl_seconds: int = DEFAULT_SANDBOX_TTL_SECONDS
+    ttl_cleanup_interval_seconds: int = DEFAULT_TTL_CLEANUP_INTERVAL_SECONDS
     connection: KubernetesApiConnectionSettings = field(default_factory=KubernetesApiConnectionSettings)
     gateway: KubernetesSandboxGatewaySettings = field(default_factory=KubernetesSandboxGatewaySettings)
     extra_labels: dict[str, str] = field(default_factory=dict)
@@ -99,11 +106,21 @@ class KubernetesApiSandboxPoolSettings:
             image_pull_policy=str(raw_api.get("image_pull_policy", "IfNotPresent")),
             service_type=str(raw_api.get("service_type", "NodePort")),
             node_host=str(raw_api.get("node_host", "")),
-            port=int(raw_api.get("port", DEFAULT_PORT)),
+            port=_parse_int_setting(raw_api.get("port"), DEFAULT_PORT, min_value=1),
             cpu_request=str(raw_api.get("cpu_request", "250m")),
             memory_request=str(raw_api.get("memory_request", "512Mi")),
             cpu_limit=str(raw_api.get("cpu_limit", "2")),
             memory_limit=str(raw_api.get("memory_limit", "4Gi")),
+            ttl_seconds=_parse_int_setting(
+                raw_api.get("ttl_seconds"),
+                DEFAULT_SANDBOX_TTL_SECONDS,
+                min_value=0,
+            ),
+            ttl_cleanup_interval_seconds=_parse_int_setting(
+                raw_api.get("ttl_cleanup_interval_seconds"),
+                DEFAULT_TTL_CLEANUP_INTERVAL_SECONDS,
+                min_value=1,
+            ),
             connection=KubernetesApiConnectionSettings(
                 kubeconfig=str(raw_connection.get("kubeconfig", "")),
                 context=str(raw_connection.get("context", "")),
@@ -120,7 +137,7 @@ class KubernetesApiSandboxPoolSettings:
                 base_url=str(raw_gateway.get("base_url", "")),
                 path_template=str(raw_gateway.get("path_template", "/sandboxes/{sandbox_id}")),
                 scheme=str(raw_gateway.get("scheme", "http")),
-                port=int(raw_gateway.get("port", 0) or 0),
+                port=_parse_int_setting(raw_gateway.get("port"), 0, min_value=0),
                 path=str(raw_gateway.get("path", "/")),
             ),
             extra_labels=dict(raw_api.get("labels", {}) or {}),
@@ -141,6 +158,10 @@ class KubernetesApiSandboxPool:
             "connection": self._connection_health(),
             "gateway": self._gateway_health(),
             "error": "",
+            "ttl": {
+                "ttlSeconds": self.settings.ttl_seconds,
+                "cleanupIntervalSeconds": self.settings.ttl_cleanup_interval_seconds,
+            },
         }
         try:
             version = self.version_api.get_code()
@@ -197,7 +218,8 @@ class KubernetesApiSandboxPool:
     def create(self, request: SandboxCreateRequest) -> SandboxSummary:
         sandbox_id = _normalize_name(request.sandbox_id)
         image = request.image or self.settings.image
-        pod = self._pod_manifest(sandbox_id, image, request.env, request.labels)
+        ttl_seconds = self.settings.ttl_seconds if request.ttl_seconds is None else request.ttl_seconds
+        pod = self._pod_manifest(sandbox_id, image, request.env, request.labels, ttl_seconds)
         service = self._service_manifest(sandbox_id)
         ingress = self._ingress_manifest(sandbox_id) if self.settings.gateway.enabled else None
 
@@ -226,6 +248,19 @@ class KubernetesApiSandboxPool:
             except ApiException as exc:
                 if exc.status != 404:
                     raise
+
+    def cleanup_expired(self) -> list[str]:
+        deleted: list[str] = []
+        continue_token = ""
+        while True:
+            result = self.list(limit=100, continue_token=continue_token)
+            for sandbox in result.items:
+                if sandbox.expired and sandbox.sandbox_id:
+                    self.delete(sandbox.sandbox_id)
+                    deleted.append(sandbox.sandbox_id)
+            if not result.continue_token:
+                return deleted
+            continue_token = result.continue_token
 
     def preload_image(self, image_id: str, image: str) -> SandboxImagePreloadStatus:
         image_id = _normalize_name(image_id)
@@ -309,12 +344,14 @@ class KubernetesApiSandboxPool:
         image: str,
         env: dict[str, str],
         labels: dict[str, str],
+        ttl_seconds: int,
     ) -> client.V1Pod:
         return client.V1Pod(
             metadata=client.V1ObjectMeta(
                 name=self._pod_name(sandbox_id),
                 namespace=self.settings.namespace,
                 labels=self._labels(sandbox_id, labels),
+                annotations=self._ttl_annotations(ttl_seconds),
             ),
             spec=client.V1PodSpec(
                 restart_policy="Never",
@@ -437,10 +474,13 @@ class KubernetesApiSandboxPool:
         status = pod.status or client.V1PodStatus()
         spec = pod.spec or client.V1PodSpec(containers=[])
         labels = metadata.labels or {}
+        annotations = metadata.annotations or {}
         sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
         containers = spec.containers or []
         image = containers[0].image if containers else ""
         node_name = spec.node_name or ""
+        expires_at = annotations.get(SANDBOX_EXPIRES_AT_ANNOTATION, "")
+        ttl_seconds = _parse_optional_int(annotations.get(SANDBOX_TTL_SECONDS_ANNOTATION))
         return SandboxSummary(
             sandbox_id=sandbox_id,
             sandbox_url=self._sandbox_url(sandbox_id, node_name),
@@ -454,6 +494,9 @@ class KubernetesApiSandboxPool:
             node_name=node_name,
             pod_ip=status.pod_ip or "",
             created_at=metadata.creation_timestamp.isoformat().replace("+00:00", "Z") if metadata.creation_timestamp else "",
+            ttl_seconds=ttl_seconds,
+            expires_at=expires_at,
+            expired=_is_expired(expires_at),
             labels=labels,
         )
 
@@ -539,6 +582,15 @@ class KubernetesApiSandboxPool:
             SANDBOX_ID_LABEL: sandbox_id,
         }
 
+    def _ttl_annotations(self, ttl_seconds: int) -> dict[str, str]:
+        if ttl_seconds <= 0:
+            return {SANDBOX_TTL_SECONDS_ANNOTATION: "0"}
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+        return {
+            SANDBOX_TTL_SECONDS_ANNOTATION: str(ttl_seconds),
+            SANDBOX_EXPIRES_AT_ANNOTATION: _format_timestamp(expires_at),
+        }
+
     def _pod_name(self, sandbox_id: str) -> str:
         return f"aio-sandbox-{sandbox_id}"
 
@@ -578,3 +630,39 @@ def _normalize_name(value: str) -> str:
     if not normalized:
         raise ValueError("sandbox_id must contain at least one DNS-compatible character")
     return normalized[:63]
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _parse_optional_int(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _parse_int_setting(value: Any, default: int, *, min_value: int) -> int:
+    if value is None or value == "":
+        return max(min_value, default)
+    try:
+        return max(min_value, int(value))
+    except (TypeError, ValueError):
+        return max(min_value, default)
+
+
+def _is_expired(expires_at: str) -> bool:
+    expires_at_dt = _parse_timestamp(expires_at)
+    return expires_at_dt is not None and expires_at_dt <= datetime.now(UTC)

@@ -118,6 +118,12 @@ export interface WorkflowNodeConfig {
   retryCount?: number
   errorStrategy?: 'interrupt' | 'fallback' | 'ignore'
   fallbackOutput?: string
+  codeLanguage?: 'python'
+  codeSource?: 'sandbox_file' | 'inline'
+  codeFilePath?: string
+  codeEntryFunction?: string
+  codeSyncStatus?: 'saved' | 'dirty' | 'saving' | 'failed'
+  codeLastSavedSignature?: string
   selectorBranches?: WorkflowSelectorBranch[]
   selectorElseBranch?: string
   loopMode?: WorkflowLoopMode

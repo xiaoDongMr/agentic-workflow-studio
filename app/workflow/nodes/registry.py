@@ -100,6 +100,8 @@ class WorkflowNodeExecutorRegistry:
                     data={"nodeType": node.type},
                 ))
                 step_update = append_step(node, node_input, error_output, duration_ms, error=str(exc))
+                if node.config.errorStrategy == "interrupt":
+                    raise
                 return {**output_update, **step_update}
 
         return execute

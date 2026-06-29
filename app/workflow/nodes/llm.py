@@ -21,6 +21,10 @@ from app.workflow.services.media_inputs import (
     media_url_to_data_url,
     vision_kind,
 )
+from app.workflow.services.error_policy import (
+    emit_error_strategy_event,
+    retry_attempts,
+)
 from app.workflow.state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -75,8 +79,7 @@ class LlmNodeExecutor:
         return vision_inputs
 
     async def _invoke_with_policy(self, node: WorkflowNode, request: LlmInvokeRequest) -> LlmInvokeResult:
-        retry_count = min(max(node.config.retryCount, 0), 10)
-        attempts = retry_count + 1
+        attempts = retry_attempts(node)
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -117,26 +120,13 @@ class LlmNodeExecutor:
 
         if node.config.errorStrategy == "fallback":
             logger.info("节点 %s 调用失败，使用兜底输出", node.id)
-            emit_workflow_event(build_workflow_event(
-                "node_log",
-                node_id=node.id,
-                node_title=node.title,
-                level="warning",
-                title="使用兜底输出",
-                message="模型调用失败，已按策略使用兜底输出",
-            ))
+            emit_error_strategy_event(node, strategy="fallback", error=last_error or RuntimeError("大模型调用失败"))
             return LlmInvokeResult(content=node.config.fallbackOutput or "", reasoning_content="")
         if node.config.errorStrategy == "ignore":
             logger.info("节点 %s 调用失败，按策略忽略", node.id)
-            emit_workflow_event(build_workflow_event(
-                "node_log",
-                node_id=node.id,
-                node_title=node.title,
-                level="warning",
-                title="忽略模型错误",
-                message="模型调用失败，已按策略忽略并返回空输出",
-            ))
+            emit_error_strategy_event(node, strategy="ignore", error=last_error or RuntimeError("大模型调用失败"))
             return LlmInvokeResult(content="", reasoning_content="")
+        emit_error_strategy_event(node, strategy="interrupt", error=last_error or RuntimeError("大模型调用失败"))
         raise last_error or RuntimeError("大模型调用失败")
 
     def _format_output(self, node: WorkflowNode, content: str, reasoning_content: str) -> dict[str, Any]:

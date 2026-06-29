@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, ImageIcon, LoaderCircle, Server } from 'lucide-react'
+import { CheckCircle2, Clock3, ImageIcon, LoaderCircle, Server } from 'lucide-react'
 
 import type { SandboxImageSummary } from '@/api/sandbox-pool'
+import { SANDBOX_DEFAULT_TTL_SECONDS } from '@/features/sandbox/sandbox-pool-constants'
 import { cn } from '@/lib/utils'
 
 interface WorkflowSandboxCreateSectionProps {
@@ -11,7 +12,7 @@ interface WorkflowSandboxCreateSectionProps {
   imagesLoading: boolean
   statusPolling: boolean
   updating: boolean
-  onCreateSandbox: (imageId: string) => Promise<unknown>
+  onCreateSandbox: (imageId: string, ttlSeconds: string) => Promise<unknown>
   onRefreshImages: () => Promise<unknown> | void
 }
 
@@ -26,6 +27,7 @@ export function WorkflowSandboxCreateSection({
   onRefreshImages,
 }: WorkflowSandboxCreateSectionProps) {
   const [selectedImageId, setSelectedImageId] = useState('')
+  const [ttlSeconds, setTtlSeconds] = useState('')
   const selectedImage = images.find((image) => image.id === selectedImageId)
 
   useEffect(() => {
@@ -81,9 +83,33 @@ export function WorkflowSandboxCreateSection({
         ) : null}
       </div>
 
+      <label className="mt-2 flex flex-col gap-2 rounded-xl border border-white/8 bg-slate-950/42 p-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-amber-300/16 bg-amber-400/10 text-amber-100">
+            <Clock3 className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold text-slate-200">过期时间</span>
+            <span className="mt-0.5 block truncate text-[11px] text-slate-500">为空默认，0 表示不过期</span>
+          </span>
+        </span>
+        <span className="flex h-9 shrink-0 items-center rounded-xl border border-white/8 bg-slate-950/72 pr-3 focus-within:border-amber-300/35 sm:w-[150px]">
+          <input
+            value={ttlSeconds}
+            onChange={(event) => setTtlSeconds(event.target.value)}
+            placeholder={String(SANDBOX_DEFAULT_TTL_SECONDS)}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            disabled={busy || !canUseSandboxSession}
+            className="h-full min-w-0 flex-1 rounded-l-xl bg-transparent px-3 text-xs text-slate-100 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <span className="shrink-0 text-[11px] text-slate-500">秒</span>
+        </span>
+      </label>
+
       <button
         type="button"
-        onClick={() => void onCreateSandbox(selectedImageId)}
+        onClick={() => void onCreateSandbox(selectedImageId, ttlSeconds)}
         disabled={busy || statusPolling || !canUseSandboxSession || !selectedImageId}
         className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/22 bg-emerald-400/12 px-3 text-sm font-semibold text-emerald-50 transition hover:border-emerald-200/40 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-50"
         title={selectedImage ? `使用镜像：${selectedImage.name || selectedImage.id}` : '请选择镜像'}

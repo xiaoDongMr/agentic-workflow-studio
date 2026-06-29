@@ -22,6 +22,8 @@ sandbox_pool:
   kubernetes_api:
     namespace: aio-sandbox
     image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    ttl_seconds: 3600
+    ttl_cleanup_interval_seconds: 60
     service_type: NodePort
     connection:
       kubeconfig: ./kubeconfig.yaml

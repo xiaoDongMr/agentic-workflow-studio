@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { LlmNodeConfigPanel } from '@/features/workflow/components/node-config/llm-node-config-panel'
 import { LoopNodeConfigPanel } from '@/features/workflow/components/node-config/loop-node-config-panel'
 import { SelectorNodeConfigPanel } from '@/features/workflow/components/node-config/selector-node-config-panel'
+import { CodeNodeConfigPanel } from '@/features/workflow/components/node-config/code-node-config-panel'
 import {
   BasicInfoSection,
   ConfigSection,
@@ -44,6 +45,9 @@ export function NodeConfigPanel(props: NodeConfigPanelProps) {
   }
   if (node.type === 'loop') {
     return <LoopNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
+  }
+  if (node.type === 'code') {
+    return <CodeNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
   if (node.type === 'loop-end') {
     return <FixedInfoPanel node={node} className={className} display={LOOP_BODY_END_NODE_DISPLAY} />

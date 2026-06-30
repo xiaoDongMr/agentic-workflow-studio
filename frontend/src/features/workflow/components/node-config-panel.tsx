@@ -27,6 +27,10 @@ export function NodeConfigPanel(props: NodeConfigPanelProps) {
     edges,
     onUpdateNode,
     className,
+    sandbox,
+    sandboxSession,
+    workflowId,
+    workflowSaved,
   } = props
 
   if (node.type === 'llm') {
@@ -47,7 +51,19 @@ export function NodeConfigPanel(props: NodeConfigPanelProps) {
     return <LoopNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
   }
   if (node.type === 'code') {
-    return <CodeNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
+    return (
+      <CodeNodeConfigPanel
+        node={node}
+        nodes={nodes}
+        edges={edges}
+        sandbox={sandbox}
+        sandboxSession={sandboxSession}
+        workflowId={workflowId}
+        workflowSaved={workflowSaved}
+        onUpdateNode={onUpdateNode}
+        className={className}
+      />
+    )
   }
   if (node.type === 'loop-end') {
     return <FixedInfoPanel node={node} className={className} display={LOOP_BODY_END_NODE_DISPLAY} />

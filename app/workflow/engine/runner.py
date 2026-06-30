@@ -36,7 +36,7 @@ class WorkflowRunner:
 
     async def stream(self, workflow: WorkflowDocument, run_input: dict[str, Any]) -> AsyncIterator[WorkflowRunEvent]:
         compiled = self.graph_compiler.compile(workflow)
-        initial_state = initial_workflow_state(run_input)
+        initial_state = initial_workflow_state(workflow, run_input)
         last_step_count = 0
         final_state: WorkflowState | None = None
 
@@ -88,8 +88,12 @@ class WorkflowRunner:
         return final_state
 
 
-def initial_workflow_state(run_input: dict[str, Any]) -> WorkflowState:
+def initial_workflow_state(workflow: WorkflowDocument, run_input: dict[str, Any]) -> WorkflowState:
     return {
+        "workflow": {
+            "id": workflow.id,
+            "name": workflow.name,
+        },
         "input": run_input,
         "variables": {},
         "steps": [],
@@ -101,6 +105,7 @@ def result_from_state(final_state: WorkflowState) -> dict[str, Any]:
     return {
         "output": final_state.get("output", {}),
         "state": {
+            "workflow": final_state.get("workflow", {}),
             "input": final_state.get("input", {}),
             "variables": final_state.get("variables", {}),
         },

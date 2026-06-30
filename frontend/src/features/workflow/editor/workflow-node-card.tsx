@@ -488,11 +488,7 @@ export function FlowgramNodeCard({
               )}
               {kind === 'llm' && <NodeMetaRow label="模型" value={data?.config.model || '默认模型'} />}
               {kind === 'code' && (
-                <>
-                  <NodeMetaRow label="语言" value={formatCodeLanguage(data?.config.codeLanguage)} />
-                  <NodeMetaRow label="入口" value={data?.config.codeFilePath || '/workspace/code/main.py'} />
-                  <NodeMetaRow label="同步" value={formatCodeSyncStatus(data?.config.codeSyncStatus)} />
-                </>
+                <CodeNodeSummary data={data} />
               )}
             </div>
           </>
@@ -1017,6 +1013,54 @@ function formatCodeSyncStatus(status?: string) {
     return '同步失败'
   }
   return '已同步'
+}
+
+function formatCodeModeLabel(source?: WorkflowNode['config']['codeSource']) {
+  if (source === 'sandbox_snippet') {
+    return '脚本片段'
+  }
+  return '沙箱文件'
+}
+
+function formatCodeModeDescription(source?: WorkflowNode['config']['codeSource']) {
+  if (source === 'sandbox_snippet') {
+    return '随节点保存，运行时发送到绑定沙箱'
+  }
+  return '在沙箱 Code 工作区维护独立文件'
+}
+
+function formatCodeEntryName(path?: string) {
+  const normalizedPath = path?.trim()
+  if (!normalizedPath) {
+    return 'main.py'
+  }
+  return normalizedPath.split('/').filter(Boolean).pop() || normalizedPath
+}
+
+function CodeNodeSummary({ data }: { data?: FlowgramNodeData }) {
+  const isSnippet = data?.config.codeSource === 'sandbox_snippet'
+  const entryLabel = isSnippet
+    ? `${(data?.config.prompt ?? '').length} 字符`
+    : formatCodeEntryName(data?.config.codeFilePath)
+
+  return (
+    <div className="aw-flow-code-summary">
+      <div className="aw-flow-code-summary__badges">
+        <span className="aw-flow-code-summary__badge aw-flow-code-summary__badge--mode">
+          {formatCodeModeLabel(data?.config.codeSource)}
+        </span>
+        <span className="aw-flow-code-summary__badge">{formatCodeLanguage(data?.config.codeLanguage)}</span>
+        <span className="aw-flow-code-summary__badge aw-flow-code-summary__badge--sync">
+          {formatCodeSyncStatus(data?.config.codeSyncStatus)}
+        </span>
+      </div>
+      <div className="aw-flow-code-summary__entry">
+        <span className="aw-flow-code-summary__entry-label">{isSnippet ? '代码' : '入口'}</span>
+        <span className="aw-flow-code-summary__entry-value">{entryLabel}</span>
+      </div>
+      <p className="aw-flow-code-summary__hint">{formatCodeModeDescription(data?.config.codeSource)}</p>
+    </div>
+  )
 }
 
 function NodeMetaRow({ label, value }: { label: string; value: string }) {

@@ -89,6 +89,17 @@ export interface WorkflowSandboxSessionUpdate {
   codeStatus?: WorkflowSandboxCodeStatus
 }
 
+export interface WorkflowCodeWorkspace {
+  workflowId: string
+  nodeId: string
+  sandboxId: string
+  sandboxUrl: string
+  folderPath: string
+  entryFilePath: string
+  codeUrl: string
+  created: boolean
+}
+
 interface WorkflowSaveDraftResponse {
   project: WorkflowProjectSummary
   workflow: WorkflowDocument
@@ -257,6 +268,18 @@ export async function updateWorkflowSandboxSession(
   payload: WorkflowSandboxSessionUpdate,
 ): Promise<WorkflowSandboxSession> {
   const { data } = await http.patch<WorkflowSandboxSession>(`/workflows/${workflowId}/sandbox-session`, payload)
+  return data
+}
+
+export async function openWorkflowNodeCodeWorkspace(
+  workflowId: string,
+  nodeId: string,
+  entryFunction: string,
+): Promise<WorkflowCodeWorkspace> {
+  const { data } = await http.post<WorkflowCodeWorkspace>(
+    `/workflows/${workflowId}/nodes/${nodeId}/code-workspace`,
+    { entryFunction },
+  )
   return data
 }
 

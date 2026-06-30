@@ -16,6 +16,7 @@ import {
   DEFAULT_LOOP_CANVAS_HEIGHT,
   DEFAULT_LOOP_CANVAS_WIDTH,
 } from '@/features/workflow/editor/loop-node.utils'
+import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
 import type { WorkflowNode } from '@/types/workflow'
 
 export const CANVAS_OFFSET_X = 420
@@ -278,7 +279,7 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
     inputs: [{ name: 'input', type: 'Object', description: '传入代码的上下文对象' }],
     outputs: [{ name: 'code_result', type: 'Object', description: '代码执行结果' }],
     config: {
-      prompt: 'def main(input):\n    return {"result": input}',
+      prompt: DEFAULT_CODE_SNIPPET,
       model: 'Python',
       temperature: 0,
       maxTokens: 600,
@@ -289,7 +290,7 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
       inputMappings: [],
       codeLanguage: 'python',
       codeSource: 'sandbox_file',
-      codeFilePath: '/workspace/code/main.py',
+      codeFilePath: '',
       codeEntryFunction: 'main',
       codeSyncStatus: 'saved',
       codeLastSavedSignature: '',

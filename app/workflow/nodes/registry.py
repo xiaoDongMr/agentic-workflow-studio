@@ -33,7 +33,7 @@ class WorkflowNodeExecutorRegistry:
             "llm": LlmNodeExecutor(app_config),
             "selector": SelectorNodeExecutor(),
             "loop": LoopNodeExecutor(app_config),
-            "code": CodeNodeExecutor(),
+            "code": CodeNodeExecutor(app_config),
             "end": EndNodeExecutor(),
         }
 

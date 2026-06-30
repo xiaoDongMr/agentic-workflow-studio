@@ -1,4 +1,5 @@
 import type { WorkflowDocument } from '@/types/workflow'
+import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
 
 export const mockWorkflow: WorkflowDocument = {
   id: 'basic-langgraph-flow',
@@ -115,7 +116,7 @@ export const mockWorkflow: WorkflowDocument = {
       inputs: [{ name: 'input', type: 'Object', description: '传入代码的上下文对象' }],
       outputs: [{ name: 'code_result', type: 'Object', description: '代码执行结果' }],
       config: {
-        prompt: 'def main(input):\n    return {"branch": input.get("branch"), "loop_count": input.get("count", 0)}',
+          prompt: DEFAULT_CODE_SNIPPET,
         model: 'Python',
         temperature: 0,
         maxTokens: 512,
@@ -126,7 +127,7 @@ export const mockWorkflow: WorkflowDocument = {
         inputMappings: [],
         codeLanguage: 'python',
         codeSource: 'sandbox_file',
-        codeFilePath: '/workspace/code/main.py',
+        codeFilePath: '',
         codeEntryFunction: 'main',
         codeSyncStatus: 'saved',
         codeLastSavedSignature: '',

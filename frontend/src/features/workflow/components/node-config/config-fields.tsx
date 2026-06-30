@@ -3,6 +3,8 @@ import type { HTMLAttributes, ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 import { IOSection } from '@/features/workflow/components/node-config/io-section'
+import type { SandboxSummary } from '@/api/sandbox-pool'
+import type { WorkflowSandboxSession } from '@/api/workflow'
 import type { WorkflowInputMapping, WorkflowNode } from '@/types/workflow'
 
 const DEFAULT_MODEL_LABEL = '默认模型'
@@ -19,6 +21,10 @@ export interface NodeConfigPanelProps extends HTMLAttributes<HTMLDivElement> {
       config?: Partial<WorkflowNode['config']>
     },
   ) => void
+  sandbox?: SandboxSummary | null
+  sandboxSession?: WorkflowSandboxSession | null
+  workflowId?: string
+  workflowSaved?: boolean
 }
 
 export function ConfigShell({

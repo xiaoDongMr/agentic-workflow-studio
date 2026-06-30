@@ -187,6 +187,10 @@ function App() {
                           node={selectedNode}
                           nodes={allWorkflowNodes}
                           edges={allWorkflowEdges}
+                          sandbox={workflowSandboxSession.sandbox}
+                          sandboxSession={workflowSandboxSession.session}
+                          workflowId={workflow.id}
+                          workflowSaved={currentWorkflowSaved}
                           onUpdateNode={(partial) => {
                             if (canvasApi) {
                               canvasApi.updateSelectedNode(partial)

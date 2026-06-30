@@ -525,6 +525,81 @@ textarea {
   color: #64748b;
 }
 
+.aw-flow-code-summary {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-radius: 16px;
+  border: 1px solid rgba(240, 171, 252, 0.12);
+  background:
+    linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(15, 23, 42, 0.58)),
+    rgba(2, 6, 23, 0.18);
+  padding: 9px;
+}
+
+.aw-flow-code-summary__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.aw-flow-code-summary__badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #cbd5e1;
+}
+
+.aw-flow-code-summary__badge--mode {
+  border-color: rgba(240, 171, 252, 0.24);
+  background: rgba(168, 85, 247, 0.12);
+  color: #f5d0fe;
+}
+
+.aw-flow-code-summary__badge--sync {
+  color: #a7f3d0;
+}
+
+.aw-flow-code-summary__entry {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.aw-flow-code-summary__entry-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.aw-flow-code-summary__entry-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+.aw-flow-code-summary__hint {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #64748b;
+}
+
 .aw-flow-selector-branch-list {
   display: flex;
   flex-direction: column;

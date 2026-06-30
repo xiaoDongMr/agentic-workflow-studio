@@ -11,6 +11,7 @@ def merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
 
 
 class WorkflowState(TypedDict, total=False):
+    workflow: dict[str, Any]
     input: dict[str, Any]
     variables: Annotated[dict[str, Any], merge_dicts]
     steps: Annotated[list[dict[str, Any]], add]

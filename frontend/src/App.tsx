@@ -142,6 +142,7 @@ function App() {
                       <WorkflowCanvas
                         key={`${workflow.id}:${workflow.version}`}
                         className="h-full"
+                        workflowId={workflow.id}
                         nodes={workflow.nodes}
                         edges={workflow.edges}
                         selectedNodeId={selectedNodeId}
@@ -181,7 +182,7 @@ function App() {
                     )}
 
                     {selectedNode && (
-                      <div className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[420px] max-w-[calc(100%-24px)]">
+                      <div className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[min(480px,calc(100%_-_24px))] 2xl:w-[min(540px,calc(100%_-_24px))]">
                         <NodeConfigPanel
                           className="h-full"
                           node={selectedNode}

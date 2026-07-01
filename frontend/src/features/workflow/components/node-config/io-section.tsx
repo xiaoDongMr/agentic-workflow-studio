@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState, type ChangeEvent, type ReactNod
 
 import { cn } from '@/lib/utils'
 import type { WorkflowInputMapping, WorkflowNode, WorkflowNodeIO, WorkflowValueType } from '@/types/workflow'
+import { createEmptyIOItem, syncMappingAtIndex } from '@/features/workflow/components/node-config/io-mapping-utils'
 import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
 import {
   ARRAY_VALUE_TYPES,
@@ -759,23 +760,4 @@ function TypeBadge({ type, muted = false }: { type: string; muted?: boolean }) {
       {formatValueType(type)}
     </span>
   )
-}
-
-function createEmptyIOItem(sourceOption?: WorkflowVariableSource): WorkflowNodeIO {
-  return {
-    name: sourceOption?.value.split('.').at(-1) ?? '',
-    type: sourceOption ? normalizeValueType(sourceOption.type) : 'String',
-    description: '',
-  }
-}
-
-function syncMappingAtIndex(
-  mappings: WorkflowInputMapping[],
-  index: number,
-  nextMapping: WorkflowInputMapping,
-) {
-  if (index < mappings.length) {
-    return mappings.map((mapping, mappingIndex) => (mappingIndex === index ? { ...mapping, ...nextMapping } : mapping))
-  }
-  return [...mappings, nextMapping]
 }

@@ -47,11 +47,39 @@ export function buildPayloadFromFieldEntries(fields: GlobalDebugFieldValue[]) {
   )
 }
 
+export function syncCombinedJsonWithFields(combinedJson: string, fields: GlobalDebugFieldValue[]) {
+  const parsed = parseJsonObject(combinedJson)
+  if (!parsed) {
+    return JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
+  }
+  const fieldPayload = buildPayloadFromFieldEntries(fields)
+  const nextPayload = Object.fromEntries(
+    fields.map((field) => [
+      field.name,
+      Object.prototype.hasOwnProperty.call(parsed, field.name)
+        ? parsed[field.name]
+        : fieldPayload[field.name],
+    ]),
+  )
+  return JSON.stringify(nextPayload, null, 2)
+}
+
 function parseArrayFieldValue(value: string) {
   try {
     const parsed = JSON.parse(value) as unknown
     return Array.isArray(parsed) ? parsed : []
   } catch {
     return value.split('\n').map((item) => item.trim()).filter(Boolean)
+  }
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
   }
 }

@@ -10,7 +10,10 @@ from app.workflow.services.code_execution import (
     execute_sandbox_snippet,
     safe_exec,
 )
-from app.workflow.services.code_sandbox_runtime import resolve_bound_workflow_sandbox
+from app.workflow.services.code_sandbox_runtime import (
+    CodeSandboxConfigurationError,
+    resolve_bound_workflow_sandbox,
+)
 from app.workflow.services.error_policy import (
     emit_error_strategy_event,
     emit_retry_event,
@@ -20,6 +23,10 @@ from app.workflow.services.error_policy import (
     retry_attempts,
 )
 from app.workflow.state import WorkflowState
+
+
+class CodeNodeConfigurationError(ValueError):
+    """Raised when code node configuration is incomplete before sandbox execution."""
 
 
 class CodeNodeExecutor:
@@ -32,9 +39,11 @@ class CodeNodeExecutor:
         for attempt in range(1, attempts + 1):
             try:
                 result = await self._run_code(node, node_input, state)
-                return {output_key(node): result}
+                return self._format_output(node, result)
             except Exception as exc:
                 last_error = exc
+                if self._is_non_retryable_error(exc):
+                    break
                 if attempt < attempts:
                     emit_retry_event(node, attempt=attempt, attempts=attempts, error=exc, title="代码执行重试")
 
@@ -59,7 +68,7 @@ class CodeNodeExecutor:
     async def _run_sandbox_snippet(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> Any:
         code = node.config.prompt.strip()
         if not code:
-            raise ValueError("脚本片段为空")
+            raise CodeNodeConfigurationError("脚本片段为空")
         sandbox = await resolve_bound_workflow_sandbox(app_config=self._app_config, state=state)
         return execute_sandbox_snippet(
             sandbox=sandbox,
@@ -71,7 +80,7 @@ class CodeNodeExecutor:
     async def _run_sandbox_file(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> Any:
         file_path = node.config.codeFilePath.strip()
         if not file_path:
-            raise ValueError("入口文件未初始化，请先打开沙箱 Code 工作区")
+            raise CodeNodeConfigurationError("入口文件未初始化，请先打开沙箱 Code 工作区")
         sandbox = await resolve_bound_workflow_sandbox(app_config=self._app_config, state=state)
         return execute_sandbox_file(
             sandbox=sandbox,
@@ -80,3 +89,21 @@ class CodeNodeExecutor:
             node_input=node_input,
             variables=state.get("variables", {}),
         )
+
+    @staticmethod
+    def _is_non_retryable_error(error: Exception) -> bool:
+        return isinstance(error, (CodeNodeConfigurationError, CodeSandboxConfigurationError))
+
+    @staticmethod
+    def _format_output(node: WorkflowNode, result: Any) -> dict[str, Any]:
+        output_names = [output.name.strip() for output in node.outputs if output.name.strip()]
+        if not isinstance(result, dict):
+            raise CodeNodeConfigurationError("编码节点返回值必须是对象，并与输出变量名称一一对应")
+        if output_names:
+            missing_outputs = [name for name in output_names if name not in result]
+            if missing_outputs:
+                raise CodeNodeConfigurationError(
+                    f"编码节点返回结果缺少输出变量：{', '.join(missing_outputs)}"
+                )
+            return {name: result[name] for name in output_names}
+        return {output_key(node): result}

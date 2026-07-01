@@ -5,6 +5,10 @@ from datetime import datetime
 from typing import Any
 
 
+class ValueTypeConversionError(ValueError):
+    pass
+
+
 def normalize_value_type(value_type: str) -> str:
     normalized = value_type.strip().lower()
     if normalized.startswith("array<") and normalized.endswith(">"):
@@ -57,10 +61,18 @@ def convert_value(value: Any, value_type: str) -> Any:
     if normalized_type == "string":
         return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     if normalized_type == "integer":
+        if isinstance(value, dict):
+            raise ValueTypeConversionError(f"期望 Integer，但收到 Object: {value!r}")
+        if isinstance(value, list):
+            raise ValueTypeConversionError(f"期望 Integer，但收到 Array: {value!r}")
         if isinstance(value, bool):
             return int(value)
         return int(float(value))
     if normalized_type == "number":
+        if isinstance(value, dict):
+            raise ValueTypeConversionError(f"期望 Number，但收到 Object: {value!r}")
+        if isinstance(value, list):
+            raise ValueTypeConversionError(f"期望 Number，但收到 Array: {value!r}")
         return float(value)
     if normalized_type == "boolean":
         if isinstance(value, bool):
@@ -92,11 +104,24 @@ def convert_value(value: Any, value_type: str) -> Any:
     return value
 
 
-def coerce_by_io_definitions(values: dict[str, Any], io_definitions: list[Any]) -> dict[str, Any]:
+def coerce_by_io_definitions(
+    values: dict[str, Any],
+    io_definitions: list[Any],
+    *,
+    scope: str = "变量",
+) -> dict[str, Any]:
     next_values = dict(values)
     for item in io_definitions:
         field_name = getattr(item, "name", "")
         if not field_name or field_name not in next_values:
             continue
-        next_values[field_name] = convert_value(next_values[field_name], getattr(item, "type", "string"))
+        value_type = getattr(item, "type", "string")
+        try:
+            next_values[field_name] = convert_value(next_values[field_name], value_type)
+        except ValueTypeConversionError as exc:
+            raise ValueTypeConversionError(f"{scope} {field_name} 类型转换失败：{exc}") from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueTypeConversionError(
+                f"{scope} {field_name} 类型转换失败：无法将 {next_values[field_name]!r} 转换为 {value_type}"
+            ) from exc
     return next_values

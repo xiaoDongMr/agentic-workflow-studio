@@ -57,19 +57,21 @@ class WorkflowNodeExecutorRegistry:
     def make_node_callable(self, node: WorkflowNode):
         async def execute(state: WorkflowState) -> WorkflowState:
             started_at = time.perf_counter()
-            node_input = build_node_input(node, state)
-            emit_workflow_event(build_workflow_event(
-                "node_started",
-                node_id=node.id,
-                node_title=node.title,
-                title="节点开始执行",
-                message=f"{node.title} 执行中",
-                data={"inputKeys": list(node_input.keys()), "nodeType": node.type},
-            ))
+            node_input: dict[str, Any] = {}
             try:
                 executor = self.get(node.type)
+                if node.config.enabled:
+                    node_input = build_node_input(node, state)
+                emit_workflow_event(build_workflow_event(
+                    "node_started",
+                    node_id=node.id,
+                    node_title=node.title,
+                    title="节点开始执行",
+                    message=f"{node.title} 执行中",
+                    data={"inputKeys": list(node_input.keys()), "nodeType": node.type},
+                ))
                 node_output = {"skipped": True} if not node.config.enabled else await executor.run(node, node_input, state)
-                node_output = coerce_by_io_definitions(node_output, node.outputs)
+                node_output = coerce_by_io_definitions(node_output, node.outputs, scope="输出变量")
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
                 output_update = store_node_output(node, node_output)
                 emit_workflow_event(build_workflow_event(

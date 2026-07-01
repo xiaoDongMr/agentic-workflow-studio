@@ -114,9 +114,39 @@ def parse_literal_mapping_value(source: Any, value_type: str) -> Any:
 
 
 def build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
+    if node.type == "loop" and node.config.loopMode == "count":
+        return {}
+
+    ensure_declared_inputs_are_mapped(node)
     result = build_mapped_values(node.config.inputMappings, state)
     if not result and node.type == "selector" and node.config.selectorBranches:
         result = build_selector_reference_values(node, state)
     if not result:
-        result["input"] = state.get("input", {})
-    return coerce_by_io_definitions(result, node.inputs)
+        return {}
+    return coerce_by_io_definitions(result, node.inputs, scope="输入变量")
+
+
+def ensure_declared_inputs_are_mapped(node: WorkflowNode) -> None:
+    input_names = {item.name for item in node.inputs if item.name}
+    if not input_names:
+        return
+
+    mapped_fields = {
+        mapping.field
+        for mapping in node.config.inputMappings
+        if is_valid_input_mapping(mapping)
+    }
+    missing_fields = sorted(input_names - mapped_fields)
+    if missing_fields:
+        raise ValueError(
+            f"节点「{node.title}」输入映射未配置：{', '.join(missing_fields)}。"
+            "请在节点配置中为输入变量绑定来源。"
+        )
+
+
+def is_valid_input_mapping(mapping: Any) -> bool:
+    if not getattr(mapping, "field", ""):
+        return False
+    if mapping.sourceType == "literal":
+        return True
+    return bool(getattr(mapping, "source", ""))

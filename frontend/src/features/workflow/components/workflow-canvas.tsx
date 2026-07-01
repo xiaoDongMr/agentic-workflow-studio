@@ -11,6 +11,7 @@ const WorkflowEditor = lazy(async () => {
 })
 
 interface WorkflowCanvasProps {
+  workflowId: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
   selectedNodeId: string

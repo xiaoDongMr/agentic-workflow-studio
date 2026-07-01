@@ -47,14 +47,18 @@ export function normalizeSelectorLabelsForNode(node: WorkflowNode, allNodes: Wor
   return normalized
 }
 
-export function toSingleNodeTestWorkflow(node: WorkflowNode, allNodes: WorkflowNode[] = []): WorkflowDocument {
+export function toSingleNodeTestWorkflow(
+  node: WorkflowNode,
+  allNodes: WorkflowNode[] = [],
+  workflowId?: string,
+): WorkflowDocument {
   const singleNode = cloneWorkflowNode(normalizeSelectorLabelsForNode(node, allNodes))
   const inputDefinitions = getSingleNodeInputDefinitions(singleNode, allNodes)
   singleNode.inputs = inputDefinitions
   const contextMappings = createSingleNodeContextMappings(singleNode, allNodes)
 
   return {
-    id: `single-node-${singleNode.id}`,
+    id: workflowId?.trim() || `single-node-${singleNode.id}`,
     name: `${singleNode.title} 单节点测试`,
     description: '仅执行当前节点，用于快速验证节点配置。',
     version: 'v0.1.0',

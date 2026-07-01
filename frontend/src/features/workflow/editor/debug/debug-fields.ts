@@ -39,10 +39,32 @@ export function formatInputFieldValue(value: unknown, structured: boolean, array
   if (value === undefined) {
     return structured ? (arrayStructured ? '[]' : '{}') : ''
   }
-  if (typeof value === 'string') {
-    return structured ? value : value
+  if (!structured) {
+    return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   }
-  return JSON.stringify(value, null, 2)
+  return JSON.stringify(coerceStructuredFieldValue(value, arrayStructured), null, 2)
+}
+
+export function areDebugFieldsEqual(left: GlobalDebugFieldValue[], right: GlobalDebugFieldValue[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((leftField, index) => {
+    const rightField = right[index]
+    return Boolean(
+      rightField &&
+      leftField.name === rightField.name &&
+      leftField.type === rightField.type &&
+      leftField.valueType === rightField.valueType &&
+      leftField.value === rightField.value &&
+      leftField.label === rightField.label &&
+      leftField.description === rightField.description &&
+      leftField.group === rightField.group &&
+      leftField.groupLabel === rightField.groupLabel &&
+      leftField.sourceLabel === rightField.sourceLabel &&
+      areStringArraysEqual(leftField.usageHints, rightField.usageHints)
+    )
+  })
 }
 
 function createSelectorTrialFields(
@@ -66,7 +88,11 @@ function createSelectorTrialFields(
       usageHints: reference.usageHints,
       type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
       valueType: reference.valueType,
-      value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
+      value: formatInputFieldValue(
+        value,
+        structured || inputType.endsWith('-array'),
+        arrayStructured || inputType.endsWith('-array'),
+      ),
     } satisfies GlobalDebugFieldValue
   })
 }
@@ -88,7 +114,11 @@ function createDebugFieldFromDefinition(
     sourceLabel: definition.sourceLabel,
     type: inputType === 'string' && typeof value === 'object' && value !== null ? 'json' : inputType,
     valueType: definition.type,
-    value: formatInputFieldValue(value, structured || inputType.endsWith('-array'), arrayStructured),
+    value: formatInputFieldValue(
+      value,
+      structured || inputType.endsWith('-array'),
+      arrayStructured || inputType.endsWith('-array'),
+    ),
   } satisfies GlobalDebugFieldValue
 }
 
@@ -127,4 +157,28 @@ function isStructuredWorkflowType(type: string) {
 
 function isArrayWorkflowType(type?: string) {
   return Boolean(type?.trim().toLowerCase().startsWith('array'))
+}
+
+function coerceStructuredFieldValue(value: unknown, arrayStructured: boolean) {
+  if (typeof value === 'string') {
+    try {
+      return coerceStructuredFieldValue(JSON.parse(value) as unknown, arrayStructured)
+    } catch {
+      return arrayStructured ? [] : {}
+    }
+  }
+  if (arrayStructured) {
+    return Array.isArray(value) ? value : []
+  }
+  return value
+}
+
+function areStringArraysEqual(left?: string[], right?: string[]) {
+  if (!left?.length && !right?.length) {
+    return true
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false
+  }
+  return left.every((item, index) => item === right[index])
 }

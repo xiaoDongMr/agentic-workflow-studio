@@ -27,6 +27,7 @@ import {
   SingleNodeTrialPanel,
 } from '@/features/workflow/editor/workflow-editor-components'
 import {
+  areDebugFieldsEqual,
   createGlobalDebugFields,
   createSingleNodeTrialFields,
   formatInputFieldValue,
@@ -36,6 +37,7 @@ import {
   buildDebugPayloadFromFields,
   buildPayloadFromFieldEntries,
   safeParseJsonField,
+  syncCombinedJsonWithFields,
   type SingleNodeTrialCache,
 } from '@/features/workflow/editor/debug/trial-run-payload'
 import {
@@ -100,6 +102,7 @@ export interface WorkflowCanvasApi {
 }
 
 interface WorkflowEditorProps {
+  workflowId: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
   selectedNodeId: string
@@ -134,6 +137,7 @@ function trialRunExecutionStateKey(nodeId: string, loopNodeId?: string) {
 }
 
 export function WorkflowEditor({
+  workflowId,
   nodes,
   edges,
   selectedNodeId,
@@ -170,6 +174,8 @@ export function WorkflowEditor({
   const [singleNodeJsonMode, setSingleNodeJsonMode] = useState(false)
   const [singleNodeCombinedJson, setSingleNodeCombinedJson] = useState('{}')
   const [singleNodeJsonError, setSingleNodeJsonError] = useState('')
+  const singleNodeTrialFieldsRef = useRef<GlobalDebugFieldValue[]>([])
+  const singleNodeCombinedJsonRef = useRef('{}')
   const runTimerIdsRef = useRef<number[]>([])
   const runAbortControllerRef = useRef<AbortController | null>(null)
   const singleNodeTrialCacheRef = useRef<Record<string, SingleNodeTrialCache>>({})
@@ -201,6 +207,14 @@ export function WorkflowEditor({
       [nodeId]: cache,
     }
   }, [])
+
+  useEffect(() => {
+    singleNodeTrialFieldsRef.current = singleNodeTrialFields
+  }, [singleNodeTrialFields])
+
+  useEffect(() => {
+    singleNodeCombinedJsonRef.current = singleNodeCombinedJson
+  }, [singleNodeCombinedJson])
 
   const replaceTrialRunExecutions = useCallback((next: Record<string, TrialRunNodeExecution>) => {
     trialRunExecutionsRef.current = next
@@ -419,8 +433,14 @@ export function WorkflowEditor({
     const fallbackPayload = globalDebugJsonMode
       ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
       : buildPayloadFromFieldEntries(globalDebugFields)
-    const fields = cached?.fields ?? createSingleNodeTrialFields(targetNode, fallbackPayload, allKnownNodes)
-    const combinedJson = cached?.combinedJson ?? JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
+    const fields = createSingleNodeTrialFields(
+      targetNode,
+      cached?.fields ? buildPayloadFromFieldEntries(cached.fields) : fallbackPayload,
+      allKnownNodes,
+    )
+    const combinedJson = cached?.combinedJson
+      ? syncCombinedJsonWithFields(cached.combinedJson, fields)
+      : JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
 
     clearTrialRunTimers()
     abortTrialRunStream()
@@ -450,6 +470,47 @@ export function WorkflowEditor({
     onSelectNode,
     replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
+  ])
+
+  useEffect(() => {
+    if (!singleNodeTrialOpen || !singleNodeTrialNodeId) {
+      return
+    }
+
+    const allKnownNodes = flattenWorkflowNodes(nodes)
+    const targetNode = findWorkflowNodeById(nodes, singleNodeTrialNodeId)
+    if (!targetNode) {
+      return
+    }
+
+    const currentFields = singleNodeTrialFieldsRef.current
+    const nextFields = createSingleNodeTrialFields(
+      targetNode,
+      buildPayloadFromFieldEntries(currentFields),
+      allKnownNodes,
+    )
+    if (areDebugFieldsEqual(currentFields, nextFields)) {
+      return
+    }
+
+    const nextCombinedJson = singleNodeJsonMode
+      ? syncCombinedJsonWithFields(singleNodeCombinedJsonRef.current, nextFields)
+      : JSON.stringify(buildPayloadFromFieldEntries(nextFields), null, 2)
+
+    setSingleNodeTrialFields(nextFields)
+    setSingleNodeCombinedJson(nextCombinedJson)
+    saveSingleNodeTrialCache(singleNodeTrialNodeId, {
+      fields: nextFields,
+      jsonMode: singleNodeJsonMode,
+      combinedJson: nextCombinedJson,
+    })
+    setSingleNodeJsonError('')
+  }, [
+    nodes,
+    saveSingleNodeTrialCache,
+    singleNodeJsonMode,
+    singleNodeTrialNodeId,
+    singleNodeTrialOpen,
   ])
 
   const runSingleNode = useCallback(async (nodeId: string, payloadOverride?: Record<string, unknown>) => {
@@ -496,7 +557,7 @@ export function WorkflowEditor({
         : buildPayloadFromFieldEntries(globalDebugFields))
 
       setTrialRunning(true)
-      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode, allKnownNodes), payload, {
+      const executions = await streamWorkflow(toSingleNodeTestWorkflow(targetNode, allKnownNodes, workflowId), payload, {
         signal: abortController.signal,
         onWorkflowEvent: (event) => {
           applyRuntimeEventToNode(event, nodeId, targetNode)
@@ -558,6 +619,7 @@ export function WorkflowEditor({
     nodes,
     replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
+    workflowId,
   ])
 
   const closeDebugPanels = useCallback(() => {
@@ -834,7 +896,7 @@ export function WorkflowEditor({
         ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
         : buildDebugPayloadFromFields(globalDebugFields)
       const workflow = {
-        id: 'current-canvas',
+        id: workflowId,
         name: '当前画布工作流',
         description: '前端画布提交到后端 LangGraph 执行的工作流。',
         version: 'v0.1.0',
@@ -892,6 +954,7 @@ export function WorkflowEditor({
     nodes,
     replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
+    workflowId,
   ])
 
   const closeTrialRun = useCallback(() => {

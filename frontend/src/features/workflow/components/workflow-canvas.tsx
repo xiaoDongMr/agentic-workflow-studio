@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { LoaderCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import type { SandboxSummary } from '@/api/sandbox-pool'
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 export type { WorkflowCanvasApi } from '@/features/workflow/editor/workflow-editor'
 
@@ -14,6 +15,7 @@ interface WorkflowCanvasProps {
   workflowId: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  sandbox?: SandboxSummary | null
   selectedNodeId: string
   onSelectNode: (nodeId: string) => void
   onReady?: (api: import('@/features/workflow/editor/workflow-editor').WorkflowCanvasApi) => void

@@ -78,23 +78,51 @@ import traceback
 
 payload = json.loads(base64.b64decode("{encoded_payload}").decode("utf-8"))
 
+class Args:
+    def __init__(self, params, variables):
+        self.params = params
+        self.variables = variables
+
+Output = dict
+args = Args(payload["input"], payload["variables"])
+
+def expected_signature(entry_name):
+    return "async def " + entry_name + "(args: Args) -> Output"
+
+def invoke_entry(entry, entry_name):
+    if not callable(entry):
+        raise TypeError("编码节点缺少入口函数：" + entry_name)
+    if not inspect.iscoroutinefunction(entry):
+        raise TypeError("编码节点入口函数必须定义为 " + expected_signature(entry_name))
+    try:
+        parameters = list(inspect.signature(entry).parameters.values())
+    except (TypeError, ValueError) as exc:
+        raise TypeError("无法读取编码节点入口函数签名：" + str(exc)) from exc
+    if len(parameters) != 1:
+        raise TypeError("编码节点入口函数必须定义为 " + expected_signature(entry_name))
+    parameter = parameters[0]
+    annotation = parameter.annotation
+    annotation_name = getattr(annotation, "__name__", str(annotation))
+    if parameter.name != "args" or annotation_name != "Args":
+        raise TypeError("编码节点入口函数必须定义为 " + expected_signature(entry_name))
+    return asyncio.run(entry(args))
+
 try:
     if payload["mode"] == "file":
         spec = importlib.util.spec_from_file_location("workflow_code_node", payload["file_path"])
         if spec is None or spec.loader is None:
             raise RuntimeError("Cannot load entry file: " + payload["file_path"])
         module = importlib.util.module_from_spec(spec)
+        module.Args = Args
+        module.Output = Output
+        module.args = args
+        module.input = payload["input"]
+        module.params = payload["input"]
+        module.variables = payload["variables"]
         spec.loader.exec_module(module)
         entry = getattr(module, payload["entry_function"])
-        result = entry(payload["input"])
+        result = invoke_entry(entry, payload["entry_function"])
     else:
-        class Args:
-            def __init__(self, params, variables):
-                self.params = params
-                self.variables = variables
-
-        Output = dict
-        args = Args(payload["input"], payload["variables"])
         local_vars = {{
             "Args": Args,
             "Output": Output,
@@ -116,14 +144,7 @@ try:
         }}
         exec(payload["code"], sandbox_globals, local_vars)
         entry = local_vars.get("main")
-        if callable(entry):
-            result = entry(args)
-            if inspect.isawaitable(result):
-                result = asyncio.run(result)
-        elif local_vars.get("ret") is not None:
-            result = local_vars.get("ret")
-        else:
-            result = local_vars.get("result")
+        result = invoke_entry(entry, "main")
     response = {{"ok": True, "result": result}}
 except Exception as exc:
     response = {{

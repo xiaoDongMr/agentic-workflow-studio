@@ -119,6 +119,7 @@ export interface WorkflowNodeConfig {
   errorStrategy?: 'interrupt' | 'fallback' | 'ignore'
   fallbackOutput?: string
   codeLanguage?: 'python'
+  codeCapability?: 'python' | 'browser'
   codeSource?: 'sandbox_file' | 'sandbox_snippet' | 'inline'
   codeFilePath?: string
   codeEntryFunction?: string

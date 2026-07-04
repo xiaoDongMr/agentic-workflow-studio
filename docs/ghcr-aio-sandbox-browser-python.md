@@ -87,16 +87,58 @@ PY
 连接已有 Chromium CDP：
 
 ```python
+import json
+from urllib.request import urlopen
+
 from playwright.sync_api import sync_playwright
 
-cdp_url = "http://127.0.0.1:9222"
+with urlopen("http://127.0.0.1:8080/v1/browser/info", timeout=10) as response:
+    browser_info = json.loads(response.read().decode("utf-8"))
+
+cdp_url = browser_info["data"]["cdp_url"]
 
 with sync_playwright() as p:
     browser = p.chromium.connect_over_cdp(cdp_url)
-    page = browser.new_page()
+    context = browser.contexts[0] if browser.contexts else browser.new_context()
+    page = context.pages[0] if context.pages else context.new_page()
     page.goto("https://example.com", wait_until="domcontentloaded")
     print(page.title())
-    browser.close()
+```
+
+编码节点浏览器操作默认模板建议使用同样方式：直接访问 AioSandbox 本地 API 获取 CDP 地址，不依赖 `agent_sandbox` SDK。
+
+```python
+import json
+from urllib.request import urlopen
+
+from playwright.async_api import async_playwright
+
+
+async def main(args: Args) -> Output:
+    params = args.params
+    target_url = params["url"]
+
+    with urlopen("http://127.0.0.1:8080/v1/browser/info", timeout=10) as response:
+        browser_info = json.loads(response.read().decode("utf-8"))
+
+    cdp_url = browser_info["data"]["cdp_url"]
+
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(cdp_url)
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = context.pages[0] if context.pages else await context.new_page()
+
+        await page.goto(target_url, wait_until="domcontentloaded")
+        title = await page.title()
+        final_url = page.url
+        screenshot_path = "/tmp/workflow-browser-screenshot.png"
+        await page.screenshot(path=screenshot_path, full_page=True)
+
+    return {
+        "title": title,
+        "url": final_url,
+        "screenshot_path": screenshot_path,
+    }
 ```
 
 ## 排查

@@ -1022,7 +1022,17 @@ function formatCodeModeLabel(source?: WorkflowNode['config']['codeSource']) {
   return '沙箱文件'
 }
 
-function formatCodeModeDescription(source?: WorkflowNode['config']['codeSource']) {
+function formatCodeCapabilityLabel(capability?: WorkflowNode['config']['codeCapability']) {
+  if (capability === 'browser') {
+    return '浏览器操作'
+  }
+  return 'Python'
+}
+
+function formatCodeModeDescription(source?: WorkflowNode['config']['codeSource'], capability?: WorkflowNode['config']['codeCapability']) {
+  if (capability === 'browser') {
+    return '连接 AioSandbox 浏览器/CDP，并可通过 VNC 预览'
+  }
   if (source === 'sandbox_snippet') {
     return '随节点保存，运行时发送到绑定沙箱'
   }
@@ -1038,7 +1048,8 @@ function formatCodeEntryName(path?: string) {
 }
 
 function CodeNodeSummary({ data }: { data?: FlowgramNodeData }) {
-  const isSnippet = data?.config.codeSource === 'sandbox_snippet'
+  const isBrowser = data?.config.codeCapability === 'browser'
+  const isSnippet = !isBrowser && data?.config.codeSource === 'sandbox_snippet'
   const entryLabel = isSnippet
     ? `${(data?.config.prompt ?? '').length} 字符`
     : formatCodeEntryName(data?.config.codeFilePath)
@@ -1047,8 +1058,9 @@ function CodeNodeSummary({ data }: { data?: FlowgramNodeData }) {
     <div className="aw-flow-code-summary">
       <div className="aw-flow-code-summary__badges">
         <span className="aw-flow-code-summary__badge aw-flow-code-summary__badge--mode">
-          {formatCodeModeLabel(data?.config.codeSource)}
+          {formatCodeCapabilityLabel(data?.config.codeCapability)}
         </span>
+        <span className="aw-flow-code-summary__badge">{formatCodeModeLabel(isBrowser ? 'sandbox_file' : data?.config.codeSource)}</span>
         <span className="aw-flow-code-summary__badge">{formatCodeLanguage(data?.config.codeLanguage)}</span>
         <span className="aw-flow-code-summary__badge aw-flow-code-summary__badge--sync">
           {formatCodeSyncStatus(data?.config.codeSyncStatus)}
@@ -1058,7 +1070,7 @@ function CodeNodeSummary({ data }: { data?: FlowgramNodeData }) {
         <span className="aw-flow-code-summary__entry-label">{isSnippet ? '代码' : '入口'}</span>
         <span className="aw-flow-code-summary__entry-value">{entryLabel}</span>
       </div>
-      <p className="aw-flow-code-summary__hint">{formatCodeModeDescription(data?.config.codeSource)}</p>
+      <p className="aw-flow-code-summary__hint">{formatCodeModeDescription(data?.config.codeSource, data?.config.codeCapability)}</p>
     </div>
   )
 }

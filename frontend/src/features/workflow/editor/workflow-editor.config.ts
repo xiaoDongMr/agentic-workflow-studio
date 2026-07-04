@@ -16,7 +16,11 @@ import {
   DEFAULT_LOOP_CANVAS_HEIGHT,
   DEFAULT_LOOP_CANVAS_WIDTH,
 } from '@/features/workflow/editor/loop-node.utils'
-import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
+import {
+  DEFAULT_CODE_NODE_INPUTS,
+  DEFAULT_CODE_NODE_OUTPUTS,
+  DEFAULT_CODE_SNIPPET,
+} from '@/features/workflow/code-node-defaults'
 import type { WorkflowNode } from '@/types/workflow'
 
 export const CANVAS_OFFSET_X = 420
@@ -276,8 +280,8 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
     title: '编码节点',
     description: '在调试沙箱中执行 Python 代码，转换并返回结构化结果。',
     status: 'idle',
-    inputs: [{ name: 'input', type: 'Object', description: '传入代码的上下文对象' }],
-    outputs: [{ name: 'code_result', type: 'Object', description: '代码执行结果' }],
+    inputs: DEFAULT_CODE_NODE_INPUTS,
+    outputs: DEFAULT_CODE_NODE_OUTPUTS,
     config: {
       prompt: DEFAULT_CODE_SNIPPET,
       model: 'Python',
@@ -286,10 +290,11 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
       enabled: true,
       fallbackToHuman: false,
       responseMode: 'json',
-      outputKey: 'code_result',
+      outputKey: 'key0',
       inputMappings: [],
       codeLanguage: 'python',
-      codeSource: 'sandbox_file',
+      codeCapability: 'python',
+      codeSource: 'sandbox_snippet',
       codeFilePath: '',
       codeEntryFunction: 'main',
       codeSyncStatus: 'saved',

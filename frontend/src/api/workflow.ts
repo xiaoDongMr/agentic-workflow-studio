@@ -100,6 +100,8 @@ export interface WorkflowCodeWorkspace {
   created: boolean
 }
 
+export type WorkflowCodeCapability = 'python' | 'browser'
+
 interface WorkflowSaveDraftResponse {
   project: WorkflowProjectSummary
   workflow: WorkflowDocument
@@ -275,10 +277,11 @@ export async function openWorkflowNodeCodeWorkspace(
   workflowId: string,
   nodeId: string,
   entryFunction: string,
+  codeCapability: WorkflowCodeCapability = 'python',
 ): Promise<WorkflowCodeWorkspace> {
   const { data } = await http.post<WorkflowCodeWorkspace>(
     `/workflows/${workflowId}/nodes/${nodeId}/code-workspace`,
-    { entryFunction },
+    { entryFunction, codeCapability },
   )
   return data
 }

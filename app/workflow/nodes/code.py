@@ -10,6 +10,7 @@ from app.workflow.services.code_execution import (
     execute_sandbox_snippet,
     safe_exec,
 )
+from app.workflow.services.browser_runtime import validate_browser_runtime
 from app.workflow.services.code_sandbox_runtime import (
     CodeSandboxConfigurationError,
     resolve_bound_workflow_sandbox,
@@ -58,6 +59,8 @@ class CodeNodeExecutor:
         raise error
 
     async def _run_code(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> Any:
+        if node.config.codeCapability == "browser" and node.config.codeSource != "sandbox_file":
+            raise CodeNodeConfigurationError("浏览器操作仅支持沙箱文件入口，请先打开沙箱 Code 工作区")
         code_source = node.config.codeSource
         if code_source in {"sandbox_snippet", "inline"}:
             return await self._run_sandbox_snippet(node, node_input, state)
@@ -82,6 +85,11 @@ class CodeNodeExecutor:
         if not file_path:
             raise CodeNodeConfigurationError("入口文件未初始化，请先打开沙箱 Code 工作区")
         sandbox = await resolve_bound_workflow_sandbox(app_config=self._app_config, state=state)
+        if node.config.codeCapability == "browser":
+            try:
+                validate_browser_runtime(sandbox)
+            except RuntimeError as exc:
+                raise CodeNodeConfigurationError(str(exc)) from exc
         return execute_sandbox_file(
             sandbox=sandbox,
             file_path=file_path,

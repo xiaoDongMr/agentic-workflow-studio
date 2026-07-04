@@ -1,33 +1,38 @@
-import { AlertCircle, Clock3 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock3, FileCode2, ScrollText } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import type { WorkflowNodeConfig } from '@/types/workflow'
 
 import {
   CODE_AUTHORING_OPTIONS,
+  CODE_EXECUTION_CAPABILITY_OPTIONS,
   CODE_SYNC_STATUS_LABELS,
   type CodeAuthoringMode,
+  type CodeExecutionCapability,
 } from './code-node-constants'
 
 export function CodeNodeSummary({
   codeMode,
+  capability,
   entryFunction,
   fileName,
   filePath,
   syncStatus,
 }: {
   codeMode: CodeAuthoringMode
+  capability: CodeExecutionCapability
   entryFunction: string
   fileName: string
   filePath: string
   syncStatus: NonNullable<WorkflowNodeConfig['codeSyncStatus']>
 }) {
   const isSnippetMode = codeMode === 'sandbox_snippet'
+  const isBrowser = capability === 'browser'
   return (
     <div className="rounded-[20px] border border-emerald-300/14 bg-[radial-gradient(circle_at_12%_0%,rgba(16,185,129,0.16),transparent_34%),linear-gradient(135deg,rgba(15,23,42,0.78),rgba(2,6,23,0.72))] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-white">Python 代码执行</p>
+          <p className="text-sm font-semibold text-white">{isBrowser ? '浏览器自动化执行' : 'Python 代码执行'}</p>
           <p className="mt-1 truncate text-[11px] text-emerald-100/70" title={filePath || '脚本片段随节点配置保存'}>
             {isSnippetMode ? '脚本片段随节点配置保存，不创建入口文件。' : fileName}
           </p>
@@ -35,25 +40,25 @@ export function CodeNodeSummary({
         <StatusPill status={syncStatus} />
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <SummaryTile label="执行能力" value={isBrowser ? '浏览器操作' : 'Python'} />
         <SummaryTile label="编码模式" value={isSnippetMode ? '脚本片段' : '沙箱文件'} />
         <SummaryTile label={isSnippetMode ? '入口方式' : '入口函数'} value={isSnippetMode ? '直接执行' : entryFunction || 'main'} />
-        <SummaryTile label="运行环境" value="调试沙箱" />
       </div>
     </div>
   )
 }
 
-export function CodeModeSwitch({
+export function CodeCapabilitySwitch({
   value,
   onChange,
 }: {
-  value: CodeAuthoringMode
-  onChange: (value: CodeAuthoringMode) => void
+  value: CodeExecutionCapability
+  onChange: (value: CodeExecutionCapability) => void
 }) {
   return (
-    <div className="mb-3 rounded-2xl border border-white/8 bg-slate-950/42 p-1">
+    <div className="rounded-2xl border border-white/8 bg-slate-950/42 p-1">
       <div className="grid gap-1 sm:grid-cols-2">
-        {CODE_AUTHORING_OPTIONS.map((option) => {
+        {CODE_EXECUTION_CAPABILITY_OPTIONS.map((option) => {
           const active = value === option.value
           return (
             <button
@@ -63,7 +68,7 @@ export function CodeModeSwitch({
               className={cn(
                 'rounded-xl border px-3 py-2 text-left transition',
                 active
-                  ? 'border-emerald-300/26 bg-emerald-400/10 text-emerald-50'
+                  ? 'border-sky-300/28 bg-sky-400/10 text-sky-50'
                   : 'border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-200',
               )}
             >
@@ -77,6 +82,66 @@ export function CodeModeSwitch({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+export function CodeModeSwitch({
+  value,
+  onChange,
+}: {
+  value: CodeAuthoringMode
+  onChange: (value: CodeAuthoringMode) => void
+}) {
+  return (
+    <div className="mb-3 grid gap-2 sm:grid-cols-2">
+      {CODE_AUTHORING_OPTIONS.map((option) => {
+        const active = value === option.value
+        const Icon = option.value === 'sandbox_snippet' ? ScrollText : FileCode2
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'group relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition',
+              active
+                ? 'border-emerald-300/28 bg-[linear-gradient(135deg,rgba(16,185,129,0.16),rgba(15,23,42,0.68))] text-emerald-50 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_14px_32px_rgba(16,185,129,0.08)]'
+                : 'border-white/8 bg-slate-950/34 text-slate-400 hover:border-white/14 hover:bg-white/[0.045] hover:text-slate-200',
+            )}
+          >
+            {active ? (
+              <span className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-emerald-200/50 to-transparent" />
+            ) : null}
+            <span className="flex items-start gap-2.5">
+              <span
+                className={cn(
+                  'mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition',
+                  active
+                    ? 'border-emerald-300/24 bg-emerald-300/12 text-emerald-100'
+                    : 'border-white/8 bg-white/[0.03] text-slate-500 group-hover:text-slate-300',
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">{option.title}</span>
+                  {active ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/18 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
+                      <CheckCircle2 className="h-3 w-3" />
+                      当前
+                    </span>
+                  ) : null}
+                </span>
+                <span className="mt-1 block text-[11px] leading-4 text-slate-500 group-hover:text-slate-400">
+                  {option.description}
+                </span>
+              </span>
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

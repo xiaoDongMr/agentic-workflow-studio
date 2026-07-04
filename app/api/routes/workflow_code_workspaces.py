@@ -79,6 +79,7 @@ async def open_workflow_node_code_workspace(
             sandbox=sandbox,
             node_id=normalized_node_id,
             entry_function=body.entryFunction,
+            code_capability=body.codeCapability,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

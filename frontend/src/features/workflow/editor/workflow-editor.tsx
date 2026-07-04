@@ -45,6 +45,7 @@ import {
   normalizeWorkflowNodesForRun,
   toSingleNodeTestWorkflow,
 } from '@/features/workflow/editor/debug/single-node-workflow'
+import { resolveBrowserRuntimePreview } from '@/features/workflow/editor/debug/browser-runtime-preview'
 import { useWorkflowNodeActions } from '@/features/workflow/editor/hooks/use-workflow-node-actions'
 import {
   findFlowgramNodeById,
@@ -56,6 +57,7 @@ import {
 } from '@/features/workflow/editor/loop-child-drag'
 import type {
   AddNodeOptions,
+  BrowserRuntimePreview,
   FlowgramNodeData,
   GlobalDebugFieldValue,
   NodePaletteKey,
@@ -76,6 +78,7 @@ import {
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
 import { clearNodeExecutionPanelExpansion } from '@/features/workflow/editor/node-execution-panel-state'
+import { buildBrowserPreviewUrl } from '@/features/workflow/components/node-config/code-node/code-node-utils'
 import {
   clearNodeTrialRunExecution,
   createTrialRunId,
@@ -90,6 +93,7 @@ import {
   findWorkflowNodeById,
   flattenWorkflowNodes,
 } from '@/features/workflow/utils/workflow-document'
+import type { SandboxSummary } from '@/api/sandbox-pool'
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 
 export interface WorkflowCanvasApi {
@@ -105,6 +109,7 @@ interface WorkflowEditorProps {
   workflowId: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  sandbox?: SandboxSummary | null
   selectedNodeId: string
   onSelectNode: (nodeId: string) => void
   onReady?: (api: WorkflowCanvasApi) => void
@@ -140,6 +145,7 @@ export function WorkflowEditor({
   workflowId,
   nodes,
   edges,
+  sandbox,
   selectedNodeId,
   onSelectNode,
   onReady,
@@ -190,6 +196,28 @@ export function WorkflowEditor({
     const targetNode = findWorkflowNodeById(nodes, singleNodeTrialNodeId)
     return targetNode ? normalizeSelectorLabelsForNode(targetNode, flattenWorkflowNodes(nodes)) : undefined
   }, [nodes, singleNodeTrialNodeId])
+  const browserPreviewUrl = useMemo(() => buildBrowserPreviewUrl(sandbox?.sandboxUrl), [sandbox?.sandboxUrl])
+  const globalBrowserPreview = useMemo(
+    () =>
+      resolveBrowserRuntimePreview({
+        previewUrl: browserPreviewUrl,
+        nodes,
+        executions: trialRunExecutions,
+      }),
+    [browserPreviewUrl, nodes, trialRunExecutions],
+  )
+  const singleNodeBrowserPreview = useMemo<BrowserRuntimePreview | undefined>(() => {
+    const execution = singleNodeTrialNodeId ? trialRunExecutions[singleNodeTrialNodeId] : undefined
+    if (!browserPreviewUrl || singleNodeTrialNode?.config.codeCapability !== 'browser' || !execution) {
+      return undefined
+    }
+    return {
+      previewUrl: browserPreviewUrl,
+      nodeId: execution.nodeId,
+      nodeTitle: execution.nodeTitle || singleNodeTrialNode.title,
+      status: execution.status,
+    }
+  }, [browserPreviewUrl, singleNodeTrialNode, singleNodeTrialNodeId, trialRunExecutions])
 
   const clearTrialRunTimers = useCallback(() => {
     runTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId))
@@ -1198,6 +1226,7 @@ export function WorkflowEditor({
             open={trialRunOpen}
             fields={globalDebugFields}
             running={trialRunning}
+            browserPreview={globalBrowserPreview}
             jsonMode={globalDebugJsonMode}
             combinedJson={globalDebugCombinedJson}
             jsonError={globalDebugJsonError}
@@ -1213,6 +1242,7 @@ export function WorkflowEditor({
             fields={singleNodeTrialFields}
             running={trialRunning}
             execution={singleNodeTrialNodeId ? trialRunExecutions[singleNodeTrialNodeId] : undefined}
+            browserPreview={singleNodeBrowserPreview}
             jsonMode={singleNodeJsonMode}
             combinedJson={singleNodeCombinedJson}
             jsonError={singleNodeJsonError}

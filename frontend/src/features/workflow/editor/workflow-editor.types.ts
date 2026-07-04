@@ -111,6 +111,13 @@ export interface TrialRunNodeExecution {
   loopIterations?: TrialRunLoopIterationExecution[]
 }
 
+export interface BrowserRuntimePreview {
+  previewUrl: string
+  nodeId: string
+  nodeTitle: string
+  status: TrialRunNodeState
+}
+
 export interface GlobalDebugFieldValue {
   name: string
   type: 'json' | 'string' | 'image' | 'video' | 'image-array' | 'video-array'

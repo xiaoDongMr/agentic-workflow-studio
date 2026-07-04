@@ -13,6 +13,7 @@ DEFAULT_SANDBOX_HOME_DIR = "/home/gem"
 WORKFLOW_CODE_ROOT_DIR = "workflows"
 CODE_SERVER_PATH = "/code-server/"
 DEFAULT_CODE_FILE_NAME = "main.py"
+BROWSER_CODE_FILE_NAME = "browser_main.py"
 
 _SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _ENTRY_FILE_EXISTS_MARKER = "__workflow_code_entry_exists__"
@@ -51,6 +52,7 @@ def build_workflow_code_workspace_paths(
     node_id: str,
     *,
     sandbox_home_dir: str = DEFAULT_SANDBOX_HOME_DIR,
+    code_capability: str = "python",
 ) -> WorkflowCodeWorkspacePaths:
     safe_workflow_id = normalize_workflow_code_path_segment(workflow_id, "workflow_id")
     safe_node_id = normalize_workflow_code_path_segment(node_id, "node_id")
@@ -58,7 +60,7 @@ def build_workflow_code_workspace_paths(
     folder_path = f"{code_root}/{safe_workflow_id}/nodes/{safe_node_id}"
     return WorkflowCodeWorkspacePaths(
         folder_path=folder_path,
-        entry_file_path=f"{folder_path}/{DEFAULT_CODE_FILE_NAME}",
+        entry_file_path=f"{folder_path}/{_entry_file_name_for_capability(code_capability)}",
     )
 
 
@@ -73,6 +75,7 @@ def ensure_workflow_code_workspace(
     sandbox: SandboxSummary,
     node_id: str,
     entry_function: str,
+    code_capability: str = "python",
 ) -> WorkflowCodeWorkspaceResult:
     if not session.sandbox_id:
         raise ValueError("workflow sandbox is not bound")
@@ -88,12 +91,14 @@ def ensure_workflow_code_workspace(
         session.workflow_id,
         node_id,
         sandbox_home_dir=_sandbox_home_dir(sandbox_client),
+        code_capability=code_capability,
     )
     created = _ensure_entry_file(
         sandbox=sandbox_client,
         folder_path=paths.folder_path,
         entry_file_path=paths.entry_file_path,
         entry_function=entry_function,
+        code_capability=code_capability,
     )
     return WorkflowCodeWorkspaceResult(
         workflow_id=session.workflow_id,
@@ -113,6 +118,7 @@ def _ensure_entry_file(
     folder_path: str,
     entry_file_path: str,
     entry_function: str,
+    code_capability: str,
 ) -> bool:
     quoted_folder = shlex.quote(folder_path)
     quoted_entry_file = shlex.quote(entry_file_path)
@@ -125,7 +131,7 @@ def _ensure_entry_file(
     if _ENTRY_FILE_EXISTS_MARKER in output:
         return False
 
-    sandbox.write_file(entry_file_path, _default_main_py(entry_function))
+    sandbox.write_file(entry_file_path, _default_main_py(entry_function, code_capability=code_capability))
     return True
 
 
@@ -140,10 +146,68 @@ def _sandbox_home_dir(sandbox: WorkflowCodeSandbox) -> str:
     return home_dir.rstrip("/") or DEFAULT_SANDBOX_HOME_DIR
 
 
-def _default_main_py(entry_function: str) -> str:
+def _default_main_py(entry_function: str, *, code_capability: str = "python") -> str:
+    if code_capability == "browser":
+        return _default_browser_main_py(entry_function)
+    if code_capability != "python":
+        raise ValueError(f"unsupported code capability: {code_capability}")
+    return _default_python_main_py(entry_function)
+
+
+def _entry_file_name_for_capability(code_capability: str) -> str:
+    if code_capability == "browser":
+        return BROWSER_CODE_FILE_NAME
+    if code_capability == "python":
+        return DEFAULT_CODE_FILE_NAME
+    raise ValueError(f"unsupported code capability: {code_capability}")
+
+
+def _default_python_main_py(entry_function: str) -> str:
     return (
-        f"def {entry_function}(input):\n"
-        "    return {\"result\": input}\n"
+        "# 在这里，您可以通过 'args' 获取节点中的输入变量，并通过返回对象输出结果\n"
+        "# 'args' 会在编码节点运行时注入，args.params 是当前节点的输入参数\n"
+        "# 返回对象的 key 需要与节点输出变量名称保持一致\n\n"
+        f"async def {entry_function}(args: Args) -> Output:\n"
+        "    params = args.params\n"
+        "    ret: Output = {\n"
+        "        \"key0\": params[\"input\"] + params[\"input\"],\n"
+        "        \"key1\": [\"hello\", \"world\"],\n"
+        "        \"key2\": {\n"
+        "            \"key21\": \"hi\",\n"
+        "        },\n"
+        "    }\n"
+        "    return ret\n"
+    )
+
+
+def _default_browser_main_py(entry_function: str) -> str:
+    return (
+        "import json\n"
+        "from urllib.request import urlopen\n\n"
+        "from playwright.async_api import async_playwright\n\n\n"
+        "# 浏览器操作会直接调用 AioSandbox 本地 Browser API，并连接内置浏览器/CDP。\n"
+        "# 当前沙箱镜像需要包含 Playwright、浏览器运行环境和 VNC/CDP 能力。\n"
+        "# 返回对象的 key 需要与节点输出变量名称保持一致。\n"
+        f"async def {entry_function}(args: Args) -> Output:\n"
+        "    params = args.params\n"
+        "    target_url = params[\"url\"]\n\n"
+        "    with urlopen(\"http://127.0.0.1:8080/v1/browser/info\", timeout=10) as response:\n"
+        "        browser_info = json.loads(response.read().decode(\"utf-8\"))\n\n"
+        "    cdp_url = browser_info[\"data\"][\"cdp_url\"]\n\n"
+        "    async with async_playwright() as p:\n"
+        "        browser = await p.chromium.connect_over_cdp(cdp_url)\n"
+        "        context = browser.contexts[0] if browser.contexts else await browser.new_context()\n"
+        "        page = context.pages[0] if context.pages else await context.new_page()\n\n"
+        "        await page.goto(target_url, wait_until=\"domcontentloaded\")\n"
+        "        title = await page.title()\n"
+        "        final_url = page.url\n"
+        "        screenshot_path = \"/tmp/workflow-browser-screenshot.png\"\n"
+        "        await page.screenshot(path=screenshot_path, full_page=True)\n\n"
+        "    return {\n"
+        "        \"title\": title,\n"
+        "        \"url\": final_url,\n"
+        "        \"screenshot_path\": screenshot_path,\n"
+        "    }\n"
     )
 
 

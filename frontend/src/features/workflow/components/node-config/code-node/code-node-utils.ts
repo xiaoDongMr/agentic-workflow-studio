@@ -1,8 +1,10 @@
 import type { NodeConfigPanelProps } from '@/features/workflow/components/node-config/config-fields'
 import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
-import type { WorkflowNodeConfig } from '@/types/workflow'
+import type { SandboxSummary } from '@/api/sandbox-pool'
+import type { WorkflowNodeConfig, WorkflowNodeIO } from '@/types/workflow'
 
 import {
+  BROWSER_CODE_ENTRY_FILE_NAME,
   DEFAULT_CODE_ENTRY_FILE_NAME,
   DEFAULT_SANDBOX_CODE_FILE_PATH,
   DEFAULT_SANDBOX_WORKFLOW_CODE_ROOT,
@@ -10,6 +12,35 @@ import {
   LEGACY_WORKFLOW_CODE_ROOT_PREFIXES,
   type CodeAuthoringMode,
 } from './code-node-constants'
+
+export function isLegacyCodeResultOutput(outputs: WorkflowNodeIO[]) {
+  return outputs.length === 1 && outputs[0]?.name === 'code_result' && outputs[0]?.type === 'Object'
+}
+
+export function isBrowserCapableSandbox(sandbox?: SandboxSummary | null) {
+  if (!sandbox) {
+    return false
+  }
+  const candidates = [
+    sandbox.imageId,
+    sandbox.image,
+    ...Object.keys(sandbox.labels ?? {}),
+    ...Object.values(sandbox.labels ?? {}),
+  ]
+    .join(' ')
+    .toLowerCase()
+  return ['browser', 'playwright', 'chromium', 'chrome', 'vnc', 'cdp'].some((keyword) =>
+    candidates.includes(keyword),
+  )
+}
+
+export function buildBrowserPreviewUrl(sandboxUrl?: string) {
+  const baseUrl = sandboxUrl?.trim().replace(/\/+$/, '')
+  if (!baseUrl) {
+    return ''
+  }
+  return `${baseUrl}/vnc/index.html?autoconnect=true`
+}
 
 export function formatCodeLanguage(language?: WorkflowNodeConfig['codeLanguage']) {
   if (language === 'python' || !language) {
@@ -23,10 +54,7 @@ export function formatCodeFileName(path: string) {
 }
 
 export function resolveCodeAuthoringMode(codeSource?: WorkflowNodeConfig['codeSource']): CodeAuthoringMode {
-  if (codeSource === 'sandbox_snippet' || codeSource === 'inline') {
-    return 'sandbox_snippet'
-  }
-  return 'sandbox_file'
+  return codeSource === 'sandbox_file' ? 'sandbox_file' : 'sandbox_snippet'
 }
 
 export function resolveCodeSnippet(code?: string) {
@@ -75,7 +103,12 @@ export function getCodeWorkspaceOpenState({
   }
 }
 
-export function resolveCodeFilePath(workflowId: string, nodeId: string, configuredPath?: string) {
+export function resolveCodeFilePath(
+  workflowId: string,
+  nodeId: string,
+  configuredPath?: string,
+  entryFileName = DEFAULT_CODE_ENTRY_FILE_NAME,
+) {
   const normalizedPath = configuredPath?.trim()
   if (
     normalizedPath &&
@@ -85,9 +118,13 @@ export function resolveCodeFilePath(workflowId: string, nodeId: string, configur
     return normalizedPath
   }
   if (workflowId && nodeId) {
-    return `${DEFAULT_SANDBOX_WORKFLOW_CODE_ROOT}/${workflowId}/nodes/${nodeId}/${DEFAULT_CODE_ENTRY_FILE_NAME}`
+    return `${DEFAULT_SANDBOX_WORKFLOW_CODE_ROOT}/${workflowId}/nodes/${nodeId}/${entryFileName}`
   }
   return normalizedPath || DEFAULT_SANDBOX_CODE_FILE_PATH
+}
+
+export function resolveDefaultEntryFileName(codeCapability?: WorkflowNodeConfig['codeCapability']) {
+  return codeCapability === 'browser' ? BROWSER_CODE_ENTRY_FILE_NAME : DEFAULT_CODE_ENTRY_FILE_NAME
 }
 
 export function resolveCodeOutputKey(outputs: Array<{ name: string }>) {

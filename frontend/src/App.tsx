@@ -145,6 +145,7 @@ function App() {
                         workflowId={workflow.id}
                         nodes={workflow.nodes}
                         edges={workflow.edges}
+                        sandbox={workflowSandboxSession.sandbox}
                         selectedNodeId={selectedNodeId}
                         onSelectNode={setSelectedNodeId}
                         onReady={setCanvasApi}

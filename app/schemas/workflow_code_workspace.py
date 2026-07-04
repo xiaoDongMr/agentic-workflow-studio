@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import keyword
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 
 class WorkflowCodeWorkspaceRequest(BaseModel):
     entryFunction: str = Field(default="main", max_length=128)
+    codeCapability: Literal["python", "browser"] = "python"
 
     @field_validator("entryFunction")
     @classmethod

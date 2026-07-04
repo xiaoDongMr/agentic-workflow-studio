@@ -1,4 +1,4 @@
-import { Copy, ExternalLink, FolderOpen, LoaderCircle, Maximize2 } from 'lucide-react'
+import { Copy, ExternalLink, FolderOpen, Info, LoaderCircle, Maximize2, Monitor } from 'lucide-react'
 
 import { EditableField } from '@/features/workflow/components/node-config/config-fields'
 import type { WorkflowNodeConfig } from '@/types/workflow'
@@ -16,8 +16,12 @@ interface CodeEntryCardProps {
   openMessage: string
   syncStatus: NonNullable<WorkflowNodeConfig['codeSyncStatus']>
   workspaceError: string
+  browserCapable?: boolean
+  browserPreviewMessage?: string
+  browserMode?: boolean
   onCopyPath: () => void
   onEntryFunctionChange: (value: string) => void
+  onOpenBrowserOnly?: () => void
   onOpenCode: () => void
   onOpenExternal: () => void
   openingMode: CodeWorkspaceOpeningMode
@@ -33,22 +37,37 @@ export function CodeEntryCard({
   openMessage,
   syncStatus,
   workspaceError,
+  browserCapable = false,
+  browserPreviewMessage = '',
+  browserMode = false,
   onCopyPath,
   onEntryFunctionChange,
+  onOpenBrowserOnly,
   onOpenCode,
   onOpenExternal,
   openingMode,
 }: CodeEntryCardProps) {
+  const title = browserMode ? '浏览器编码工作台' : '沙箱 Code 工作区'
+  const description = browserMode
+    ? '在同一个工作台中编辑浏览器脚本，并查看 AioSandbox VNC 实时画面。'
+    : '点击打开时会在当前绑定沙箱中创建节点目录和入口文件，已有文件不会覆盖。'
+  const environmentText = browserMode
+    ? '浏览器操作会连接 AioSandbox 内置浏览器/CDP，并通过 VNC 展示实时页面。当前沙箱镜像需要包含 Playwright、浏览器运行环境和 VNC/CDP 能力。'
+    : '沙箱文件会在当前绑定调试沙箱内执行，只能使用该沙箱镜像中已经安装的 Python 版本、系统工具和第三方依赖。如果代码需要额外依赖，请基于 AioSandbox 构建自定义镜像，并在创建调试沙箱时选择该镜像。'
   return (
     <div className="rounded-2xl border border-emerald-300/14 bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(15,23,42,0.72))] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-50">
-            <FolderOpen className="h-3.5 w-3.5 text-emerald-200" />
-            沙箱 Code 工作区
+            {browserMode ? (
+              <Monitor className="h-3.5 w-3.5 text-sky-200" />
+            ) : (
+              <FolderOpen className="h-3.5 w-3.5 text-emerald-200" />
+            )}
+            {title}
           </p>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">
-            点击打开时会在当前绑定沙箱中创建节点目录和入口文件，已有文件不会覆盖。
+            {description}
           </p>
         </div>
         <StatusPill status={syncStatus} />
@@ -76,18 +95,43 @@ export function CodeEntryCard({
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           <CodeMetaBadge label="语言" value={language} />
-          <CodeMetaBadge label="来源" value="沙箱文件" />
+          <CodeMetaBadge label="来源" value={browserMode ? '浏览器操作' : '沙箱文件'} />
           <CodeMetaBadge label="目录" value="按节点隔离" />
+          {browserMode ? (
+            <CodeMetaBadge label="预览" value="VNC" />
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-3 grid gap-2.5">
-        <EditableField
-          label="入口函数"
-          value={entryFunction}
-          placeholder="main"
-          onChange={onEntryFunctionChange}
-        />
+      {!browserMode ? (
+        <div className="mt-3 grid gap-2.5">
+          <EditableField
+            label="入口函数"
+            value={entryFunction}
+            placeholder="main"
+            onChange={onEntryFunctionChange}
+          />
+        </div>
+      ) : null}
+
+      <div className="mt-3 rounded-xl border border-sky-300/14 bg-sky-400/[0.07] px-3 py-2.5">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-100">
+          <Info className="h-3.5 w-3.5 text-sky-200" />
+          运行环境说明
+        </p>
+        <p className="mt-1.5 text-[11px] leading-5 text-slate-400">
+          {environmentText}
+        </p>
+        {browserMode ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={browserCapable ? 'text-[11px] text-emerald-200' : 'text-[11px] text-amber-200'}>
+              {browserCapable ? '镜像疑似支持 Browser 能力' : '请确认使用 AioSandbox Browser 镜像'}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {browserPreviewMessage}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/8 bg-slate-950/45 p-2.5">
@@ -105,8 +149,19 @@ export function CodeEntryCard({
               ) : (
                 <Maximize2 className="h-3.5 w-3.5" />
               )}
-              应用内打开
+              {browserMode ? '打开工作台' : '应用内打开'}
             </button>
+            {browserMode && onOpenBrowserOnly ? (
+              <button
+                type="button"
+                onClick={onOpenBrowserOnly}
+                disabled={!canOpenCode}
+                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-sky-300/20 bg-sky-400/10 px-3 text-xs font-semibold text-sky-50 transition hover:border-sky-200/34 hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-white/8 disabled:bg-white/[0.04] disabled:text-slate-500"
+              >
+                <Monitor className="h-3.5 w-3.5" />
+                仅浏览器
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onOpenExternal}

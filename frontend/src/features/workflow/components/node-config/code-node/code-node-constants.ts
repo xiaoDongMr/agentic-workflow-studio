@@ -2,6 +2,8 @@ import type { WorkflowNodeConfig } from '@/types/workflow'
 
 export type CodeAuthoringMode = 'sandbox_file' | 'sandbox_snippet'
 
+export type CodeExecutionCapability = 'python' | 'browser'
+
 export type CodeWorkspaceOpeningMode = 'drawer' | 'external' | null
 
 export const CODE_SYNC_STATUS_LABELS: Record<NonNullable<WorkflowNodeConfig['codeSyncStatus']>, string> = {
@@ -28,7 +30,25 @@ export const CODE_AUTHORING_OPTIONS: Array<{
   },
 ]
 
+export const CODE_EXECUTION_CAPABILITY_OPTIONS: Array<{
+  value: CodeExecutionCapability
+  title: string
+  description: string
+}> = [
+  {
+    value: 'python',
+    title: 'Python 脚本',
+    description: '通用执行',
+  },
+  {
+    value: 'browser',
+    title: '浏览器操作',
+    description: 'VNC/CDP',
+  },
+]
+
 export const DEFAULT_CODE_ENTRY_FILE_NAME = 'main.py'
+export const BROWSER_CODE_ENTRY_FILE_NAME = 'browser_main.py'
 export const DEFAULT_SANDBOX_CODE_FILE_PATH = '/home/gem/code/main.py'
 export const DEFAULT_SANDBOX_WORKFLOW_CODE_ROOT = '/home/gem/workflows'
 

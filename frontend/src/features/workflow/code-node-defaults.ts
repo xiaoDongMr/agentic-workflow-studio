@@ -1,3 +1,25 @@
+import type { WorkflowNodeIO } from '@/types/workflow'
+
+export const DEFAULT_CODE_NODE_INPUTS: WorkflowNodeIO[] = [
+  { name: 'input', type: 'Integer', description: '示例入参' },
+]
+
+export const DEFAULT_CODE_NODE_OUTPUTS: WorkflowNodeIO[] = [
+  { name: 'key0', type: 'Integer', description: '示例数值结果' },
+  { name: 'key1', type: 'Array<String>', description: '示例数组结果' },
+  { name: 'key2', type: 'Object', description: '示例对象结果' },
+]
+
+export const DEFAULT_BROWSER_CODE_NODE_INPUTS: WorkflowNodeIO[] = [
+  { name: 'url', type: 'String', description: '需要打开的页面地址' },
+]
+
+export const DEFAULT_BROWSER_CODE_NODE_OUTPUTS: WorkflowNodeIO[] = [
+  { name: 'title', type: 'String', description: '页面标题' },
+  { name: 'url', type: 'String', description: '最终页面地址' },
+  { name: 'screenshot_path', type: 'String', description: '沙箱内截图路径' },
+]
+
 export const DEFAULT_CODE_SNIPPET = `# 在这里，您可以通过 'args'  获取节点中的输入变量，并通过 'ret' 输出结果
 # 'args' 已经被正确地注入到环境中
 # 下面是一个示例，首先获取节点的全部输入参数params，其次获取其中参数名为'input'的值：

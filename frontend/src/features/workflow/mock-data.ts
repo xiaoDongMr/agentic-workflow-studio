@@ -1,5 +1,9 @@
 import type { WorkflowDocument } from '@/types/workflow'
-import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
+import {
+  DEFAULT_CODE_NODE_INPUTS,
+  DEFAULT_CODE_NODE_OUTPUTS,
+  DEFAULT_CODE_SNIPPET,
+} from '@/features/workflow/code-node-defaults'
 
 export const mockWorkflow: WorkflowDocument = {
   id: 'basic-langgraph-flow',
@@ -113,8 +117,8 @@ export const mockWorkflow: WorkflowDocument = {
       description: '在调试沙箱中执行 Python 代码并返回结构化结果',
       position: { x: 560, y: 300 },
       status: 'idle',
-      inputs: [{ name: 'input', type: 'Object', description: '传入代码的上下文对象' }],
-      outputs: [{ name: 'code_result', type: 'Object', description: '代码执行结果' }],
+      inputs: DEFAULT_CODE_NODE_INPUTS,
+      outputs: DEFAULT_CODE_NODE_OUTPUTS,
       config: {
           prompt: DEFAULT_CODE_SNIPPET,
         model: 'Python',
@@ -123,10 +127,11 @@ export const mockWorkflow: WorkflowDocument = {
         enabled: true,
         fallbackToHuman: false,
         responseMode: 'json',
-        outputKey: 'code_result',
+        outputKey: 'key0',
         inputMappings: [],
         codeLanguage: 'python',
-        codeSource: 'sandbox_file',
+        codeCapability: 'python',
+        codeSource: 'sandbox_snippet',
         codeFilePath: '',
         codeEntryFunction: 'main',
         codeSyncStatus: 'saved',

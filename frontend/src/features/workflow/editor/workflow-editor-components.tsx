@@ -1,5 +1,23 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { Check, CheckCircle2, ChevronDown, Clipboard, ImageUp, LayoutGrid, Link, Minus, Play, Plus, Redo2, Scan, Search, Trash2, Undo2, Upload, X } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Clipboard,
+  ImageUp,
+  LayoutGrid,
+  Link,
+  Minus,
+  Play,
+  Plus,
+  Redo2,
+  Scan,
+  Search,
+  Trash2,
+  Undo2,
+  Upload,
+  X,
+} from 'lucide-react'
 import { useClientContext, usePlaygroundTools } from '@flowgram.ai/free-layout-editor'
 import type { NodePanelRenderProps } from '@flowgram.ai/free-node-panel-plugin'
 
@@ -11,7 +29,12 @@ import { uploadMediaFile } from '@/api/storage'
 import { SelectorTrialInputSection } from '@/features/workflow/editor/selector-debug/selector-trial-input-section'
 import { SelectorTrialResult } from '@/features/workflow/editor/selector-debug/selector-trial-result'
 import { cn } from '@/lib/utils'
-import type { GlobalDebugFieldValue, TrialRunNodeExecution } from '@/features/workflow/editor/workflow-editor.types'
+import type {
+  BrowserRuntimePreview,
+  GlobalDebugFieldValue,
+  TrialRunNodeExecution,
+} from '@/features/workflow/editor/workflow-editor.types'
+import { BrowserRuntimePreviewCard } from '@/features/workflow/editor/browser-runtime-preview-card'
 import type { WorkflowNode } from '@/types/workflow'
 
 export function FlowgramNodePanel({
@@ -123,6 +146,7 @@ export function EditorTrialRunPanel({
   open,
   fields,
   running,
+  browserPreview,
   jsonMode,
   combinedJson,
   jsonError,
@@ -135,6 +159,7 @@ export function EditorTrialRunPanel({
   open: boolean
   fields: GlobalDebugFieldValue[]
   running: boolean
+  browserPreview?: BrowserRuntimePreview
   jsonMode: boolean
   combinedJson: string
   jsonError?: string
@@ -165,6 +190,10 @@ export function EditorTrialRunPanel({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {browserPreview ? (
+          <BrowserRuntimePreviewCard preview={browserPreview} />
+        ) : null}
 
         <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/8 bg-white/[0.03]">
           <div className="shrink-0 flex items-center justify-between border-b border-white/8 px-4 py-3">
@@ -291,6 +320,7 @@ export function SingleNodeTrialPanel({
   fields,
   running,
   execution,
+  browserPreview,
   jsonMode,
   combinedJson,
   jsonError,
@@ -305,6 +335,7 @@ export function SingleNodeTrialPanel({
   fields: GlobalDebugFieldValue[]
   running: boolean
   execution?: TrialRunNodeExecution
+  browserPreview?: BrowserRuntimePreview
   jsonMode: boolean
   combinedJson: string
   jsonError?: string
@@ -407,6 +438,10 @@ export function SingleNodeTrialPanel({
               </div>
             )}
           </div>
+
+          {browserPreview ? (
+            <BrowserRuntimePreviewCard preview={browserPreview} />
+          ) : null}
 
           {execution && (
             <div className="mt-6 space-y-4 rounded-2xl border border-white/8 bg-white/[0.03] p-3">

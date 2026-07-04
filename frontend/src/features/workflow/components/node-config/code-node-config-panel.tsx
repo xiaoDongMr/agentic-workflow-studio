@@ -16,15 +16,28 @@ import {
   SwitchRow,
   type NodeConfigPanelProps,
 } from '@/features/workflow/components/node-config/config-fields'
+import {
+  BrowserWorkspaceDrawer,
+  type BrowserWorkspaceViewMode,
+} from '@/features/workflow/components/node-config/code-node/browser-workspace-drawer'
 import { CodeEntryCard } from '@/features/workflow/components/node-config/code-node/code-entry-card'
-import { CodeModeSwitch, CodeNodeSummary, SandboxBindingHint } from '@/features/workflow/components/node-config/code-node/code-node-ui'
+import {
+  CodeCapabilitySwitch,
+  CodeModeSwitch,
+  CodeNodeSummary,
+  SandboxBindingHint,
+} from '@/features/workflow/components/node-config/code-node/code-node-ui'
 import { CodeSnippetCard } from '@/features/workflow/components/node-config/code-node/code-snippet-card'
 import { CodeSnippetDrawer } from '@/features/workflow/components/node-config/code-node/code-snippet-drawer'
 import { CodeWorkspaceDrawer } from '@/features/workflow/components/node-config/code-node/code-workspace-drawer'
 import {
   formatCodeFileName,
   formatCodeLanguage,
+  buildBrowserPreviewUrl,
   getCodeWorkspaceOpenState,
+  isBrowserCapableSandbox,
+  isLegacyCodeResultOutput,
+  resolveDefaultEntryFileName,
   resolveCodeAuthoringMode,
   resolveCodeFilePath,
   resolveCodeOutputKey,
@@ -32,7 +45,13 @@ import {
 } from '@/features/workflow/components/node-config/code-node/code-node-utils'
 import { ErrorStrategyConfig } from '@/features/workflow/components/node-config/error-strategy-config'
 import { getAvailableInputSources } from '@/features/workflow/components/node-config/variable-utils'
-import { DEFAULT_CODE_SNIPPET } from '@/features/workflow/code-node-defaults'
+import {
+  DEFAULT_CODE_NODE_INPUTS,
+  DEFAULT_CODE_NODE_OUTPUTS,
+  DEFAULT_BROWSER_CODE_NODE_INPUTS,
+  DEFAULT_BROWSER_CODE_NODE_OUTPUTS,
+  DEFAULT_CODE_SNIPPET,
+} from '@/features/workflow/code-node-defaults'
 import { getErrorMessage } from '@/features/workflow/utils/error-message'
 
 export function CodeNodeConfigPanel({
@@ -48,14 +67,20 @@ export function CodeNodeConfigPanel({
 }: NodeConfigPanelProps) {
   const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const codeSyncStatus = node.config.codeSyncStatus ?? 'saved'
-  const codeMode = resolveCodeAuthoringMode(node.config.codeSource)
-  const codeFilePath = resolveCodeFilePath(workflowId, node.id, node.config.codeFilePath)
+  const codeCapability = node.config.codeCapability ?? 'python'
+  const codeMode = codeCapability === 'browser' ? 'sandbox_file' : resolveCodeAuthoringMode(node.config.codeSource)
+  const entryFunction = codeCapability === 'browser' ? 'main' : (node.config.codeEntryFunction ?? 'main')
+  const defaultEntryFileName = resolveDefaultEntryFileName(codeCapability)
+  const codeFilePath = resolveCodeFilePath(workflowId, node.id, node.config.codeFilePath, defaultEntryFileName)
   const codeFileName = formatCodeFileName(codeFilePath)
   const errorStrategy = node.config.errorStrategy ?? 'interrupt'
+  const browserCapable = isBrowserCapableSandbox(sandbox)
+  const browserPreviewUrl = buildBrowserPreviewUrl(sandbox?.sandboxUrl)
   const [openingMode, setOpeningMode] = useState<'drawer' | 'external' | null>(null)
   const [codeWorkspaceError, setCodeWorkspaceError] = useState('')
   const [codeWorkspace, setCodeWorkspace] = useState<WorkflowCodeWorkspace | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [browserWorkspaceView, setBrowserWorkspaceView] = useState<BrowserWorkspaceViewMode>('split')
   const [snippetDrawerOpen, setSnippetDrawerOpen] = useState(false)
   const [copiedPath, setCopiedPath] = useState(false)
   const openState = useMemo(
@@ -68,6 +93,8 @@ export function CodeNodeConfigPanel({
       }),
     [sandbox, sandboxSession, workflowId, workflowSaved],
   )
+  const canOpenWorkspace = openState.canOpen && openingMode === null
+  const canOpenBrowserWorkspace = canOpenWorkspace && Boolean(browserPreviewUrl)
 
   const prepareCodeWorkspace = useCallback(async () => {
     if (!openState.canOpen) {
@@ -79,13 +106,25 @@ export function CodeNodeConfigPanel({
       const workspace = await openWorkflowNodeCodeWorkspace(
         workflowId,
         node.id,
-        node.config.codeEntryFunction ?? 'main',
+        entryFunction,
+        codeCapability,
       )
+      const shouldUseBrowserOutputs = codeCapability === 'browser'
+      const shouldMigrateLegacyOutput = isLegacyCodeResultOutput(node.outputs)
+      const nextOutputs = shouldUseBrowserOutputs
+        ? DEFAULT_BROWSER_CODE_NODE_OUTPUTS
+        : shouldMigrateLegacyOutput
+          ? DEFAULT_CODE_NODE_OUTPUTS
+          : node.outputs
       onUpdateNode({
+        inputs: shouldUseBrowserOutputs ? DEFAULT_BROWSER_CODE_NODE_INPUTS : node.inputs,
+        outputs: nextOutputs,
         config: {
           codeFilePath: workspace.entryFilePath,
           codeSource: 'sandbox_file',
+          codeCapability,
           codeSyncStatus: 'saved',
+          outputKey: resolveCodeOutputKey(nextOutputs),
         },
       })
       setCodeWorkspace(workspace)
@@ -94,13 +133,27 @@ export function CodeNodeConfigPanel({
       setCodeWorkspaceError(getErrorMessage(error, '打开沙箱 Code 失败'))
       return null
     }
-  }, [node.config.codeEntryFunction, node.id, onUpdateNode, openState, workflowId])
+  }, [codeCapability, entryFunction, node.id, node.inputs, node.outputs, onUpdateNode, openState, workflowId])
 
   const openCodeWorkspaceDrawer = useCallback(async () => {
     setOpeningMode('drawer')
     try {
       const workspace = await prepareCodeWorkspace()
       if (workspace) {
+        setBrowserWorkspaceView('split')
+        setDrawerOpen(true)
+      }
+    } finally {
+      setOpeningMode(null)
+    }
+  }, [prepareCodeWorkspace])
+
+  const openBrowserWorkspace = useCallback(async (viewMode: BrowserWorkspaceViewMode) => {
+    setOpeningMode('drawer')
+    try {
+      const workspace = await prepareCodeWorkspace()
+      if (workspace) {
+        setBrowserWorkspaceView(viewMode)
         setDrawerOpen(true)
       }
     } finally {
@@ -135,7 +188,8 @@ export function CodeNodeConfigPanel({
     <ConfigShell node={node} className={className}>
       <CodeNodeSummary
         codeMode={codeMode}
-        entryFunction={node.config.codeEntryFunction ?? 'main'}
+        capability={codeCapability}
+        entryFunction={entryFunction}
         fileName={codeFileName}
         filePath={codeMode === 'sandbox_file' ? codeFilePath : ''}
         syncStatus={codeSyncStatus}
@@ -143,25 +197,65 @@ export function CodeNodeConfigPanel({
 
       <BasicInfoSection node={node} onUpdateNode={onUpdateNode} />
 
-      <ConfigSection title="代码入口" icon={<FileCode2 className="h-4 w-4 text-emerald-300" />}>
-        <CodeModeSwitch
-          value={codeMode}
-          onChange={(value) =>
+      <ConfigSection title="执行能力" icon={<Settings2 className="h-4 w-4 text-sky-300" />}>
+        <CodeCapabilitySwitch
+          value={codeCapability}
+          onChange={(value) => {
+            if (value === 'browser') {
+              onUpdateNode({
+                inputs: DEFAULT_BROWSER_CODE_NODE_INPUTS,
+                outputs: DEFAULT_BROWSER_CODE_NODE_OUTPUTS,
+                config: {
+                  codeCapability: 'browser',
+                  codeSource: 'sandbox_file',
+                  codeFilePath: '',
+                  codeEntryFunction: 'main',
+                  outputKey: resolveCodeOutputKey(DEFAULT_BROWSER_CODE_NODE_OUTPUTS),
+                  codeSyncStatus: 'saved',
+                },
+              })
+              return
+            }
             onUpdateNode({
+              inputs: DEFAULT_CODE_NODE_INPUTS,
+              outputs: DEFAULT_CODE_NODE_OUTPUTS,
               config: {
-                codeSource: value,
-                prompt:
-                  value === 'sandbox_snippet' && !(node.config.prompt ?? '').trim()
-                    ? DEFAULT_CODE_SNIPPET
-                    : node.config.prompt,
+                codeCapability: 'python',
+                codeSource: 'sandbox_snippet',
+                codeFilePath: '',
+                prompt: !(node.config.prompt ?? '').trim() ? DEFAULT_CODE_SNIPPET : node.config.prompt,
+                outputKey: resolveCodeOutputKey(DEFAULT_CODE_NODE_OUTPUTS),
                 codeSyncStatus: 'saved',
               },
             })
-          }
+          }}
         />
+      </ConfigSection>
+
+      <ConfigSection
+        title={codeCapability === 'browser' ? '浏览器工作台' : '代码入口'}
+        icon={<FileCode2 className="h-4 w-4 text-emerald-300" />}
+      >
+        {codeCapability === 'python' ? (
+          <CodeModeSwitch
+            value={codeMode}
+            onChange={(value) =>
+              onUpdateNode({
+                config: {
+                  codeSource: value,
+                  prompt:
+                    value === 'sandbox_snippet' && !(node.config.prompt ?? '').trim()
+                      ? DEFAULT_CODE_SNIPPET
+                      : node.config.prompt,
+                  codeSyncStatus: 'saved',
+                },
+              })
+            }
+          />
+        ) : null}
         {codeMode === 'sandbox_file' ? (
           <CodeEntryCard
-            entryFunction={node.config.codeEntryFunction ?? 'main'}
+            entryFunction={entryFunction}
             fileName={codeFileName}
             filePath={codeFilePath}
             language={formatCodeLanguage(node.config.codeLanguage)}
@@ -169,11 +263,23 @@ export function CodeNodeConfigPanel({
             syncStatus={codeSyncStatus}
             copiedPath={copiedPath}
             workspaceError={codeWorkspaceError}
+            browserCapable={browserCapable}
+            browserMode={codeCapability === 'browser'}
+            browserPreviewMessage={browserPreviewUrl ? '预览地址使用 /vnc/index.html?autoconnect=true' : openState.message}
             onEntryFunctionChange={(value) => onUpdateNode({ config: { codeEntryFunction: value } })}
             onCopyPath={copyCodePath}
-            onOpenCode={openCodeWorkspaceDrawer}
+            onOpenBrowserOnly={
+              codeCapability === 'browser'
+                ? () => openBrowserWorkspace('browser')
+                : undefined
+            }
+            onOpenCode={
+              codeCapability === 'browser'
+                ? () => openBrowserWorkspace('split')
+                : openCodeWorkspaceDrawer
+            }
             onOpenExternal={openCodeWorkspaceExternal}
-            canOpenCode={openState.canOpen && openingMode === null}
+            canOpenCode={codeCapability === 'browser' ? canOpenBrowserWorkspace : canOpenWorkspace}
             openingMode={openingMode}
           />
         ) : (
@@ -245,11 +351,20 @@ export function CodeNodeConfigPanel({
         </div>
       </ConfigSection>
       {drawerOpen && codeWorkspace ? (
-        <CodeWorkspaceDrawer
-          workspace={codeWorkspace}
-          onClose={() => setDrawerOpen(false)}
-          onOpenExternal={() => window.open(codeWorkspace.codeUrl, '_blank', 'noopener,noreferrer')}
-        />
+        codeCapability === 'browser' && browserPreviewUrl ? (
+          <BrowserWorkspaceDrawer
+            workspace={codeWorkspace}
+            previewUrl={browserPreviewUrl}
+            initialView={browserWorkspaceView}
+            onClose={() => setDrawerOpen(false)}
+          />
+        ) : (
+          <CodeWorkspaceDrawer
+            workspace={codeWorkspace}
+            onClose={() => setDrawerOpen(false)}
+            onOpenExternal={() => window.open(codeWorkspace.codeUrl, '_blank', 'noopener,noreferrer')}
+          />
+        )
       ) : null}
       {snippetDrawerOpen ? (
         <CodeSnippetDrawer

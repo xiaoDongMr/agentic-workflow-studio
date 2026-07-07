@@ -5,9 +5,18 @@ import {
   Server,
   Settings2,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { openWorkflowNodeCodeWorkspace, type WorkflowCodeWorkspace } from '@/api/workflow'
+import {
+  getWorkflowNodeCodeWorkspaceStatus,
+  listWorkflowNodeCodeWorkspacePackages,
+  openWorkflowNodeCodeWorkspace,
+  restoreWorkflowNodeCodeWorkspacePackageVersion,
+  saveWorkflowNodeCodeWorkspacePackage,
+  type WorkflowCodePackageSummary,
+  type WorkflowCodeWorkspace,
+  type WorkflowCodeWorkspaceStatus,
+} from '@/api/workflow'
 import {
   BasicInfoSection,
   ConfigSection,
@@ -21,6 +30,11 @@ import {
   type BrowserWorkspaceViewMode,
 } from '@/features/workflow/components/node-config/code-node/browser-workspace-drawer'
 import { CodeEntryCard } from '@/features/workflow/components/node-config/code-node/code-entry-card'
+import { CodeWorkspaceHistoryDrawer } from '@/features/workflow/components/node-config/code-node/code-workspace-history-drawer'
+import {
+  formatWorkspacePackageSaveResult,
+  formatWorkspacePackageStatus,
+} from '@/features/workflow/components/node-config/code-node/code-workspace-package-utils'
 import {
   CodeCapabilitySwitch,
   CodeModeSwitch,
@@ -83,6 +97,12 @@ export function CodeNodeConfigPanel({
   const [browserWorkspaceView, setBrowserWorkspaceView] = useState<BrowserWorkspaceViewMode>('split')
   const [snippetDrawerOpen, setSnippetDrawerOpen] = useState(false)
   const [copiedPath, setCopiedPath] = useState(false)
+  const [workspacePackageStatus, setWorkspacePackageStatus] = useState<WorkflowCodeWorkspaceStatus | null>(null)
+  const [workspacePackageMessage, setWorkspacePackageMessage] = useState('')
+  const [packageSaving, setPackageSaving] = useState(false)
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
+  const [workspacePackages, setWorkspacePackages] = useState<WorkflowCodePackageSummary[]>([])
+  const [restoringPackageId, setRestoringPackageId] = useState('')
   const openState = useMemo(
     () =>
       getCodeWorkspaceOpenState({
@@ -95,6 +115,37 @@ export function CodeNodeConfigPanel({
   )
   const canOpenWorkspace = openState.canOpen && openingMode === null
   const canOpenBrowserWorkspace = canOpenWorkspace && Boolean(browserPreviewUrl)
+
+  const refreshWorkspacePackageStatus = useCallback(async () => {
+    if (!workflowSaved || !workflowId || codeMode !== 'sandbox_file') {
+      setWorkspacePackageStatus(null)
+      return
+    }
+    try {
+      const status = await getWorkflowNodeCodeWorkspaceStatus(workflowId, node.id)
+      setWorkspacePackageStatus(status)
+      setWorkspacePackageMessage(formatWorkspacePackageStatus(status))
+    } catch {
+      setWorkspacePackageStatus(null)
+    }
+  }, [codeMode, node.id, workflowId, workflowSaved])
+
+  const refreshWorkspacePackages = useCallback(async () => {
+    if (!workflowSaved || !workflowId || codeMode !== 'sandbox_file') {
+      setWorkspacePackages([])
+      return
+    }
+    try {
+      const packages = await listWorkflowNodeCodeWorkspacePackages(workflowId, node.id, 20)
+      setWorkspacePackages(packages)
+    } catch {
+      setWorkspacePackages([])
+    }
+  }, [codeMode, node.id, workflowId, workflowSaved])
+
+  useEffect(() => {
+    void refreshWorkspacePackageStatus()
+  }, [refreshWorkspacePackageStatus])
 
   const prepareCodeWorkspace = useCallback(async () => {
     if (!openState.canOpen) {
@@ -184,6 +235,75 @@ export function CodeNodeConfigPanel({
     }
   }, [codeFilePath])
 
+  const saveWorkspacePackage = useCallback(async () => {
+    if (!workflowId || !canOpenWorkspace) {
+      setWorkspacePackageMessage(openState.message)
+      return
+    }
+    setPackageSaving(true)
+    setWorkspacePackageMessage('正在保存代码工作区')
+    try {
+      const result = await saveWorkflowNodeCodeWorkspacePackage(workflowId, node.id, {
+        codeCapability,
+        entryFile: codeFileName,
+      })
+      setWorkspacePackageMessage(formatWorkspacePackageSaveResult(result))
+      await refreshWorkspacePackageStatus()
+      await refreshWorkspacePackages()
+    } catch (error) {
+      setWorkspacePackageMessage(getErrorMessage(error, '保存代码工作区失败'))
+    } finally {
+      setPackageSaving(false)
+    }
+  }, [
+    canOpenWorkspace,
+    codeCapability,
+    codeFileName,
+    node.id,
+    openState.message,
+    refreshWorkspacePackageStatus,
+    refreshWorkspacePackages,
+    workflowId,
+  ])
+
+  const openPackageHistory = useCallback(async () => {
+    setHistoryDrawerOpen(true)
+    await refreshWorkspacePackages()
+  }, [refreshWorkspacePackages])
+
+  const restoreWorkspacePackageVersion = useCallback(async (packageId: string) => {
+    if (!workflowId || !canOpenWorkspace) {
+      setWorkspacePackageMessage(openState.message)
+      return
+    }
+    setRestoringPackageId(packageId)
+    setWorkspacePackageMessage('正在恢复历史版本到沙箱')
+    try {
+      const result = await restoreWorkflowNodeCodeWorkspacePackageVersion(workflowId, node.id, packageId, {
+        codeCapability,
+      })
+      setWorkspacePackageMessage(result.message || (result.restored ? '历史版本已恢复' : '历史版本恢复失败'))
+      if (result.restored) {
+        await prepareCodeWorkspace()
+      }
+      await refreshWorkspacePackageStatus()
+      await refreshWorkspacePackages()
+    } catch (error) {
+      setWorkspacePackageMessage(getErrorMessage(error, '恢复历史版本失败'))
+    } finally {
+      setRestoringPackageId('')
+    }
+  }, [
+    canOpenWorkspace,
+    codeCapability,
+    node.id,
+    openState.message,
+    prepareCodeWorkspace,
+    refreshWorkspacePackageStatus,
+    refreshWorkspacePackages,
+    workflowId,
+  ])
+
   return (
     <ConfigShell node={node} className={className}>
       <CodeNodeSummary
@@ -266,6 +386,11 @@ export function CodeNodeConfigPanel({
             browserCapable={browserCapable}
             browserMode={codeCapability === 'browser'}
             browserPreviewMessage={browserPreviewUrl ? '预览地址使用 /vnc/index.html?autoconnect=true' : openState.message}
+            packageMessage={workspacePackageMessage || formatWorkspacePackageStatus(workspacePackageStatus)}
+            packageFileCount={workspacePackageStatus?.fileCount ?? 0}
+            packageSavedAt={workspacePackageStatus?.savedAt ?? null}
+            packageTotalSize={workspacePackageStatus?.totalSize ?? 0}
+            packageSaving={packageSaving}
             onEntryFunctionChange={(value) => onUpdateNode({ config: { codeEntryFunction: value } })}
             onCopyPath={copyCodePath}
             onOpenBrowserOnly={
@@ -279,6 +404,8 @@ export function CodeNodeConfigPanel({
                 : openCodeWorkspaceDrawer
             }
             onOpenExternal={openCodeWorkspaceExternal}
+            onOpenHistory={openPackageHistory}
+            onSaveWorkspace={saveWorkspacePackage}
             canOpenCode={codeCapability === 'browser' ? canOpenBrowserWorkspace : canOpenWorkspace}
             openingMode={openingMode}
           />
@@ -379,6 +506,14 @@ export function CodeNodeConfigPanel({
               },
             })
           }
+        />
+      ) : null}
+      {historyDrawerOpen ? (
+        <CodeWorkspaceHistoryDrawer
+          packages={workspacePackages}
+          restoringPackageId={restoringPackageId}
+          onClose={() => setHistoryDrawerOpen(false)}
+          onRestore={restoreWorkspacePackageVersion}
         />
       ) : null}
     </ConfigShell>

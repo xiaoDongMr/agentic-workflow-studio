@@ -102,9 +102,59 @@ export interface WorkflowCodeWorkspace {
 
 export type WorkflowCodeCapability = 'python' | 'browser'
 
+export interface WorkflowCodeWorkspaceStatus {
+  nodeId: string
+  packageId: string
+  workspaceHash: string
+  fileCount: number
+  totalSize: number
+  savedAt: string | null
+}
+
+export interface WorkflowCodeWorkspaceSaveResult {
+  nodeId: string
+  status: 'saved' | 'skipped' | 'failed'
+  packageId: string
+  workspaceHash: string
+  fileCount: number
+  totalSize: number
+  packageUri: string
+  message: string
+}
+
+export interface WorkflowCodeWorkspaceRestoreResult {
+  nodeId: string
+  packageId: string
+  restored: boolean
+  message: string
+}
+
+export interface WorkflowCodePackageSummary {
+  id: string
+  nodeId: string
+  codeCapability: WorkflowCodeCapability
+  entryFile: string
+  packageName: string
+  packageHash: string
+  workspaceHash: string
+  fileCount: number
+  totalSize: number
+  sourceSandboxId: string
+  saveReason: 'workflow_save' | 'manual_save' | 'publish' | string
+  createdAt: string
+}
+
+export interface WorkflowCodeWorkspaceSaveSummary {
+  saved: number
+  skipped: number
+  failed: number
+  items: WorkflowCodeWorkspaceSaveResult[]
+}
+
 interface WorkflowSaveDraftResponse {
   project: WorkflowProjectSummary
   workflow: WorkflowDocument
+  codeWorkspaceSaveSummary?: WorkflowCodeWorkspaceSaveSummary
 }
 
 interface WorkflowRunStep {
@@ -286,6 +336,58 @@ export async function openWorkflowNodeCodeWorkspace(
   return data
 }
 
+export async function getWorkflowNodeCodeWorkspaceStatus(
+  workflowId: string,
+  nodeId: string,
+): Promise<WorkflowCodeWorkspaceStatus> {
+  const { data } = await http.get<WorkflowCodeWorkspaceStatus>(
+    `/workflows/${workflowId}/nodes/${nodeId}/code-workspace/status`,
+  )
+  return data
+}
+
+export async function saveWorkflowNodeCodeWorkspacePackage(
+  workflowId: string,
+  nodeId: string,
+  payload: {
+    codeCapability: WorkflowCodeCapability
+    entryFile: string
+  },
+): Promise<WorkflowCodeWorkspaceSaveResult> {
+  const { data } = await http.post<WorkflowCodeWorkspaceSaveResult>(
+    `/workflows/${workflowId}/nodes/${nodeId}/code-workspace/package`,
+    payload,
+  )
+  return data
+}
+
+export async function listWorkflowNodeCodeWorkspacePackages(
+  workflowId: string,
+  nodeId: string,
+  limit = 20,
+): Promise<WorkflowCodePackageSummary[]> {
+  const { data } = await http.get<{ items: WorkflowCodePackageSummary[] }>(
+    `/workflows/${workflowId}/nodes/${nodeId}/code-workspace/packages`,
+    { params: { limit } },
+  )
+  return data.items
+}
+
+export async function restoreWorkflowNodeCodeWorkspacePackageVersion(
+  workflowId: string,
+  nodeId: string,
+  packageId: string,
+  payload: {
+    codeCapability: WorkflowCodeCapability
+  },
+): Promise<WorkflowCodeWorkspaceRestoreResult> {
+  const { data } = await http.post<WorkflowCodeWorkspaceRestoreResult>(
+    `/workflows/${workflowId}/nodes/${nodeId}/code-workspace/packages/${packageId}/restore`,
+    payload,
+  )
+  return data
+}
+
 export async function saveWorkflowDraft(workflow: WorkflowDocument): Promise<WorkflowSaveDraftResponse> {
   const normalizedWorkflow = sanitizeWorkflowDocument(workflow)
   const { data } = await http.post<WorkflowSaveDraftResponse>('/workflows/draft', {
@@ -294,6 +396,7 @@ export async function saveWorkflowDraft(workflow: WorkflowDocument): Promise<Wor
   return {
     project: data.project,
     workflow: sanitizeWorkflowDocument(data.workflow),
+    codeWorkspaceSaveSummary: data.codeWorkspaceSaveSummary,
   }
 }
 

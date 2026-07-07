@@ -143,6 +143,61 @@ CREATE INDEX IF NOT EXISTS idx_workflow_sandbox_sessions_workflow
 CREATE INDEX IF NOT EXISTS idx_workflow_sandbox_sessions_sandbox
   ON workflow_sandbox_sessions (sandbox_id);
 
+CREATE TABLE IF NOT EXISTS workflow_node_code_workspaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID NOT NULL REFERENCES workflow_projects(id),
+  node_id VARCHAR(128) NOT NULL,
+  code_capability VARCHAR(32) NOT NULL DEFAULT 'python',
+  entry_file VARCHAR(128) NOT NULL DEFAULT 'main.py',
+  latest_package_id UUID NULL,
+  latest_workspace_hash VARCHAR(128) NOT NULL DEFAULT '',
+  latest_saved_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (workflow_id, node_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_node_code_workspaces_workflow
+  ON workflow_node_code_workspaces (workflow_id, updated_at DESC);
+
+ALTER TABLE workflow_node_code_workspaces
+  ALTER COLUMN latest_package_id DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS workflow_node_code_packages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID NOT NULL REFERENCES workflow_projects(id),
+  node_id VARCHAR(128) NOT NULL,
+  workflow_version_id UUID NULL REFERENCES workflow_versions(id),
+  code_capability VARCHAR(32) NOT NULL DEFAULT 'python',
+  entry_file VARCHAR(128) NOT NULL DEFAULT 'main.py',
+  package_uri VARCHAR(512) NOT NULL DEFAULT '',
+  package_name VARCHAR(256) NOT NULL DEFAULT '',
+  package_hash VARCHAR(128) NOT NULL DEFAULT '',
+  workspace_hash VARCHAR(128) NOT NULL DEFAULT '',
+  manifest JSONB NOT NULL DEFAULT '{}'::jsonb,
+  file_count INTEGER NOT NULL DEFAULT 0,
+  total_size INTEGER NOT NULL DEFAULT 0,
+  source_sandbox_id VARCHAR(128) NOT NULL DEFAULT '',
+  save_reason VARCHAR(32) NOT NULL DEFAULT 'workflow_save',
+  created_by UUID NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_node_code_packages_node
+  ON workflow_node_code_packages (workflow_id, node_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_node_code_packages_hash
+  ON workflow_node_code_packages (workflow_id, node_id, workspace_hash);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_node_code_packages_version
+  ON workflow_node_code_packages (workflow_version_id);
+
+ALTER TABLE workflow_node_code_packages
+  ALTER COLUMN workflow_version_id DROP NOT NULL;
+
+ALTER TABLE workflow_node_code_packages
+  DROP COLUMN IF EXISTS retained;
+
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_id UUID NOT NULL REFERENCES workflow_projects(id),

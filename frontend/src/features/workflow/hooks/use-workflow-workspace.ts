@@ -7,6 +7,7 @@ import {
   getWorkflowVersion,
   saveWorkflowDraft,
   updateWorkflowProject,
+  type WorkflowCodeWorkspaceSaveSummary,
 } from '@/api/workflow'
 import type { AppNavigationView } from '@/features/workflow/components/navigation-sidebar'
 import type { WorkflowCanvasApi } from '@/features/workflow/components/workflow-canvas'
@@ -30,6 +31,22 @@ type PendingWorkflowLeaveAction =
   | { type: 'openProject'; workflowId: string }
   | { type: 'openLocalDraft'; workflowId: string }
   | { type: 'changeView'; view: AppNavigationView }
+
+function formatCodeWorkspaceSaveSummary(summary?: WorkflowCodeWorkspaceSaveSummary) {
+  if (!summary) {
+    return '草稿已保存'
+  }
+  if (summary.failed > 0) {
+    return `草稿已保存，${summary.failed} 个代码工作区保存失败`
+  }
+  if (summary.saved > 0) {
+    return `草稿已保存，${summary.saved} 个代码工作区已同步`
+  }
+  if (summary.skipped > 0) {
+    return '草稿已保存，代码工作区无变更或已跳过'
+  }
+  return '草稿已保存，代码工作区无变更'
+}
 
 export function useWorkflowWorkspace() {
   const workflow = useWorkflowStore((state) => state.workflow)
@@ -233,7 +250,7 @@ export function useWorkflowWorkspace() {
       setLastSavedSignature(getWorkflowSignature(saved.workflow))
       setLastSavedAt(new Date())
       setSaveStatus('saved')
-      setSaveMessage('草稿已保存')
+      setSaveMessage(formatCodeWorkspaceSaveSummary(saved.codeWorkspaceSaveSummary))
       await refreshWorkflowVersions(saved.workflow.id)
       resetWorkflowProjectPage()
       await refreshWorkflowProjects({ page: 1 })

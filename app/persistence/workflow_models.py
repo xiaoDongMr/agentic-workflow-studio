@@ -156,3 +156,51 @@ class WorkflowSandboxSessionRow(Base):
         Index("idx_workflow_sandbox_sessions_workflow", "workflow_id", "updated_at"),
         Index("idx_workflow_sandbox_sessions_sandbox", "sandbox_id"),
     )
+
+
+class WorkflowNodeCodeWorkspaceRow(Base):
+    __tablename__ = "workflow_node_code_workspaces"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("workflow_projects.id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    code_capability: Mapped[str] = mapped_column(String(32), default="python")
+    entry_file: Mapped[str] = mapped_column(String(128), default="main.py")
+    latest_package_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    latest_workspace_hash: Mapped[str] = mapped_column(String(128), default="")
+    latest_saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "node_id", name="uq_workflow_node_code_workspaces_node"),
+        Index("idx_workflow_node_code_workspaces_workflow", "workflow_id", "updated_at"),
+    )
+
+
+class WorkflowNodeCodePackageRow(Base):
+    __tablename__ = "workflow_node_code_packages"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("workflow_projects.id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workflow_version_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey("workflow_versions.id"))
+    code_capability: Mapped[str] = mapped_column(String(32), default="python")
+    entry_file: Mapped[str] = mapped_column(String(128), default="main.py")
+    package_uri: Mapped[str] = mapped_column(String(512), default="")
+    package_name: Mapped[str] = mapped_column(String(256), default="")
+    package_hash: Mapped[str] = mapped_column(String(128), default="")
+    workspace_hash: Mapped[str] = mapped_column(String(128), default="")
+    manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_size: Mapped[int] = mapped_column(Integer, default=0)
+    source_sandbox_id: Mapped[str] = mapped_column(String(128), default="")
+    save_reason: Mapped[str] = mapped_column(String(32), default="workflow_save")
+    created_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        Index("idx_workflow_node_code_packages_node", "workflow_id", "node_id", "created_at"),
+        Index("idx_workflow_node_code_packages_hash", "workflow_id", "node_id", "workspace_hash"),
+        Index("idx_workflow_node_code_packages_version", "workflow_version_id"),
+    )

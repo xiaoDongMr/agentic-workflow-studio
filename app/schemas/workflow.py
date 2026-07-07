@@ -259,3 +259,4 @@ class WorkflowVersionSummary(BaseModel):
 class WorkflowSaveDraftResponse(BaseModel):
     project: WorkflowProjectSummary
     workflow: WorkflowDocument
+    codeWorkspaceSaveSummary: dict[str, Any] = Field(default_factory=dict)

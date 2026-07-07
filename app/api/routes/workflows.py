@@ -26,6 +26,9 @@ from app.services.workflow_store import (
     WorkflowProjectSummary as StoredWorkflowProjectSummary,
     WorkflowVersionSummary as StoredWorkflowVersionSummary,
 )
+from app.sandbox_pool import KubernetesApiSandboxPool
+from app.services.workflow_code_persistence import WorkflowCodePersistenceService
+from app.services.workflow_sandbox_session import WorkflowSandboxSessionStore
 from app.services.workflow_runner import WorkflowRunner
 
 router = APIRouter()
@@ -39,6 +42,16 @@ def _get_workflow_store() -> WorkflowStore:
             detail="Workflow persistence is not available. Configure database.backend as sqlite or postgres.",
         )
     return WorkflowStore(session_factory)
+
+
+def _get_session_factory_or_503():
+    session_factory = get_session_factory()
+    if session_factory is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Workflow persistence is not available. Configure database.backend as sqlite or postgres.",
+        )
+    return session_factory
 
 
 def _to_project_summary(summary: StoredWorkflowProjectSummary) -> WorkflowProjectSummary:
@@ -89,12 +102,14 @@ async def list_workflows(
 
 
 @router.post("/workflows/draft", response_model=WorkflowSaveDraftResponse)
-async def save_workflow_draft(body: WorkflowSaveDraftRequest) -> WorkflowSaveDraftResponse:
+async def save_workflow_draft(body: WorkflowSaveDraftRequest, request: Request) -> WorkflowSaveDraftResponse:
     store = _get_workflow_store()
     saved = await store.save_draft(body.workflow, workspace_id=body.workspaceId)
+    code_workspace_save_summary = await _save_code_workspaces_for_workflow(saved.workflow, request)
     return WorkflowSaveDraftResponse(
         project=_to_project_summary(saved.project),
         workflow=saved.workflow,
+        codeWorkspaceSaveSummary=code_workspace_save_summary,
     )
 
 
@@ -159,6 +174,94 @@ async def duplicate_workflow_project(
         project=_to_project_summary(saved.project),
         workflow=saved.workflow,
     )
+
+
+async def _save_code_workspaces_for_workflow(workflow: WorkflowDocument, request: Request) -> dict:
+    code_nodes = [
+        node for node in _flatten_workflow_nodes(workflow.nodes)
+        if node.type == "code" and node.config.codeSource == "sandbox_file"
+    ]
+    summary = {
+        "saved": 0,
+        "skipped": 0,
+        "failed": 0,
+        "items": [],
+    }
+    if not code_nodes:
+        return summary
+
+    session_factory = _get_session_factory_or_503()
+    sandbox_session = await WorkflowSandboxSessionStore(session_factory).get_session(workflow.id)
+    if sandbox_session is None or not sandbox_session.sandbox_id:
+        summary["skipped"] = len(code_nodes)
+        summary["items"] = [
+            {
+                "nodeId": node.id,
+                "status": "skipped",
+                "message": "未绑定调试沙箱",
+            }
+            for node in code_nodes
+        ]
+        return summary
+
+    try:
+        sandbox = KubernetesApiSandboxPool(get_app_config(request)).get(sandbox_session.sandbox_id)
+    except Exception as exc:
+        summary["skipped"] = len(code_nodes)
+        summary["items"] = [
+            {
+                "nodeId": node.id,
+                "status": "skipped",
+                "message": f"获取调试沙箱失败：{exc}",
+            }
+            for node in code_nodes
+        ]
+        return summary
+
+    persistence = WorkflowCodePersistenceService(session_factory, get_app_config(request))
+    for node in code_nodes:
+        try:
+            result = await persistence.save_workspace(
+                session=sandbox_session,
+                sandbox=sandbox,
+                node_id=node.id,
+                code_capability=node.config.codeCapability,
+                entry_file=_code_entry_file_name(node),
+                save_reason="workflow_save",
+            )
+            summary[result.status] = summary.get(result.status, 0) + 1
+            summary["items"].append({
+                "nodeId": result.node_id,
+                "status": result.status,
+                "packageId": result.package_id,
+                "workspaceHash": result.workspace_hash,
+                "fileCount": result.file_count,
+                "totalSize": result.total_size,
+                "message": result.message,
+            })
+        except Exception as exc:
+            summary["failed"] += 1
+            summary["items"].append({
+                "nodeId": node.id,
+                "status": "failed",
+                "message": str(exc),
+            })
+    return summary
+
+
+def _flatten_workflow_nodes(nodes: list) -> list:
+    result = []
+    for node in nodes:
+        result.append(node)
+        result.extend(_flatten_workflow_nodes(node.config.loopBodyNodes))
+    return result
+
+
+def _code_entry_file_name(node) -> str:
+    path = node.config.codeFilePath.strip()
+    if path:
+        return path.rsplit("/", 1)[-1]
+    return "browser_main.py" if node.config.codeCapability == "browser" else "main.py"
 
 
 @router.delete("/workflows/{workflow_id}", status_code=204)

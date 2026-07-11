@@ -11,6 +11,7 @@ export interface AddNodeOptions {
   panelPosition?: { x: number; y: number }
   position?: { x: number; y: number }
   selectCreated?: boolean
+  ignoreSelectedNode?: boolean
 }
 
 export type FlowgramNodeData = {

@@ -77,6 +77,15 @@ import {
   normalizeNodeData,
   toFlowgramJSON,
 } from '@/features/workflow/editor/workflow-editor.utils'
+import {
+  isWorkflowGraphEqual,
+  sanitizeWorkflowGraph,
+} from '@/features/workflow/editor/workflow-graph-sanitizer'
+import {
+  canConnectPortsWithinSameLoopScope,
+  canConnectWithinSameLoopScope,
+} from '@/features/workflow/editor/workflow-loop-scope'
+import { getVisibleCanvasAddPlacement } from '@/features/workflow/editor/workflow-canvas-placement'
 import { clearNodeExecutionPanelExpansion } from '@/features/workflow/editor/node-execution-panel-state'
 import { buildBrowserPreviewUrl } from '@/features/workflow/components/node-config/code-node/code-node-utils'
 import {
@@ -118,7 +127,6 @@ interface WorkflowEditorProps {
 
 type PlaygroundConfigWithPosition = {
   getPosFromMouseEvent?: (event: MouseEvent | ReactMouseEvent) => { x: number; y: number }
-  toFixedPos?: (position: { x: number; y: number }) => { x: number; y: number }
 }
 
 function workflowLineKey(line: WorkflowLineEntity) {
@@ -152,8 +160,13 @@ export function WorkflowEditor({
   className,
 }: WorkflowEditorProps) {
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null)
-  const [initialData] = useState<WorkflowJSON>(() => toFlowgramJSON(nodes, edges))
+  const editorShellRef = useRef<HTMLDivElement | null>(null)
+  const bottomNodePanelOpenRef = useRef(false)
+  const [initialData] = useState<WorkflowJSON>(() => toFlowgramJSON(...sanitizeWorkflowGraph(nodes, edges)))
   const setWorkflowGraph = useWorkflowStore((state) => state.setWorkflowGraph)
+  const commitSanitizedWorkflowGraph = useCallback((nextNodes: WorkflowNode[], nextEdges: WorkflowEdge[]) => {
+    setWorkflowGraph(...sanitizeWorkflowGraph(nextNodes, nextEdges))
+  }, [setWorkflowGraph])
   const [trialRunOpen, setTrialRunOpen] = useState(false)
   const [globalDebugFields, setGlobalDebugFields] = useState<GlobalDebugFieldValue[]>([
     {
@@ -675,7 +688,6 @@ export function WorkflowEditor({
     deleteNode,
     openNodePanel,
     openQuickAddPanel,
-    updateNodeConfigById,
     updateSelectedNode,
   } = useWorkflowNodeActions({
     ctxRef,
@@ -683,7 +695,7 @@ export function WorkflowEditor({
     edges,
     selectedNodeId,
     onSelectNode,
-    setWorkflowGraph,
+    setWorkflowGraph: commitSanitizedWorkflowGraph,
     onBeforeQuickAdd: () => {
       clearTrialRunTimers()
       setTrialRunning(false)
@@ -707,6 +719,36 @@ export function WorkflowEditor({
   const getPlaygroundPositionConfig = useCallback(() => (
     ctxRef.current?.playground as { config?: PlaygroundConfigWithPosition } | undefined
   )?.config, [])
+
+  const getBottomNodePanelPlacement = useCallback(() => {
+    const shell = editorShellRef.current
+    const playgroundConfig = getPlaygroundPositionConfig()
+    const getPosFromMouseEvent = playgroundConfig?.getPosFromMouseEvent?.bind(playgroundConfig)
+
+    return getVisibleCanvasAddPlacement(shell, getPosFromMouseEvent)
+  }, [getPlaygroundPositionConfig])
+
+  const openBottomNodePanel = useCallback(async () => {
+    if (bottomNodePanelOpenRef.current) {
+      return
+    }
+
+    bottomNodePanelOpenRef.current = true
+    closeDebugPanels()
+    onSelectNode('')
+    const placement = getBottomNodePanelPlacement()
+
+    try {
+      await openNodePanel({
+        panelPosition: placement?.panelPosition,
+        position: placement?.position,
+        selectCreated: true,
+        ignoreSelectedNode: true,
+      })
+    } finally {
+      bottomNodePanelOpenRef.current = false
+    }
+  }, [closeDebugPanels, getBottomNodePanelPlacement, onSelectNode, openNodePanel])
 
   const resetLineFromMouse = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const ctx = ctxRef.current
@@ -839,24 +881,28 @@ export function WorkflowEditor({
         drawing: '#60a5fa',
         hidden: 'transparent',
       },
+      canAddLine: (_ctx, fromPort, toPort) => canConnectPortsWithinSameLoopScope(fromPort, toPort),
+      canResetLine: (ctx, _oldLine, newLineInfo) => {
+        const fromNode = findFlowgramNodeById(ctx, String(newLineInfo.from))
+        const toNode = findFlowgramNodeById(ctx, String(newLineInfo.to))
+        return canConnectWithinSameLoopScope(fromNode, toNode)
+      },
       onContentChange: (ctx) => {
         lockAllLoopChildPositions(ctx)
         const liveJson = getWorkflowJSONWithLivePositions(ctx)
-        const nextGraph = fromFlowgramJSON(liveJson)
-        setWorkflowGraph(...nextGraph)
+        commitSanitizedWorkflowGraph(...fromFlowgramJSON(liveJson))
       },
       onDragLineEnd: async () => {
         const ctx = ctxRef.current
         if (ctx) {
           lockAllLoopChildPositions(ctx)
           const liveJson = getWorkflowJSONWithLivePositions(ctx)
-          const nextGraph = fromFlowgramJSON(liveJson)
-          setWorkflowGraph(...nextGraph)
+          commitSanitizedWorkflowGraph(...fromFlowgramJSON(liveJson))
         }
       },
       onAllLayersRendered: (ctx) => {
         patchLoopChildDragIsolation(ctx)
-        installNodeDragEndPersistence(ctx, setWorkflowGraph)
+        installNodeDragEndPersistence(ctx, commitSanitizedWorkflowGraph)
         ctx.tools.fitView(false)
       },
     }),
@@ -871,12 +917,11 @@ export function WorkflowEditor({
       openSingleNodeTrial,
       selectNodeForConfig,
       selectedNodeId,
-      setWorkflowGraph,
+      commitSanitizedWorkflowGraph,
       singleNodeTrialNodeId,
       singleNodeTrialOpen,
       trialRunExecutions,
       trialRunning,
-      updateNodeConfigById,
     ],
   )
 
@@ -890,6 +935,14 @@ export function WorkflowEditor({
       updateSelectedNode,
     })
   }, [addNode, onReady, updateSelectedNode])
+
+  useEffect(() => {
+    const [sanitizedNodes, sanitizedEdges] = sanitizeWorkflowGraph(nodes, edges)
+    if (isWorkflowGraphEqual(nodes, edges, sanitizedNodes, sanitizedEdges)) {
+      return
+    }
+    setWorkflowGraph(sanitizedNodes, sanitizedEdges)
+  }, [edges, nodes, setWorkflowGraph])
 
   useEffect(() => {
     return () => {
@@ -923,13 +976,14 @@ export function WorkflowEditor({
       const payload = globalDebugJsonMode
         ? buildDebugPayloadFromCombinedJson(globalDebugCombinedJson)
         : buildDebugPayloadFromFields(globalDebugFields)
+      const [runNodes, runEdges] = sanitizeWorkflowGraph(nodes, edges)
       const workflow = {
         id: workflowId,
         name: '当前画布工作流',
         description: '前端画布提交到后端 LangGraph 执行的工作流。',
         version: 'v0.1.0',
-        nodes: normalizeWorkflowNodesForRun(nodes),
-        edges,
+        nodes: normalizeWorkflowNodesForRun(runNodes),
+        edges: runEdges,
       }
       setGlobalDebugJsonError('')
 
@@ -1203,6 +1257,7 @@ export function WorkflowEditor({
       )}
     >
       <div
+        ref={editorShellRef}
         className="aw-flow-editor-shell relative h-full min-h-[680px]"
         onMouseDownCapture={(event) => {
           if (resetLineFromMouse(event)) {
@@ -1254,9 +1309,7 @@ export function WorkflowEditor({
           />
           <EditorBottomBar
             trialRunOpen={trialRunOpen}
-            onAddNode={() => {
-              void openNodePanel()
-            }}
+            onAddNode={openBottomNodePanel}
             onToggleTrialRun={() => {
               setSingleNodeTrialOpen(false)
               setGlobalDebugFields((prev) => {

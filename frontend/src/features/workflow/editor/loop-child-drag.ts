@@ -140,7 +140,7 @@ export function getWorkflowJSONWithLivePositions(ctx: FreeLayoutPluginContext): 
 
 export function installNodeDragEndPersistence(
   ctx: FreeLayoutPluginContext,
-  setWorkflowGraph: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void,
+  commitWorkflowGraph: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void,
 ) {
   const dragService = ctx.get(WorkflowDragService) as unknown as {
     __awNodeDragEndPersistenceInstalled?: boolean
@@ -158,7 +158,7 @@ export function installNodeDragEndPersistence(
       lockAllLoopChildPositions(ctx)
       const liveJson = getWorkflowJSONWithLivePositions(ctx)
       const nextGraph = fromFlowgramJSON(liveJson)
-      setWorkflowGraph(...nextGraph)
+      commitWorkflowGraph(...nextGraph)
     }, 0)
   })
   dragService.__awNodeDragEndPersistenceInstalled = true

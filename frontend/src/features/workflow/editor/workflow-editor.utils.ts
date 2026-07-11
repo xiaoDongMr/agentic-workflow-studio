@@ -10,10 +10,9 @@ import {
   defaultNodeContent,
 } from '@/features/workflow/editor/workflow-editor.config'
 import { normalizeSelectorBranches } from '@/features/workflow/components/node-config/selector-utils'
+import { normalizeLegacyNodeConfig } from '@/features/workflow/editor/workflow-node-legacy-normalizer'
 import type {
   FlowgramNodeData,
-  GlobalDebugFieldValue,
-  TrialRunNodeExecution,
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
   createLoopCanvasAnchorNode,
@@ -26,7 +25,6 @@ import {
   normalizeLoopBodyEdges,
   toVisibleLoopBodyEdges,
 } from '@/features/workflow/editor/loop-node.utils'
-import { trialRunStepTemplates } from '@/features/workflow/mock-data'
 import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode } from '@/types/workflow'
 
 export const SELECTOR_ELSE_PORT_ID = 'selector-else'
@@ -106,17 +104,7 @@ function normalizeNodeConfig(config: FlowgramNodeData['config'] | undefined): Fl
   if (next.selectorBranches) {
     next.selectorBranches = normalizeSelectorBranches(next.selectorBranches)
   }
-  if ('thinkingLevel' in config) {
-    const legacy = (config as { thinkingLevel?: string }).thinkingLevel
-    if (next.thinkingEnabled === undefined) {
-      next.thinkingEnabled = legacy !== 'minimal'
-    }
-    if (next.reasoningEffort === undefined && (legacy === 'low' || legacy === 'medium' || legacy === 'high')) {
-      next.reasoningEffort = legacy
-    }
-    delete (next as { thinkingLevel?: string }).thinkingLevel
-  }
-  return next
+  return normalizeLegacyNodeConfig(next)
 }
 
 export function mergeInputMappings(
@@ -352,57 +340,5 @@ export function getNextNodeCanvasPosition(
   return {
     x: fromNode.position.x + CANVAS_OFFSET_X + NODE_GAP_X,
     y: fromNode.position.y + CANVAS_OFFSET_Y + branchCount * NODE_GAP_Y * 0.65,
-  }
-}
-
-export function buildTrialRunNodeExecutions(payload: {
-  fields: GlobalDebugFieldValue[]
-  userInput: string
-  userId: string
-  channel: string
-}): TrialRunNodeExecution[] {
-  const summaryInput = buildDebugSummaryInput(payload.fields)
-
-  return trialRunStepTemplates.map((step) => ({
-    nodeId: step.nodeId,
-    nodeTitle: step.nodeTitle,
-    log: step.log,
-    input: fillTrialTemplate(step.inputTemplate, payload),
-    output: fillTrialTemplate(step.outputTemplate, payload),
-    durationMs: step.durationMs,
-    status: 'success',
-    summaryInput,
-    summaryOutput: summarizeOutput(fillTrialTemplate(step.outputTemplate, payload)),
-  }))
-}
-
-function fillTrialTemplate(
-  template: string,
-  payload: {
-    fields: GlobalDebugFieldValue[]
-    userInput: string
-    userId: string
-    channel: string
-  },
-) {
-  return template
-    .replaceAll('{userInput}', payload.userInput)
-    .replaceAll('{userId}', payload.userId)
-    .replaceAll('{channel}', payload.channel)
-}
-
-function buildDebugSummaryInput(fields: GlobalDebugFieldValue[]) {
-  return fields
-    .map((field) => `${field.name}: ${field.type === 'json' ? 'Object' : 'String'}`)
-    .join(' / ')
-}
-
-function summarizeOutput(output: string) {
-  try {
-    const parsed = JSON.parse(output) as Record<string, unknown>
-    const keys = Object.keys(parsed)
-    return keys.length > 0 ? `输出 ${keys.join(' / ')}` : '输出完成'
-  } catch {
-    return output.length > 40 ? `${output.slice(0, 40)}...` : output
   }
 }

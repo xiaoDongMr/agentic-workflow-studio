@@ -1,4 +1,4 @@
-import { useCallback, type RefObject } from 'react'
+import { useCallback, useRef, type RefObject } from 'react'
 import type { WorkflowNodeJSON } from '@flowgram.ai/free-layout-core'
 import { WorkflowNodePortsData } from '@flowgram.ai/free-layout-core'
 import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor'
@@ -56,6 +56,7 @@ export function useWorkflowNodeActions({
   onBeforeQuickAdd,
   onNodeDeleted,
 }: UseWorkflowNodeActionsOptions) {
+  const nodePanelOpenRef = useRef(false)
   const createNodeByType = useCallback(
     (
       type: WorkflowNode['type'],
@@ -66,6 +67,7 @@ export function useWorkflowNodeActions({
         loopSourceNodeId?: string
         position?: { x: number; y: number }
         selectCreated?: boolean
+        ignoreSelectedNode?: boolean
       },
     ) => {
       const ctx = ctxRef.current
@@ -86,6 +88,7 @@ export function useWorkflowNodeActions({
       const parentNode = parentNodeId
         ? allNodes.find((node) => String(node.id) === parentNodeId)
         : undefined
+      const shouldIgnoreSelectedNode = options?.ignoreSelectedNode === true
 
       if (parentNode && DISALLOWED_LOOP_CHILD_TYPES.includes(type)) {
         return
@@ -93,7 +96,7 @@ export function useWorkflowNodeActions({
 
       const fromNodeId = parentNode && selectedNodeType === 'loop' && !options?.connectFromNodeId
         ? undefined
-        : options?.connectFromNodeId ?? (parentNode ? undefined : selectedNodeId)
+        : options?.connectFromNodeId ?? (parentNode || shouldIgnoreSelectedNode ? undefined : selectedNodeId)
       const fromNode = fromNodeId
         ? allNodes.find((node) => String(node.id) === fromNodeId)
         : undefined
@@ -185,67 +188,75 @@ export function useWorkflowNodeActions({
   const openNodePanel = useCallback(
     async (options?: AddNodeOptions) => {
       const ctx = ctxRef.current
-      if (!ctx) {
+      if (!ctx || nodePanelOpenRef.current) {
         return
       }
 
-      const allNodes = ctx.document.getAllNodes()
-      const selectedNode = selectedNodeId
-        ? allNodes.find((node) => String(node.id) === selectedNodeId)
-        : undefined
-      const selectedNodeType = selectedNode ? getWorkflowNodeType(selectedNode) : ''
-      const explicitFromNode = options?.connectFromNodeId
-        ? allNodes.find((node) => String(node.id) === options.connectFromNodeId)
-        : undefined
-      const explicitFromLoopParentId = explicitFromNode ? getLoopParentNodeId(explicitFromNode, allNodes) : undefined
-      const parentNodeId = options?.parentNodeId ?? explicitFromLoopParentId
-      const parentNode = parentNodeId
-        ? allNodes.find((node) => String(node.id) === parentNodeId)
-        : undefined
-      const fromNodeId = parentNode && selectedNodeType === 'loop' && !options?.connectFromNodeId
-        ? undefined
-        : options?.connectFromNodeId ?? (parentNode ? undefined : selectedNodeId)
-      const fromNode = fromNodeId
-        ? allNodes.find((node) => String(node.id) === fromNodeId)
-        : undefined
-      const fromNodeLike = fromNode ? getNodeEntityMeta(fromNode) : undefined
-      const panelPosition = parentNode
-        ? options?.panelPosition ?? getLoopPanelPosition(parentNode)
-        : options?.panelPosition
-          ?? (options?.position
-            ? {
-              x: options.position.x + CANVAS_OFFSET_X,
-              y: options.position.y + CANVAS_OFFSET_Y,
-            }
-            : getNextNodeCanvasPosition(fromNodeLike, edges))
-      const sourceTitle = parentNodeId
-        ? `${nodes.find((node) => node.id === parentNodeId)?.title ?? '循环节点'} · 循环体`
-        : fromNodeId
-          ? nodes.find((node) => node.id === fromNodeId)?.title ?? ''
-          : ''
+      nodePanelOpenRef.current = true
 
-      const nodePanelService = ctx.get(WorkflowNodePanelService)
-      const result = await nodePanelService.singleSelectNodePanel({
-        position: panelPosition,
-        panelProps: {
-          sourceTitle,
-          disallowNodeTypes: parentNode ? DISALLOWED_LOOP_CHILD_TYPES : [],
-        },
-        containerNode: parentNode ?? fromNode,
-      })
+      try {
+        const allNodes = ctx.document.getAllNodes()
+        const selectedNode = selectedNodeId
+          ? allNodes.find((node) => String(node.id) === selectedNodeId)
+          : undefined
+        const selectedNodeType = selectedNode ? getWorkflowNodeType(selectedNode) : ''
+        const explicitFromNode = options?.connectFromNodeId
+          ? allNodes.find((node) => String(node.id) === options.connectFromNodeId)
+          : undefined
+        const explicitFromLoopParentId = explicitFromNode ? getLoopParentNodeId(explicitFromNode, allNodes) : undefined
+        const parentNodeId = options?.parentNodeId ?? explicitFromLoopParentId
+        const parentNode = parentNodeId
+          ? allNodes.find((node) => String(node.id) === parentNodeId)
+          : undefined
+        const shouldIgnoreSelectedNode = options?.ignoreSelectedNode === true
+        const fromNodeId = parentNode && selectedNodeType === 'loop' && !options?.connectFromNodeId
+          ? undefined
+          : options?.connectFromNodeId ?? (parentNode || shouldIgnoreSelectedNode ? undefined : selectedNodeId)
+        const fromNode = fromNodeId
+          ? allNodes.find((node) => String(node.id) === fromNodeId)
+          : undefined
+        const fromNodeLike = fromNode ? getNodeEntityMeta(fromNode) : undefined
+        const panelPosition = parentNode
+          ? options?.panelPosition ?? getLoopPanelPosition(parentNode)
+          : options?.panelPosition
+            ?? (options?.position
+              ? {
+                x: options.position.x + CANVAS_OFFSET_X,
+                y: options.position.y + CANVAS_OFFSET_Y,
+              }
+              : getNextNodeCanvasPosition(fromNodeLike, edges))
+        const sourceTitle = parentNodeId
+          ? `${nodes.find((node) => node.id === parentNodeId)?.title ?? '循环节点'} · 循环体`
+          : fromNodeId
+            ? nodes.find((node) => node.id === fromNodeId)?.title ?? ''
+            : ''
 
-      if (!result?.nodeType) {
-        return
+        const nodePanelService = ctx.get(WorkflowNodePanelService)
+        const result = await nodePanelService.singleSelectNodePanel({
+          position: panelPosition,
+          panelProps: {
+            sourceTitle,
+            disallowNodeTypes: parentNode ? DISALLOWED_LOOP_CHILD_TYPES : [],
+          },
+          containerNode: parentNode ?? fromNode,
+        })
+
+        if (!result?.nodeType) {
+          return
+        }
+
+        createNodeByType(result.nodeType as WorkflowNode['type'], {
+          connectFromNodeId: fromNodeId,
+          parentNodeId,
+          loopSourceNodeId: options?.loopSourceNodeId,
+          sourcePortID: options?.sourcePortID,
+          position: options?.position,
+          selectCreated: options?.selectCreated,
+          ignoreSelectedNode: options?.ignoreSelectedNode,
+        })
+      } finally {
+        nodePanelOpenRef.current = false
       }
-
-      createNodeByType(result.nodeType as WorkflowNode['type'], {
-        connectFromNodeId: fromNodeId,
-        parentNodeId,
-        loopSourceNodeId: options?.loopSourceNodeId,
-        sourcePortID: options?.sourcePortID,
-        position: options?.position,
-        selectCreated: options?.selectCreated,
-      })
     },
     [createNodeByType, ctxRef, edges, nodes, selectedNodeId],
   )
@@ -272,24 +283,6 @@ export function useWorkflowNodeActions({
       setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
     },
     [ctxRef, selectedNodeId, setWorkflowGraph],
-  )
-
-  const updateNodeConfigById = useCallback(
-    (nodeId: string, configPatch: Partial<WorkflowNode['config']>) => {
-      const ctx = ctxRef.current
-      if (!ctx) {
-        return
-      }
-
-      const targetNode = ctx.document.getAllNodes().find((node) => String(node.id) === nodeId)
-      if (!targetNode) {
-        return
-      }
-
-      syncNodeData(targetNode, { config: configPatch })
-      setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
-    },
-    [ctxRef, setWorkflowGraph],
   )
 
   const copyNode = useCallback((nodeId: string) => {
@@ -368,7 +361,6 @@ export function useWorkflowNodeActions({
     deleteNode,
     openNodePanel,
     openQuickAddPanel,
-    updateNodeConfigById,
     updateSelectedNode,
   }
 }

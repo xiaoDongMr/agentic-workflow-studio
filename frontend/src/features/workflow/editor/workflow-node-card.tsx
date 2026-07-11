@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
@@ -56,6 +57,9 @@ import type {
 import { cn } from '@/lib/utils'
 import { useWorkflowStore } from '@/store/workflow-store'
 import type { WorkflowNode } from '@/types/workflow'
+import type { WorkflowNodeValidationResult } from '@/features/workflow/validation/workflow-validation.types'
+import { validateWorkflowNode } from '@/features/workflow/validation/workflow-validation-service'
+import { findWorkflowNodeById } from '@/features/workflow/utils/workflow-document'
 
 function WorkflowNodeRenderer({
   node,
@@ -287,6 +291,7 @@ export function FlowgramNodeCard({
   selectedNodeId,
   onToggleQuickAdd,
   trialRunExecution,
+  validationResult,
   autoExpandExecutionDetails = false,
   onRunNode,
   onCopyNode,
@@ -304,6 +309,7 @@ export function FlowgramNodeCard({
     position?: AddNodeOptions['position'],
   ) => void
   trialRunExecution?: TrialRunNodeExecution
+  validationResult?: WorkflowNodeValidationResult
   autoExpandExecutionDetails?: boolean
   onRunNode: (nodeId: string) => void
   onCopyNode: (nodeId: string) => void
@@ -321,6 +327,8 @@ export function FlowgramNodeCard({
   const isLoopBodyEndNode = kind === 'end' && Boolean(parentLoopNodeId)
 
   const setSelectedNodeId = useWorkflowStore((state) => state.setSelectedNodeId)
+  const workflowNodes = useWorkflowStore((state) => state.workflow.nodes)
+  const workflowEdges = useWorkflowStore((state) => state.workflow.edges)
   const [menuOpen, setMenuOpen] = useState(false)
   const actionsRef = useRef<HTMLDivElement>(null)
   const Icon = kind === LOOP_CANVAS_ANCHOR_NODE_TYPE ? Home : nodeIcons[kind]
@@ -332,6 +340,16 @@ export function FlowgramNodeCard({
   const canRunNode = !isLoopEndpoint
   const canAddFromOutputPort = kind !== 'selector' && kind !== 'end' && kind !== 'loop-end'
   const isNodeRunning = nodeActionRunning || effectiveExecution?.status === 'running'
+  const liveValidationResult = useMemo(() => {
+    const liveNode = findWorkflowNodeById(workflowNodes, nodeId)
+    if (!liveNode) {
+      return undefined
+    }
+    return validateWorkflowNode(liveNode, workflowNodes, workflowEdges)
+  }, [nodeId, workflowEdges, workflowNodes])
+  const effectiveValidationResult = liveValidationResult ?? validationResult
+  const validationIssueCount = effectiveValidationResult?.issues.length ?? 0
+  const hasValidationError = Boolean(effectiveValidationResult?.errorCount)
   const loopEndpointDisplay = kind === 'loop-end' ? LOOP_BODY_END_NODE_DISPLAY : undefined
   const loopCanvasSize = kind === 'loop'
     ? getLoopBodyCanvasSize(data?.config ?? {}, data?.config.loopBodyNodes ?? [])
@@ -352,16 +370,6 @@ export function FlowgramNodeCard({
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen])
   useClickOutside(actionsRef, menuOpen, closeMenu)
 
-  const runtimeStatusLabel =
-    effectiveExecution?.status === 'running'
-      ? '运行中'
-      : effectiveExecution?.status === 'error'
-        ? '失败'
-        : data?.status === 'active'
-          ? '运行中'
-          : data?.status === 'success'
-            ? '完成'
-            : '待执行'
   const nodeDisplay = isLoopBodyEndNode ? getEndNodeDisplay(true) : undefined
   const nodeTitle = nodeDisplay?.title ?? data?.title
   const nodeDescription = nodeDisplay?.description ?? data?.description
@@ -460,15 +468,19 @@ export function FlowgramNodeCard({
               <div className="aw-flow-node__icon">
                 <Icon className="h-3.5 w-3.5" />
               </div>
-              <span
-                className={cn(
-                  'aw-flow-node__status',
-                  effectiveExecution?.status === 'running' && 'aw-flow-node__status--running',
-                  effectiveExecution?.status === 'error' && 'aw-flow-node__status--error',
-                )}
-              >
-                {runtimeStatusLabel}
-              </span>
+              {validationIssueCount > 0 && (
+                <span
+                  className={cn(
+                    'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium',
+                    hasValidationError
+                      ? 'border-rose-300/25 bg-rose-500/12 text-rose-100'
+                      : 'border-amber-300/24 bg-amber-500/12 text-amber-100',
+                  )}
+                  title={effectiveValidationResult?.issues.slice(0, 3).map((issue) => issue.message).join('\n')}
+                >
+                  {validationIssueCount} 个问题
+                </span>
+              )}
             </div>
             <div className="aw-flow-node__title" draggable={kind === 'loop'}>{nodeTitle}</div>
             <div className="aw-flow-node__description" draggable={kind === 'loop'}>{nodeDescription}</div>

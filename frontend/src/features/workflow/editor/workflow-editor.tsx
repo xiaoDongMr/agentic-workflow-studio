@@ -89,6 +89,10 @@ import { getVisibleCanvasAddPlacement } from '@/features/workflow/editor/workflo
 import { clearNodeExecutionPanelExpansion } from '@/features/workflow/editor/node-execution-panel-state'
 import { buildBrowserPreviewUrl } from '@/features/workflow/components/node-config/code-node/code-node-utils'
 import {
+  hasBlockingValidationErrors,
+  validateWorkflowGraph,
+} from '@/features/workflow/validation/workflow-validation-service'
+import {
   clearNodeTrialRunExecution,
   createTrialRunId,
   setNodeTrialRunExecution,
@@ -204,6 +208,7 @@ export function WorkflowEditor({
   const trialRunFlushFrameRef = useRef<number | null>(null)
   const completedGlobalTrialNodeIdsRef = useRef<Set<string>>(new Set())
   const activeTrialRunEdgeKeysRef = useRef<Set<string>>(new Set())
+  const validationResult = useMemo(() => validateWorkflowGraph(nodes, edges), [edges, nodes])
 
   const singleNodeTrialNode = useMemo(() => {
     const targetNode = findWorkflowNodeById(nodes, singleNodeTrialNodeId)
@@ -798,6 +803,7 @@ export function WorkflowEditor({
             onSelectNode={selectNodeForConfig}
             selectedNodeId={selectedNodeId}
             trialRunExecution={trialRunExecutions[String(props.node.id)]}
+            validationResult={validationResult.nodeResults[String(props.node.id)]}
             autoExpandExecutionDetails={singleNodeTrialOpen && singleNodeTrialNodeId === String(props.node.id)}
             nodeActionRunning={trialRunning}
             onRunNode={openSingleNodeTrial}
@@ -922,6 +928,7 @@ export function WorkflowEditor({
       singleNodeTrialOpen,
       trialRunExecutions,
       trialRunning,
+      validationResult,
     ],
   )
 
@@ -957,6 +964,21 @@ export function WorkflowEditor({
   }, [abortTrialRunStream, clearTrialRunEdgeStyles, clearTrialRunTimers])
 
   const startTrialRun = useCallback(async () => {
+    if (hasBlockingValidationErrors(validationResult)) {
+      const firstIssue = validationResult.issues.find((issue) => issue.severity === 'error')
+      setTrialRunOpen(true)
+      setSingleNodeTrialOpen(false)
+      if (firstIssue) {
+        onSelectNode(firstIssue.nodeId)
+      }
+      setGlobalDebugJsonError(
+        firstIssue
+          ? `无法开始试运行：${firstIssue.title}。${firstIssue.message}`
+          : `无法开始试运行：当前工作流还有 ${validationResult.errorCount} 个必须修复的问题。`,
+      )
+      return
+    }
+
     const runId = createTrialRunId('global')
     activeTrialRunIdRef.current = runId
     setActiveTrialRunId(runId)
@@ -1034,8 +1056,10 @@ export function WorkflowEditor({
     globalDebugFields,
     globalDebugJsonMode,
     nodes,
+    onSelectNode,
     replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
+    validationResult,
     workflowId,
   ])
 
@@ -1232,6 +1256,17 @@ export function WorkflowEditor({
       return
     }
 
+    const nodeValidationResult = validationResult.nodeResults[singleNodeTrialNodeId]
+    if (nodeValidationResult && hasBlockingValidationErrors(nodeValidationResult)) {
+      const firstIssue = nodeValidationResult.issues.find((issue) => issue.severity === 'error')
+      setSingleNodeJsonError(
+        firstIssue
+          ? `无法开始试运行：${firstIssue.title}。${firstIssue.message}`
+          : `无法开始试运行：当前节点还有 ${nodeValidationResult.errorCount} 个必须修复的问题。`,
+      )
+      return
+    }
+
     try {
       const payload = singleNodeJsonMode
         ? JSON.parse(singleNodeCombinedJson) as Record<string, unknown>
@@ -1247,6 +1282,7 @@ export function WorkflowEditor({
     singleNodeJsonMode,
     singleNodeTrialFields,
     singleNodeTrialNodeId,
+    validationResult,
   ])
 
   return (

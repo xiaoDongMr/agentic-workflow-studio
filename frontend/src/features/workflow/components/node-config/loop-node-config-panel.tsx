@@ -28,6 +28,7 @@ export function LoopNodeConfigPanel({
   edges,
   onUpdateNode,
   className,
+  validationResult,
 }: NodeConfigPanelProps) {
   const variableSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const arraySources = useMemo(
@@ -85,7 +86,7 @@ export function LoopNodeConfigPanel({
   }
 
   return (
-    <ConfigShell node={node} className={className}>
+    <ConfigShell node={node} className={className} validationResult={validationResult}>
       <BasicInfoSection node={node} onUpdateNode={onUpdateNode} />
 
       <ConfigSection title="循环方式" icon={<Waypoints className="h-4 w-4 text-cyan-300" />}>

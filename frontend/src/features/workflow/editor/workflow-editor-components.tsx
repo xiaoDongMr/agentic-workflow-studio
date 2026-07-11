@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clipboard,
+  AlertTriangle,
   ImageUp,
   LayoutGrid,
   Link,
@@ -194,6 +195,8 @@ export function EditorTrialRunPanel({
         {browserPreview ? (
           <BrowserRuntimePreviewCard preview={browserPreview} />
         ) : null}
+
+        {jsonError ? <TrialRunErrorCard message={jsonError} /> : null}
 
         <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/8 bg-white/[0.03]">
           <div className="shrink-0 flex items-center justify-between border-b border-white/8 px-4 py-3">
@@ -443,6 +446,8 @@ export function SingleNodeTrialPanel({
             <BrowserRuntimePreviewCard preview={browserPreview} />
           ) : null}
 
+          {jsonError ? <TrialRunErrorCard message={jsonError} compact /> : null}
+
           {execution && (
             <div className="mt-6 space-y-4 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
               <div className="flex items-center justify-between gap-3">
@@ -478,6 +483,31 @@ export function SingleNodeTrialPanel({
           </button>
         </div>
       </section>
+    </div>
+  )
+}
+
+function TrialRunErrorCard({
+  message,
+  compact = false,
+}: {
+  message: string
+  compact?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-2xl border border-rose-400/22 bg-rose-500/[0.08] text-rose-100',
+        compact ? 'mt-4 px-3 py-2.5' : 'mt-4 px-4 py-3',
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-semibold">运行前校验未通过</p>
+          <p className="mt-1 text-[11px] leading-4 text-rose-100/85">{message}</p>
+        </div>
+      </div>
     </div>
   )
 }

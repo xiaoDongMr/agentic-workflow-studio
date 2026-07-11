@@ -25,6 +25,7 @@ import {
   getAvailableInputSources,
   normalizeValueType,
 } from '@/features/workflow/components/node-config/variable-utils'
+import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import { cn } from '@/lib/utils'
 import type { WorkflowNode, WorkflowReasoningEffort, WorkflowValueType } from '@/types/workflow'
 
@@ -81,7 +82,7 @@ interface ModelOptionsState {
   error: string
 }
 
-export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className }: NodeConfigPanelProps) {
+export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className, validationResult }: NodeConfigPanelProps) {
   const config = node.config
   const [modelOptionsState, setModelOptionsState] = useState<ModelOptionsState>({
     items: [],
@@ -178,8 +179,15 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
     })
   }, [config.maxTokens, config.timeoutSeconds, node.outputs, onUpdateNode])
 
+  const inputIssues = validationResult?.issues.filter((issue) => issue.scope === 'input' || issue.scope === 'inputMapping') ?? []
+  const outputIssues = validationResult?.issues.filter((issue) => {
+    return issue.scope === 'output' || issue.fieldPath === 'config.outputKey' || issue.fieldPath === 'config.reasoningKey'
+  }) ?? []
+  const systemPromptIssues = validationResult?.issues.filter((issue) => issue.fieldPath === 'config.systemPrompt') ?? []
+  const userPromptIssues = validationResult?.issues.filter((issue) => issue.fieldPath === 'config.userPrompt') ?? []
+
   return (
-    <ConfigShell node={node} className={className}>
+    <ConfigShell node={node} className={className} validationResult={validationResult}>
       <BasicInfoSection node={node} onUpdateNode={onUpdateNode} />
 
       <ConfigSection title="输入变量">
@@ -191,6 +199,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           inputMappings={config.inputMappings}
           onChange={(items) => onUpdateNode({ inputs: items })}
           onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
+          validationIssues={inputIssues}
         />
       </ConfigSection>
 
@@ -238,6 +247,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           variables={textPromptVariables}
           placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量（图片/视频请在用户提示词中引用）。"
           onChange={(value) => onUpdateNode({ config: { systemPrompt: value, prompt: value } })}
+          validationIssues={systemPromptIssues}
           rows={6}
         />
         <PromptEditor
@@ -246,6 +256,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           variables={promptVariables}
           placeholder="可以使用 {{变量名}}、{{变量名.子变量名}}、{{变量名[数组索引]}} 引用输入变量。"
           onChange={(value) => onUpdateNode({ config: { userPrompt: value } })}
+          validationIssues={userPromptIssues}
           rows={6}
         />
       </ConfigSection>
@@ -258,6 +269,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           onChange={(items) => onUpdateNode({ outputs: normalizeReasoningOutputs(items, selectedModel.supportsThinking) })}
           maxItems={selectedModel.supportsThinking ? LLM_PRIMARY_OUTPUT_LIMIT + 1 : LLM_PRIMARY_OUTPUT_LIMIT}
           readonlyNames={selectedModel.supportsThinking ? [REASONING_OUTPUT_NAME] : []}
+          validationIssues={outputIssues}
         />
       </ConfigSection>
 
@@ -763,6 +775,7 @@ function PromptEditor(props: {
   variables: { name: string; type: WorkflowValueType }[]
   placeholder?: string
   onChange: (value: string) => void
+  validationIssues?: WorkflowValidationIssue[]
   rows: number
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -833,6 +846,7 @@ function PromptEditorCore({
   variables,
   placeholder,
   onChange,
+  validationIssues = [],
   rows,
   fill,
   headerAction,
@@ -842,6 +856,7 @@ function PromptEditorCore({
   variables: { name: string; type: WorkflowValueType }[]
   placeholder?: string
   onChange: (value: string) => void
+  validationIssues?: WorkflowValidationIssue[]
   rows: number
   fill?: boolean
   headerAction?: React.ReactNode
@@ -1008,6 +1023,10 @@ function PromptEditorCore({
       <div
         className={cn(
           'relative mt-1.5 rounded-xl border border-white/8 bg-slate-950/80 focus-within:border-blue-400/50',
+          validationIssues.some((issue) => issue.severity === 'error') && 'border-rose-400/35 focus-within:border-rose-300/70',
+          validationIssues.length > 0 &&
+            !validationIssues.some((issue) => issue.severity === 'error') &&
+            'border-amber-300/30 focus-within:border-amber-200/60',
           fill && 'flex-1 overflow-auto',
         )}
       >
@@ -1018,6 +1037,28 @@ function PromptEditorCore({
         )}
         <div ref={hostRef} className={cn(fill && 'h-full')} />
       </div>
+      {validationIssues.length > 0 && (
+        <div
+          className={cn(
+            'mt-1.5 space-y-1 rounded-xl border px-2.5 py-2',
+            validationIssues.some((issue) => issue.severity === 'error')
+              ? 'border-rose-400/18 bg-rose-500/[0.06]'
+              : 'border-amber-300/18 bg-amber-500/[0.06]',
+          )}
+        >
+          {validationIssues.map((issue) => (
+            <p
+              key={issue.id}
+              className={cn(
+                'text-[10px] leading-4',
+                issue.severity === 'error' ? 'text-rose-100' : 'text-amber-100',
+              )}
+            >
+              {issue.message}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

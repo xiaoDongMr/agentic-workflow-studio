@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   LoaderCircle,
   PanelLeftOpen,
@@ -15,6 +15,7 @@ import { WorkflowEditorHeader } from '@/features/workflow/components/workflow-ed
 import { WorkflowOverview } from '@/features/workflow/components/workflow-overview'
 import { useWorkflowSandboxSession } from '@/features/workflow/hooks/use-workflow-sandbox-session'
 import { useWorkflowWorkspace } from '@/features/workflow/hooks/use-workflow-workspace'
+import { validateWorkflowGraph } from '@/features/workflow/validation/workflow-validation-service'
 import { SandboxPoolPage } from '@/features/sandbox/sandbox-pool-page'
 import { cn } from '@/lib/utils'
 
@@ -82,6 +83,10 @@ function App() {
     enabled: workflowEditorOpen && currentWorkflowSaved,
     workflowId: workflow.id,
   })
+  const validationResult = useMemo(
+    () => validateWorkflowGraph(workflow.nodes, workflow.edges),
+    [workflow.edges, workflow.nodes],
+  )
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#14203d_0%,#090d18_38%,#05070c_100%)] text-slate-100">
@@ -193,6 +198,7 @@ function App() {
                           sandboxSession={workflowSandboxSession.session}
                           workflowId={workflow.id}
                           workflowSaved={currentWorkflowSaved}
+                          validationResult={validationResult.nodeResults[selectedNode.id]}
                           onUpdateNode={(partial) => {
                             if (canvasApi) {
                               canvasApi.updateSelectedNode(partial)

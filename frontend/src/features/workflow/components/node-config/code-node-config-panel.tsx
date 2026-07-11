@@ -78,6 +78,7 @@ export function CodeNodeConfigPanel({
   workflowId = '',
   workflowSaved = false,
   className,
+  validationResult,
 }: NodeConfigPanelProps) {
   const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const codeSyncStatus = node.config.codeSyncStatus ?? 'saved'
@@ -304,8 +305,11 @@ export function CodeNodeConfigPanel({
     workflowId,
   ])
 
+  const inputIssues = validationResult?.issues.filter((issue) => issue.scope === 'input' || issue.scope === 'inputMapping') ?? []
+  const outputIssues = validationResult?.issues.filter((issue) => issue.scope === 'output' || issue.fieldPath?.startsWith('config.')) ?? []
+
   return (
-    <ConfigShell node={node} className={className}>
+    <ConfigShell node={node} className={className} validationResult={validationResult}>
       <CodeNodeSummary
         codeMode={codeMode}
         capability={codeCapability}
@@ -437,6 +441,7 @@ export function CodeNodeConfigPanel({
           inputMappings={node.config.inputMappings}
           onChange={(items) => onUpdateNode({ inputs: items })}
           onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
+          validationIssues={inputIssues}
         />
       </ConfigSection>
 
@@ -446,6 +451,7 @@ export function CodeNodeConfigPanel({
           emptyLabel="输出变量"
           items={node.outputs}
           onChange={(items) => onUpdateNode({ outputs: items, config: { outputKey: resolveCodeOutputKey(items) } })}
+          validationIssues={outputIssues}
         />
       </ConfigSection>
 

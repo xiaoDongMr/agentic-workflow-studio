@@ -147,14 +147,14 @@ class LlmNodeExecutor:
 
 def resolve_llm_output_key(node: WorkflowNode) -> str:
     configured_key = (node.config.outputKey or "").strip()
-    if configured_key and configured_key != "output":
+    if configured_key:
         return configured_key
 
     for output in node.outputs:
         name = output.name.strip()
         if name and name != (node.config.reasoningKey or "reasoning_content"):
             return name
-    return configured_key or "output"
+    return "output"
 
 
 def model_name(node: WorkflowNode, app_config: AppConfig | None) -> str | None:

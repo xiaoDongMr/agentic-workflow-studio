@@ -50,24 +50,40 @@ export function validateWorkflowEdge(
 }
 
 function sanitizeWorkflowNode(node: WorkflowNode, nodeScopes: Map<string, string | undefined>): WorkflowNode {
-  if (node.type !== 'loop') {
-    return node
+  const normalizedNode = removeDeprecatedLlmOutputKey(node)
+
+  if (normalizedNode.type !== 'loop') {
+    return normalizedNode
   }
 
-  const loopScope = node.id
-  const loopBodyEdges = (node.config.loopBodyEdges ?? []).filter((edge) => {
+  const loopScope = normalizedNode.id
+  const loopBodyEdges = (normalizedNode.config.loopBodyEdges ?? []).filter((edge) => {
     return validateWorkflowEdge(edge, nodeScopes, loopScope) && edge.target !== loopScope
   })
-  const loopBodyNodes = (node.config.loopBodyNodes ?? []).map((bodyNode) => {
+  const loopBodyNodes = (normalizedNode.config.loopBodyNodes ?? []).map((bodyNode) => {
     return sanitizeWorkflowNode(bodyNode, nodeScopes)
   })
+
+  return {
+    ...normalizedNode,
+    config: {
+      ...normalizedNode.config,
+      loopBodyEdges,
+      loopBodyNodes,
+    },
+  }
+}
+
+function removeDeprecatedLlmOutputKey(node: WorkflowNode): WorkflowNode {
+  if (node.type !== 'llm' || node.config.outputKey !== 'output') {
+    return node
+  }
 
   return {
     ...node,
     config: {
       ...node.config,
-      loopBodyEdges,
-      loopBodyNodes,
+      outputKey: '',
     },
   }
 }

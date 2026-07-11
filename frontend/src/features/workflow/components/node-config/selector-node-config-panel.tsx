@@ -23,6 +23,7 @@ import {
   groupVariableSources,
   type WorkflowVariableSource,
 } from '@/features/workflow/components/node-config/variable-utils'
+import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
 import { cn } from '@/lib/utils'
 import type {
@@ -40,6 +41,7 @@ export function SelectorNodeConfigPanel({
   edges,
   onUpdateNode,
   className,
+  validationResult,
 }: NodeConfigPanelProps) {
   const variableSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const branches = useMemo(() => getSelectorBranches(node), [node])
@@ -90,7 +92,7 @@ export function SelectorNodeConfigPanel({
   }
 
   return (
-    <ConfigShell node={node} className={className}>
+    <ConfigShell node={node} className={className} validationResult={validationResult}>
       <BasicInfoSection node={node} onUpdateNode={onUpdateNode} />
 
       <ConfigSection title="条件分支" icon={<GitBranch className="h-4 w-4 text-cyan-300" />}>
@@ -127,6 +129,10 @@ export function SelectorNodeConfigPanel({
                   const hasConnector = branch.conditions.length > 1
                   const isFirstCondition = conditionIndex === 0
                   const isLastCondition = conditionIndex === branch.conditions.length - 1
+                  const conditionPath = `config.selectorBranches.${branchIndex}.conditions.${conditionIndex}`
+                  const conditionIssues = validationResult?.issues.filter((issue) => issue.fieldPath?.startsWith(conditionPath)) ?? []
+                  const leftIssues = conditionIssues.filter((issue) => issue.fieldPath === `${conditionPath}.left`)
+                  const rightIssues = conditionIssues.filter((issue) => issue.fieldPath === `${conditionPath}.right`)
 
                   return (
                     <div key={condition.id} className={cn('relative', hasConnector && 'pl-5')}>
@@ -149,6 +155,9 @@ export function SelectorNodeConfigPanel({
                         condition={condition}
                         variableSources={variableSources}
                         canRemove={branch.conditions.length > 1}
+                        validationIssues={conditionIssues}
+                        leftValidationIssues={leftIssues}
+                        rightValidationIssues={rightIssues}
                         onChange={(patch) => updateCondition(branch, condition.id, patch)}
                         onRemove={() => removeCondition(branch, condition.id)}
                       />
@@ -197,19 +206,33 @@ function ConditionRow({
   condition,
   variableSources,
   canRemove,
+  validationIssues,
+  leftValidationIssues,
+  rightValidationIssues,
   onChange,
   onRemove,
 }: {
   condition: WorkflowSelectorCondition
   variableSources: WorkflowVariableSource[]
   canRemove: boolean
+  validationIssues: WorkflowValidationIssue[]
+  leftValidationIssues: WorkflowValidationIssue[]
+  rightValidationIssues: WorkflowValidationIssue[]
   onChange: (patch: Partial<WorkflowSelectorCondition>) => void
   onRemove: () => void
 }) {
   const operator = condition.operator || 'contains'
+  const hasError = validationIssues.some((issue) => issue.severity === 'error')
+  const hasWarning = validationIssues.some((issue) => issue.severity === 'warning')
 
   return (
-    <div className="rounded-xl border border-white/8 bg-slate-950/66 p-2 shadow-inner shadow-white/[0.02] transition-colors hover:border-white/12">
+    <div
+      className={cn(
+        'rounded-xl border border-white/8 bg-slate-950/66 p-2 shadow-inner shadow-white/[0.02] transition-colors hover:border-white/12',
+        hasError && 'border-rose-400/28 bg-rose-500/[0.04] hover:border-rose-300/40',
+        !hasError && hasWarning && 'border-amber-300/24 bg-amber-500/[0.04] hover:border-amber-200/35',
+      )}
+    >
       {canRemove && (
         <div className="mb-1 flex justify-end">
           <button
@@ -228,6 +251,7 @@ function ConditionRow({
           operand={condition.left}
           variableSources={variableSources}
           placeholder="待匹配值"
+          validationIssues={leftValidationIssues}
           onChange={(left) => onChange({ left })}
         />
         <OperatorSelect
@@ -238,6 +262,7 @@ function ConditionRow({
           operand={condition.right}
           variableSources={variableSources}
           placeholder="比较值"
+          validationIssues={rightValidationIssues}
           onChange={(right) => onChange({ right })}
         />
       </div>
@@ -249,47 +274,74 @@ function OperandEditor({
   operand,
   variableSources,
   placeholder,
+  validationIssues,
   onChange,
 }: {
   operand: WorkflowSelectorOperand
   variableSources: WorkflowVariableSource[]
   placeholder: string
+  validationIssues: WorkflowValidationIssue[]
   onChange: (operand: WorkflowSelectorOperand) => void
 }) {
   const sourceType = operand.sourceType === 'literal' ? 'literal' : 'node'
   const operandSource = operand.source ?? [operand.nodeId, operand.fieldPath].filter(Boolean).join('.')
+  const hasError = validationIssues.some((issue) => issue.severity === 'error')
+  const hasWarning = validationIssues.some((issue) => issue.severity === 'warning')
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <OperandModeSelect
-        value={sourceType}
-        onChange={(nextType) => {
-          if (nextType === 'node') {
-            const nextSource = variableSources[0]?.value ?? ''
-            const nextVariable = variableSources[0]
-            onChange(nextVariable ? createSelectorOperandFromVariable(nextVariable) : createSelectorOperand('node', nextSource))
-            return
-          }
-          onChange(createSelectorOperand('literal', '', 'String'))
-        }}
-      />
-
-      {sourceType === 'node' ? (
-        <VariableSourceSelect
-          value={operandSource}
-          options={variableSources}
-          onChange={(value) => {
-            const nextSource = variableSources.find((source) => source.value === value)
-            onChange(nextSource ? createSelectorOperandFromVariable(nextSource) : createSelectorOperand('node', value))
+    <div>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <OperandModeSelect
+          value={sourceType}
+          onChange={(nextType) => {
+            if (nextType === 'node') {
+              const nextSource = variableSources[0]?.value ?? ''
+              const nextVariable = variableSources[0]
+              onChange(nextVariable ? createSelectorOperandFromVariable(nextVariable) : createSelectorOperand('node', nextSource))
+              return
+            }
+            onChange(createSelectorOperand('literal', '', 'String'))
           }}
         />
-      ) : (
-        <input
-          value={String(operand.literalValue ?? operand.source ?? '')}
-          placeholder={placeholder}
-          onChange={(event) => onChange(createSelectorOperand('literal', event.target.value))}
-          className="h-8 min-w-0 flex-1 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] text-slate-200 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50"
-        />
+
+        {sourceType === 'node' ? (
+          <VariableSourceSelect
+            value={operandSource}
+            options={variableSources}
+            hasError={hasError}
+            hasWarning={hasWarning}
+            onChange={(value) => {
+              const nextSource = variableSources.find((source) => source.value === value)
+              onChange(nextSource ? createSelectorOperandFromVariable(nextSource) : createSelectorOperand('node', value))
+            }}
+          />
+        ) : (
+          <input
+            value={String(operand.literalValue ?? operand.source ?? '')}
+            placeholder={placeholder}
+            onChange={(event) => onChange(createSelectorOperand('literal', event.target.value))}
+            className={cn(
+              'h-8 min-w-0 flex-1 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-[11px] text-slate-200 outline-none transition placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50',
+              hasError && 'border-rose-400/35 focus:border-rose-300/70',
+              !hasError && hasWarning && 'border-amber-300/30 focus:border-amber-200/60',
+            )}
+          />
+        )}
+      </div>
+      {validationIssues.length > 0 && (
+        <div className="mt-1 space-y-0.5 pl-10">
+          {validationIssues.map((issue) => (
+            <p
+              key={issue.id}
+              className={cn(
+                'text-[10px] leading-4',
+                issue.severity === 'error' ? 'text-rose-200' : 'text-amber-200',
+              )}
+            >
+              {issue.message}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -421,10 +473,14 @@ function OperatorSelect({
 function VariableSourceSelect({
   value,
   options,
+  hasError,
+  hasWarning,
   onChange,
 }: {
   value: string
   options: WorkflowVariableSource[]
+  hasError?: boolean
+  hasWarning?: boolean
   onChange: (value: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -442,6 +498,8 @@ function VariableSourceSelect({
           'flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/80 px-2.5 text-left outline-none transition',
           'hover:border-blue-300/35 hover:bg-slate-900/85 focus:border-blue-400/60',
           open && 'border-blue-400/55 bg-blue-950/20 ring-2 ring-blue-400/10',
+          hasError && 'border-rose-400/35 focus:border-rose-300/70',
+          !hasError && hasWarning && 'border-amber-300/30 focus:border-amber-200/60',
         )}
       >
         {selectedOption ? (

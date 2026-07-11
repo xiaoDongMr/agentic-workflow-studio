@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { WorkflowInputMapping, WorkflowNode, WorkflowNodeIO, WorkflowValueType } from '@/types/workflow'
 import { createEmptyIOItem, syncMappingAtIndex } from '@/features/workflow/components/node-config/io-mapping-utils'
 import { useClickOutside } from '@/features/workflow/components/node-config/use-click-outside'
+import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import {
   ARRAY_VALUE_TYPES,
   BASE_VALUE_TYPES,
@@ -30,6 +31,7 @@ interface IOSectionProps {
   maxItems?: number
   canRemove?: boolean
   readonlyNames?: string[]
+  validationIssues?: WorkflowValidationIssue[]
 }
 
 export function IOSection({
@@ -44,6 +46,7 @@ export function IOSection({
   maxItems,
   canRemove = true,
   readonlyNames = [],
+  validationIssues = [],
 }: IOSectionProps) {
   const isInputReferenceMode = Boolean(sourceOptions)
   const canAddItem = maxItems === undefined || items.length < maxItems
@@ -181,6 +184,7 @@ export function IOSection({
             onRemove={() => removeItem(index)}
             canRemove={canRemove && !readonlyNames.includes(item.name)}
             readonly={readonlyNames.includes(item.name)}
+            issues={validationIssues.filter((issue) => issue.fieldPath?.startsWith(`${isInputReferenceMode ? 'inputs' : 'outputs'}.${index}.`))}
           />
         ))}
         {items.length === 0 && (
@@ -233,6 +237,7 @@ function IOEditorRow({
   onRemove,
   canRemove,
   readonly,
+  issues,
 }: {
   item: WorkflowNodeIO
   gridClass: string
@@ -246,54 +251,79 @@ function IOEditorRow({
   onRemove: () => void
   canRemove: boolean
   readonly: boolean
+  issues: WorkflowValidationIssue[]
 }) {
+  const hasError = issues.some((issue) => issue.severity === 'error')
+  const hasWarning = issues.some((issue) => issue.severity === 'warning')
   const handleNameChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => onChange({ ...item, name: event.target.value }),
     [item, onChange],
   )
 
   return (
-    <div className={cn('grid items-center gap-1.5 rounded-xl border border-white/8 bg-slate-950/65 p-1.5', gridClass)}>
-      <input
-        value={item.name}
-        placeholder="变量名"
-        onChange={handleNameChange}
-        disabled={readonly}
-        className={cn(
-          'aw-variable-input h-7 min-w-0 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-slate-200 outline-none placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50',
-          readonly && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
-        )}
-      />
-      {sourceOptions ? (
-        <InputValueEditor
-          item={item}
-          mapping={mapping}
-          selectedSource={selectedSource}
-          sourceOptions={sourceOptions}
-          onChangeItem={onChange}
-          onChangeSource={onChangeSource}
-          onChangeMapping={onChangeMapping}
-          allowCustomValue={allowCustomValue}
-          disabled={readonly}
-        />
-      ) : (
-        <ValueTypeSelect
-          value={normalizeValueType(item.type)}
-          onChange={(type) => onChange({ ...item, type })}
-          disabled={readonly}
-        />
+    <div
+      className={cn(
+        'rounded-xl border bg-slate-950/65 p-1.5',
+        hasError ? 'border-rose-400/35 bg-rose-500/[0.05]' : hasWarning ? 'border-amber-300/28 bg-amber-500/[0.04]' : 'border-white/8',
       )}
-      {canRemove ? (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/6 hover:text-rose-300"
-          aria-label="删除字段"
-        >
-          <Trash2 className="h-2.5 w-2.5" />
-        </button>
-      ) : (
-        <span />
+    >
+      <div className={cn('grid items-center gap-1.5', gridClass)}>
+        <input
+          value={item.name}
+          placeholder="变量名"
+          onChange={handleNameChange}
+          disabled={readonly}
+          className={cn(
+            'aw-variable-input h-7 min-w-0 rounded-lg border border-white/8 bg-slate-950/80 px-2 text-slate-200 outline-none placeholder:text-slate-600 hover:border-white/14 focus:border-blue-400/50',
+            readonly && 'cursor-not-allowed border-white/6 bg-slate-900/70 text-slate-400 hover:border-white/6',
+          )}
+        />
+        {sourceOptions ? (
+          <InputValueEditor
+            item={item}
+            mapping={mapping}
+            selectedSource={selectedSource}
+            sourceOptions={sourceOptions}
+            onChangeItem={onChange}
+            onChangeSource={onChangeSource}
+            onChangeMapping={onChangeMapping}
+            allowCustomValue={allowCustomValue}
+            disabled={readonly}
+          />
+        ) : (
+          <ValueTypeSelect
+            value={normalizeValueType(item.type)}
+            onChange={(type) => onChange({ ...item, type })}
+            disabled={readonly}
+          />
+        )}
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/6 hover:text-rose-300"
+            aria-label="删除字段"
+          >
+            <Trash2 className="h-2.5 w-2.5" />
+          </button>
+        ) : (
+          <span />
+        )}
+      </div>
+      {issues.length > 0 && (
+        <div className="mt-1.5 space-y-1 px-1">
+          {issues.map((issue) => (
+            <p
+              key={issue.id}
+              className={cn(
+                'text-[10px] leading-4',
+                issue.severity === 'error' ? 'text-rose-200' : 'text-amber-200',
+              )}
+            >
+              {issue.message}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   )

@@ -24,46 +24,20 @@ export function NodeConfigPanel(props: NodeConfigPanelProps) {
   const {
     node,
     nodes,
-    edges,
-    onUpdateNode,
     className,
-    sandbox,
-    sandboxSession,
-    workflowId,
-    workflowSaved,
   } = props
 
   if (node.type === 'llm') {
-    return <LlmNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
+    return <LlmNodeConfigPanel {...props} />
   }
   if (node.type === 'selector') {
-    return (
-      <SelectorNodeConfigPanel
-        node={node}
-        nodes={nodes}
-        edges={edges}
-        onUpdateNode={onUpdateNode}
-        className={className}
-      />
-    )
+    return <SelectorNodeConfigPanel {...props} />
   }
   if (node.type === 'loop') {
-    return <LoopNodeConfigPanel node={node} nodes={nodes} edges={edges} onUpdateNode={onUpdateNode} className={className} />
+    return <LoopNodeConfigPanel {...props} />
   }
   if (node.type === 'code') {
-    return (
-      <CodeNodeConfigPanel
-        node={node}
-        nodes={nodes}
-        edges={edges}
-        sandbox={sandbox}
-        sandboxSession={sandboxSession}
-        workflowId={workflowId}
-        workflowSaved={workflowSaved}
-        onUpdateNode={onUpdateNode}
-        className={className}
-      />
-    )
+    return <CodeNodeConfigPanel {...props} />
   }
   if (node.type === 'loop-end') {
     return <FixedInfoPanel node={node} className={className} display={LOOP_BODY_END_NODE_DISPLAY} />
@@ -101,12 +75,16 @@ function DefaultNodeConfigPanel({
   edges,
   onUpdateNode,
   className,
+  validationResult,
 }: NodeConfigPanelProps) {
   const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
   const isStartNode = node.type === 'start'
 
+  const inputIssues = validationResult?.issues.filter((issue) => issue.scope === 'input' || issue.scope === 'inputMapping') ?? []
+  const outputIssues = validationResult?.issues.filter((issue) => issue.scope === 'output') ?? []
+
   return (
-    <ConfigShell node={node} className={className}>
+    <ConfigShell node={node} className={className} validationResult={validationResult}>
       <BasicInfoSection node={node} onUpdateNode={onUpdateNode} />
 
       {!isStartNode && (
@@ -119,6 +97,7 @@ function DefaultNodeConfigPanel({
             inputMappings={node.config.inputMappings}
             onChange={(items) => onUpdateNode({ inputs: items })}
             onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
+            validationIssues={inputIssues}
           />
         </ConfigSection>
       )}
@@ -129,6 +108,7 @@ function DefaultNodeConfigPanel({
           emptyLabel={isStartNode ? '输入' : '输出变量'}
           items={node.outputs}
           onChange={(items) => onUpdateNode({ outputs: items })}
+          validationIssues={outputIssues}
         />
       </ConfigSection>
     </ConfigShell>

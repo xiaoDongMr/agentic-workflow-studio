@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from langgraph.graph import END
+
 from app.schemas.workflow import WorkflowEdge, WorkflowNode
 from app.workflow.state import WorkflowState
 
@@ -22,7 +24,7 @@ def make_selector_router(node: WorkflowNode, edges: list[WorkflowEdge], nodes_by
                 return edge.target
             if normalized_branch and normalized_branch in target_node.title.lower():
                 return edge.target
-        return edges[0].target
+        return END
 
     return route
 

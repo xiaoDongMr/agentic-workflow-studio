@@ -1,4 +1,5 @@
-import type { WorkflowInputMapping, WorkflowNode, WorkflowNodeIO } from '@/types/workflow'
+import type { WorkflowEdge, WorkflowInputMapping, WorkflowNode, WorkflowNodeIO } from '@/types/workflow'
+import { createLoopEntryOutputs } from '@/features/workflow/editor/loop-node.utils'
 import { flattenWorkflowNodes } from '@/features/workflow/utils/workflow-document'
 
 const FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -32,18 +33,73 @@ export function groupDuplicateNames(items: WorkflowNodeIO[]) {
   return counts
 }
 
-export function buildWorkflowGraphContext(nodes: WorkflowNode[]) {
+export function buildWorkflowGraphContext(nodes: WorkflowNode[], edges: WorkflowEdge[] = []) {
   const flatNodes = flattenWorkflowNodes(nodes)
+  const rootNodeIds = new Set(nodes.map((node) => node.id))
+  const { loopBodyNodeIds, parentLoopByNodeId } = collectLoopBodyRelations(nodes)
   const nodeMap = new Map(flatNodes.map((node) => [node.id, node]))
+  const flatEdges = [
+    ...edges,
+    ...flatNodes.flatMap((node) => node.type === 'loop' ? node.config.loopBodyEdges ?? [] : []),
+  ]
+  const outgoingEdges = flatEdges.reduce((edgeMap, edge) => {
+    const sourceEdges = edgeMap.get(edge.source) ?? []
+    sourceEdges.push(edge)
+    edgeMap.set(edge.source, sourceEdges)
+    return edgeMap
+  }, new Map<string, WorkflowEdge[]>())
+  const rootOutgoingEdges = edges.reduce((edgeMap, edge) => {
+    const sourceEdges = edgeMap.get(edge.source) ?? []
+    sourceEdges.push(edge)
+    edgeMap.set(edge.source, sourceEdges)
+    return edgeMap
+  }, new Map<string, WorkflowEdge[]>())
 
   return {
     nodes,
+    edges: flatEdges,
+    rootEdges: edges,
     flatNodes,
+    rootNodeIds,
+    loopBodyNodeIds,
+    parentLoopByNodeId,
     nodeMap,
+    outgoingEdges,
+    rootOutgoingEdges,
   }
 }
 
 export type WorkflowGraphContext = ReturnType<typeof buildWorkflowGraphContext>
+
+function collectLoopBodyRelations(nodes: WorkflowNode[]) {
+  const loopBodyNodeIds = new Set<string>()
+  const parentLoopByNodeId = new Map<string, WorkflowNode>()
+
+  nodes.forEach((node) => {
+    if (node.type === 'loop') {
+      collectLoopBodyNodeRelations(node, loopBodyNodeIds, parentLoopByNodeId)
+    }
+  })
+
+  return {
+    loopBodyNodeIds,
+    parentLoopByNodeId,
+  }
+}
+
+function collectLoopBodyNodeRelations(
+  loopNode: WorkflowNode,
+  loopBodyNodeIds: Set<string>,
+  parentLoopByNodeId: Map<string, WorkflowNode>,
+) {
+  loopNode.config.loopBodyNodes?.forEach((bodyNode) => {
+    loopBodyNodeIds.add(bodyNode.id)
+    parentLoopByNodeId.set(bodyNode.id, loopNode)
+    if (bodyNode.type === 'loop') {
+      collectLoopBodyNodeRelations(bodyNode, loopBodyNodeIds, parentLoopByNodeId)
+    }
+  })
+}
 
 export function findMappingForInput(input: WorkflowNodeIO, mappings: WorkflowInputMapping[]) {
   const inputName = normalizeFieldName(input.name)
@@ -62,7 +118,7 @@ export function resolveMappingSource(mapping: WorkflowInputMapping, graphContext
   }
 
   const sourceNode = graphContext.nodeMap.get(nodeId)
-  const sourceOutput = sourceNode?.outputs.find((output) => normalizeFieldName(output.name) === fieldPath)
+  const sourceOutput = resolveNodeOutput(sourceNode, fieldPath)
 
   return {
     nodeId,
@@ -70,6 +126,17 @@ export function resolveMappingSource(mapping: WorkflowInputMapping, graphContext
     sourceNode,
     sourceOutput,
   }
+}
+
+function resolveNodeOutput(node: WorkflowNode | undefined, fieldPath: string) {
+  if (!node) {
+    return undefined
+  }
+
+  const outputs = node.type === 'loop'
+    ? [...node.outputs, ...createLoopEntryOutputs(node)]
+    : node.outputs
+  return outputs.find((output) => normalizeFieldName(output.name) === fieldPath)
 }
 
 export function isValueTypeCompatible(expectedType: string | undefined, actualType: string | undefined) {

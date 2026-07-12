@@ -23,8 +23,12 @@ import {
   normalizeNodeData,
   workflowNodeToFlowgramNode,
 } from '@/features/workflow/editor/workflow-editor.utils'
+import { flattenFlowgramNodes, syncLoopChildLayout } from '@/features/workflow/editor/loop-child-drag'
 import {
+  getLoopCanvasAnchorNodeId,
   LOOP_CANVAS_ANCHOR_NODE_TYPE,
+  LOOP_END_NODE_TYPE,
+  LOOP_START_NODE_TYPE,
   normalizeLoopBodyEdges,
 } from '@/features/workflow/editor/loop-node.utils'
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
@@ -33,7 +37,8 @@ const NODE_COPY_OFFSET = 36
 const LOOP_CHILD_START_X = 220
 const LOOP_CHILD_START_Y = 172
 const LOOP_CHILD_GAP_X = 360
-const DISALLOWED_LOOP_CHILD_TYPES: WorkflowNode['type'][] = ['start', 'loop', 'loop-start', 'loop-end']
+const LOOP_CHILD_GAP_Y = 220
+const DISALLOWED_LOOP_CHILD_TYPES: WorkflowNode['type'][] = ['start', 'loop', LOOP_START_NODE_TYPE, LOOP_END_NODE_TYPE]
 
 interface UseWorkflowNodeActionsOptions {
   ctxRef: RefObject<FreeLayoutPluginContext | null>
@@ -75,7 +80,7 @@ export function useWorkflowNodeActions({
         return
       }
 
-      const allNodes = ctx.document.getAllNodes()
+      const allNodes = getAllWorkflowNodeEntities(ctx)
       const selectedNode = selectedNodeId
         ? allNodes.find((node) => String(node.id) === selectedNodeId)
         : undefined
@@ -102,8 +107,9 @@ export function useWorkflowNodeActions({
         : undefined
 
       const fromNodeLike = fromNode ? getNodeEntityMeta(fromNode) : undefined
+      const fromLoopNodeLike = fromNode ? { position: getNodeCanvasPosition(fromNode) } : undefined
       const position = parentNode
-        ? getNextLoopChildPosition(parentNode, options?.position)
+        ? getNextLoopChildPosition(parentNode, options?.position, fromLoopNodeLike)
         : options?.position
           ? {
             x: options.position.x + CANVAS_OFFSET_X,
@@ -148,28 +154,40 @@ export function useWorkflowNodeActions({
       }
       const createdNode = ctx.document.createWorkflowNodeByType(type, position, nodeJson, parentNodeId)
 
-      if (fromNode) {
+      if (fromNode && parentNode && parentNodeId) {
+        appendLoopBodyEdge(
+          ctx,
+          parentNode,
+          parentNodeId,
+          String(fromNode.id),
+          String(createdNode.id),
+          options?.sourcePortID,
+        )
+      } else if (fromNode) {
         ctx.document.linesManager.createLine({
           from: String(fromNode.id),
           fromPort: options?.sourcePortID,
           to: String(createdNode.id),
         })
       } else if (options?.loopSourceNodeId) {
-        appendLoopHomeEdge(parentNode, parentNodeId, options.loopSourceNodeId, String(createdNode.id), options?.sourcePortID)
+          appendLoopBodyEdge(
+            ctx,
+            parentNode,
+            parentNodeId,
+            options.loopSourceNodeId,
+            String(createdNode.id),
+            options?.sourcePortID,
+          )
+      }
+
+      if (parentNodeId) {
+        syncLoopChildLayout(ctx, parentNodeId)
       }
 
       const nextDocumentJson = ctx.document.toJSON()
       const [nextNodes, nextEdges] = fromFlowgramJSON(nextDocumentJson)
       if (parentNodeId && parentNode) {
-        const parentWorkflowNode = nextNodes.find((node) => node.id === parentNodeId)
-        if (parentWorkflowNode) {
-          syncNodeData(parentNode, {
-            config: {
-              loopBodyNodes: parentWorkflowNode.config.loopBodyNodes ?? [],
-              loopBodyEdges: parentWorkflowNode.config.loopBodyEdges ?? [],
-            },
-          })
-        }
+        syncLoopParentNodeData(ctx, parentNodeId, nextNodes)
       }
 
       const nextSelectedId = String(createdNode.id)
@@ -195,7 +213,7 @@ export function useWorkflowNodeActions({
       nodePanelOpenRef.current = true
 
       try {
-        const allNodes = ctx.document.getAllNodes()
+        const allNodes = getAllWorkflowNodeEntities(ctx)
         const selectedNode = selectedNodeId
           ? allNodes.find((node) => String(node.id) === selectedNodeId)
           : undefined
@@ -272,15 +290,24 @@ export function useWorkflowNodeActions({
         return
       }
 
-      const targetNode = ctx.document.getAllNodes().find((node) => String(node.id) === selectedNodeId)
+      const allNodes = getAllWorkflowNodeEntities(ctx)
+      const targetNode = allNodes.find((node) => String(node.id) === selectedNodeId)
       if (!targetNode) {
         return
       }
 
+      const parentLoopNodeId = getLoopParentNodeId(targetNode, allNodes)
       const nextData = syncNodeData(targetNode, partial)
       targetNode.getData(WorkflowNodePortsData).updateAllPorts(buildWorkflowNodePorts(nextData))
+      if (parentLoopNodeId) {
+        syncLoopChildLayout(ctx, parentLoopNodeId)
+      }
 
-      setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+      const [nextNodes, nextEdges] = fromFlowgramJSON(ctx.document.toJSON())
+      if (parentLoopNodeId) {
+        syncLoopParentNodeData(ctx, parentLoopNodeId, nextNodes)
+      }
+      setWorkflowGraph(nextNodes, nextEdges)
     },
     [ctxRef, selectedNodeId, setWorkflowGraph],
   )
@@ -291,22 +318,27 @@ export function useWorkflowNodeActions({
       return
     }
 
-    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
+    const allNodes = getAllWorkflowNodeEntities(ctx)
+    const targetNode = allNodes.find((item) => String(item.id) === nodeId)
     if (!targetNode) {
       return
     }
 
     const nodeJson = targetNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
     const type = nodeJson.type as WorkflowNode['type']
-    const existingIds = new Set(ctx.document.getAllNodes().map((item) => String(item.id)))
+    if (type === 'loop') {
+      return
+    }
+    const existingIds = new Set(allNodes.map((item) => String(item.id)))
     const newNodeId = createUniqueNodeId(type, existingIds)
+    const parentLoopNodeId = getLoopParentNodeId(targetNode, allNodes)
     const position = (nodeJson.meta as { position?: { x?: number; y?: number } } | undefined)?.position
     const copiedNode = ctx.document.copyNode(
       targetNode,
       newNodeId,
       (json) => {
         const data = normalizeNodeData(json.data as Partial<FlowgramNodeData>, type)
-        return {
+        const nextJson = {
           ...json,
           id: newNodeId,
           data: {
@@ -315,6 +347,7 @@ export function useWorkflowNodeActions({
             trialRunExecution: undefined,
           },
         }
+        return nextJson
       },
       {
         x: (position?.x ?? CANVAS_OFFSET_X) + NODE_COPY_OFFSET,
@@ -322,8 +355,15 @@ export function useWorkflowNodeActions({
       },
     )
     const nextSelectedId = String(copiedNode.id)
+    if (parentLoopNodeId) {
+      syncLoopChildLayout(ctx, parentLoopNodeId)
+    }
     onSelectNode(nextSelectedId)
-    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+    const [nextNodes, nextEdges] = fromFlowgramJSON(ctx.document.toJSON())
+    if (parentLoopNodeId) {
+      syncLoopParentNodeData(ctx, parentLoopNodeId, nextNodes)
+    }
+    setWorkflowGraph(nextNodes, nextEdges)
   }, [ctxRef, onSelectNode, setWorkflowGraph])
 
   const deleteNode = useCallback((nodeId: string) => {
@@ -332,17 +372,27 @@ export function useWorkflowNodeActions({
       return
     }
 
-    const targetNode = ctx.document.getAllNodes().find((item) => String(item.id) === nodeId)
+    const allNodes = getAllWorkflowNodeEntities(ctx)
+    const targetNode = allNodes.find((item) => String(item.id) === nodeId)
     if (!targetNode || !ctx.document.canRemove(targetNode, true)) {
       return
     }
 
+    const parentLoopNodeId = getLoopParentNodeId(targetNode, allNodes)
     targetNode.dispose()
+    if (parentLoopNodeId) {
+      syncLoopChildLayout(ctx, parentLoopNodeId)
+    }
     if (selectedNodeId === nodeId) {
       onSelectNode('')
     }
     onNodeDeleted?.(nodeId)
-    setWorkflowGraph(...fromFlowgramJSON(ctx.document.toJSON()))
+    const nextDocumentJson = ctx.document.toJSON()
+    const [nextNodes, nextEdges] = fromFlowgramJSON(nextDocumentJson)
+    if (parentLoopNodeId) {
+      syncLoopParentNodeData(ctx, parentLoopNodeId, nextNodes)
+    }
+    setWorkflowGraph(nextNodes, nextEdges)
   }, [ctxRef, onNodeDeleted, onSelectNode, selectedNodeId, setWorkflowGraph])
 
   const openQuickAddPanel = useCallback((
@@ -370,6 +420,32 @@ function getWorkflowNodeType(node: { toJSON: () => unknown }) {
   return String(nodeJson.type) as WorkflowNode['type']
 }
 
+function getAllWorkflowNodeEntities(ctx: FreeLayoutPluginContext) {
+  return flattenFlowgramNodes(ctx.document.getAllNodes())
+}
+
+function syncLoopParentNodeData(
+  ctx: FreeLayoutPluginContext,
+  parentLoopNodeId: string,
+  nextNodes: WorkflowNode[],
+) {
+  const parentNode = getAllWorkflowNodeEntities(ctx).find((item) => String(item.id) === parentLoopNodeId)
+  const parentWorkflowNode = nextNodes.find((item) => item.id === parentLoopNodeId)
+  if (!parentNode || !parentWorkflowNode) {
+    return
+  }
+
+  syncNodeData(parentNode, {
+    config: {
+      loopBodyNodes: parentWorkflowNode.config.loopBodyNodes ?? [],
+      loopBodyEdges: parentWorkflowNode.config.loopBodyEdges ?? [],
+      loopCanvasWidth: parentWorkflowNode.config.loopCanvasWidth,
+      loopCanvasHeight: parentWorkflowNode.config.loopCanvasHeight,
+    },
+  })
+  ctx.document.layout.updateAffectedTransform(parentNode)
+}
+
 function syncNodeData(
   node: { toJSON: () => unknown },
   partial: Partial<Omit<WorkflowNode, 'config'>> & {
@@ -395,7 +471,8 @@ function syncNodeData(
   return nextData
 }
 
-function appendLoopHomeEdge(
+function appendLoopBodyEdge(
+  ctx: FreeLayoutPluginContext,
   parentNode: { toJSON: () => unknown } | undefined,
   loopNodeId: string | undefined,
   sourceNodeId: string,
@@ -408,13 +485,12 @@ function appendLoopHomeEdge(
 
   const parentJson = parentNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
   const parentData = normalizeNodeData(parentJson.data, 'loop')
-  const hasHomeEdge = parentData.config.loopBodyEdges?.some((edge) => edge.source === sourceNodeId)
-  if (hasHomeEdge) {
-    return
-  }
+  const existingEdges = (parentData.config.loopBodyEdges ?? []).filter((edge) => {
+    return edge.source !== sourceNodeId || String(edge.sourcePortID ?? '') !== String(sourcePortID ?? '')
+  })
 
   const nextEdges = normalizeLoopBodyEdges(loopNodeId, [
-    ...(parentData.config.loopBodyEdges ?? []),
+    ...existingEdges,
     {
       id: `${sourceNodeId}-${targetNodeId}`,
       source: sourceNodeId,
@@ -427,6 +503,43 @@ function appendLoopHomeEdge(
     config: {
       loopBodyEdges: nextEdges,
     },
+  })
+  createVisibleLoopBodyLine(ctx, loopNodeId, sourceNodeId, targetNodeId, sourcePortID)
+}
+
+function createVisibleLoopBodyLine(
+  ctx: FreeLayoutPluginContext,
+  loopNodeId: string,
+  sourceNodeId: string,
+  targetNodeId: string,
+  sourcePortID?: string | number,
+) {
+  const visibleSourceNodeId = sourceNodeId === loopNodeId
+    ? getLoopCanvasAnchorNodeId(loopNodeId)
+    : sourceNodeId
+  const sourcePortKey = String(sourcePortID ?? '')
+  let hasSameLine = false
+
+  ctx.document.linesManager.getAllLines().forEach((line) => {
+    const isSameSourcePort = String(line.info.from ?? '') === visibleSourceNodeId
+      && String(line.info.fromPort ?? '') === sourcePortKey
+    if (!isSameSourcePort) {
+      return
+    }
+    if (String(line.info.to ?? '') === targetNodeId) {
+      hasSameLine = true
+      return
+    }
+    ;(line as unknown as { dispose?: () => void }).dispose?.()
+  })
+  if (hasSameLine) {
+    return
+  }
+
+  ctx.document.linesManager.createLine({
+    from: visibleSourceNodeId,
+    fromPort: sourcePortID,
+    to: targetNodeId,
   })
 }
 
@@ -452,12 +565,22 @@ function getLoopParentNodeId(
     parentId?: string | number
   }
   const parentId = entity.parent?.id ?? entity.originParent?.id ?? nodeJson.parentID ?? nodeJson.parentId
-  if (!parentId) {
-    return undefined
+  if (parentId) {
+    const parentNode = allNodes.find((item) => String(item.id) === String(parentId))
+    if (parentNode && getWorkflowNodeType(parentNode) === 'loop') {
+      return String(parentId)
+    }
   }
 
-  const parentNode = allNodes.find((item) => String(item.id) === String(parentId))
-  return parentNode && getWorkflowNodeType(parentNode) === 'loop' ? String(parentId) : undefined
+  const nodeId = String((node as { id?: string | number }).id ?? nodeJson.id ?? '')
+  const loopParent = allNodes.find((item) => {
+    if (getWorkflowNodeType(item) !== 'loop') {
+      return false
+    }
+    const loopJson = item.toJSON() as WorkflowNodeJSON
+    return loopJson.blocks?.some((block) => String(block.id) === nodeId)
+  })
+  return loopParent ? String(loopParent.id) : undefined
 }
 
 function getLoopPanelPosition(parentNode: { toJSON: () => unknown }) {
@@ -468,9 +591,20 @@ function getLoopPanelPosition(parentNode: { toJSON: () => unknown }) {
   }
 }
 
-function getNextLoopChildPosition(parentNode: { toJSON: () => unknown }, explicitPosition?: { x: number; y: number }) {
+function getNextLoopChildPosition(
+  parentNode: { toJSON: () => unknown },
+  explicitPosition?: { x: number; y: number },
+  fromNode?: { position: { x: number; y: number } },
+) {
   if (explicitPosition) {
     return explicitPosition
+  }
+
+  if (fromNode) {
+    return {
+      x: fromNode.position.x + LOOP_CHILD_GAP_X,
+      y: fromNode.position.y,
+    }
   }
 
   const parentJson = parentNode.toJSON() as WorkflowNodeJSON
@@ -482,16 +616,16 @@ function getNextLoopChildPosition(parentNode: { toJSON: () => unknown }, explici
   }) ?? []
 
   if (childBlocks.length > 0) {
-    const rightmost = childBlocks.reduce((latest, block) => {
+    const bottommost = childBlocks.reduce((latest, block) => {
       const latestPosition = (latest.meta as { position?: { x?: number; y?: number } } | undefined)?.position
       const blockPosition = (block.meta as { position?: { x?: number; y?: number } } | undefined)?.position
-      return (blockPosition?.x ?? 0) > (latestPosition?.x ?? 0) ? block : latest
+      return (blockPosition?.y ?? 0) > (latestPosition?.y ?? 0) ? block : latest
     }, childBlocks[0])
-    const position = (rightmost.meta as { position?: { x?: number; y?: number } } | undefined)?.position
+    const position = (bottommost.meta as { position?: { x?: number; y?: number } } | undefined)?.position
 
     return {
-      x: (position?.x ?? LOOP_CHILD_START_X) + LOOP_CHILD_GAP_X,
-      y: position?.y ?? LOOP_CHILD_START_Y,
+      x: LOOP_CHILD_START_X,
+      y: (position?.y ?? LOOP_CHILD_START_Y) + LOOP_CHILD_GAP_Y,
     }
   }
 

@@ -14,9 +14,7 @@ export const DEFAULT_LOOP_CANVAS_HEIGHT = 400
 const LOOP_NODE_WIDTH = 230
 const LOOP_NODE_HEIGHT = 190
 const LOOP_CANVAS_CONTENT_PADDING_X = 112
-const LOOP_CANVAS_CONTENT_PADDING_Y = 96
-const LOOP_CANVAS_ROW_START_X = 180
-const LOOP_CANVAS_ROW_GAP_X = 240
+const LOOP_CANVAS_CONTENT_PADDING_BOTTOM = 144
 const LOOP_INDEX_OUTPUT_NAME = 'index'
 
 export type LoopBodyNodeLayout = {
@@ -79,32 +77,11 @@ export function getLoopBodyCanvasSize(
   config: Pick<WorkflowNode['config'], 'loopCanvasWidth' | 'loopCanvasHeight'>,
   bodyNodes: LoopBodyNodeLayout[] = [],
 ) {
-  const baseWidth = config.loopCanvasWidth ?? DEFAULT_LOOP_CANVAS_WIDTH
-  const baseHeight = config.loopCanvasHeight ?? DEFAULT_LOOP_CANVAS_HEIGHT
-  const flowNodes = bodyNodes.filter((node) => !isLoopInternalNodeType(node.type))
-  const contentRight = Math.max(
-    0,
-    ...flowNodes.map((node) => getLoopNodeRight(node)),
-  )
-  const contentBottom = Math.max(
-    0,
-    ...flowNodes.map((node) => getLoopNodeBottom(node)),
-  )
-
-  if (flowNodes.length === 0) {
-    return {
-      width: baseWidth,
-      height: baseHeight,
-    }
-  }
+  const autoSize = getAutoLoopBodyCanvasSize(bodyNodes)
 
   return {
-    width: Math.max(
-      baseWidth,
-      contentRight + LOOP_CANVAS_CONTENT_PADDING_X,
-      flowNodes.length > 3 ? LOOP_CANVAS_ROW_START_X + flowNodes.length * LOOP_CANVAS_ROW_GAP_X : baseWidth,
-    ),
-    height: Math.max(baseHeight, contentBottom + LOOP_CANVAS_CONTENT_PADDING_Y),
+    width: Math.max(autoSize.width, config.loopCanvasWidth ?? DEFAULT_LOOP_CANVAS_WIDTH),
+    height: Math.max(autoSize.height, config.loopCanvasHeight ?? DEFAULT_LOOP_CANVAS_HEIGHT),
   }
 }
 
@@ -113,13 +90,12 @@ export function getAutoLoopBodyCanvasSize(bodyNodes: LoopBodyNodeLayout[] = []) 
   const contentRight = Math.max(0, ...flowNodes.map(getLoopNodeRight))
   const contentBottom = Math.max(0, ...flowNodes.map(getLoopNodeBottom))
   const contentWidth = contentRight + LOOP_CANVAS_CONTENT_PADDING_X
-  const contentHeight = contentBottom + LOOP_CANVAS_CONTENT_PADDING_Y
+  const contentHeight = contentBottom + LOOP_CANVAS_CONTENT_PADDING_BOTTOM
 
   return {
     width: Math.max(
       DEFAULT_LOOP_CANVAS_WIDTH,
       Math.ceil(contentWidth),
-      flowNodes.length > 3 ? LOOP_CANVAS_ROW_START_X + flowNodes.length * LOOP_CANVAS_ROW_GAP_X : DEFAULT_LOOP_CANVAS_WIDTH,
     ),
     height: Math.max(DEFAULT_LOOP_CANVAS_HEIGHT, Math.ceil(contentHeight)),
   }
@@ -230,6 +206,20 @@ export function normalizeLoopBodyEdges(loopNodeId: string, bodyEdges: WorkflowEd
     }
     seen.add(key)
     return [nextEdge]
+  })
+}
+
+export function filterLoopBodyEdgesByNodes(
+  loopNodeId: string,
+  bodyEdges: WorkflowEdge[],
+  bodyNodes: Pick<WorkflowNode, 'id'>[],
+) {
+  const bodyNodeIds = new Set(bodyNodes.map((node) => node.id))
+
+  return bodyEdges.filter((edge) => {
+    const hasValidSource = edge.source === loopNodeId || bodyNodeIds.has(edge.source)
+    const hasValidTarget = edge.target === loopNodeId || bodyNodeIds.has(edge.target)
+    return hasValidSource && hasValidTarget
   })
 }
 

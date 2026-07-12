@@ -21,6 +21,13 @@ import {
 } from '@/features/workflow/editor/workflow-editor.utils'
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 
+const LOOP_CHILD_LEFT_RESERVED = 220
+const LOOP_CHILD_TOP_RESERVED = 172
+
+type PatchCleanupHost = {
+  __awLoopPatchCleanups?: Array<() => void>
+}
+
 export function flattenFlowgramNodes(nodes: WorkflowNodeEntity[]): WorkflowNodeEntity[] {
   return nodes.flatMap((node) => [
     node,
@@ -58,6 +65,10 @@ export function patchLoopChildDragIsolation(ctx: FreeLayoutPluginContext) {
       return startDragSelectedNodes(event)
     }
     dragService.__awLoopChildDragStartPatched = true
+    registerPatchCleanup(dragService, () => {
+      dragService.startDragSelectedNodes = startDragSelectedNodes
+      dragService.__awLoopChildDragStartPatched = false
+    })
   }
 
   if (!dragService.__awLoopChildDragPatched && typeof dragService.resetContainerInternalPosition === 'function') {
@@ -77,6 +88,10 @@ export function patchLoopChildDragIsolation(ctx: FreeLayoutPluginContext) {
       resetContainerInternalPosition(nodes)
     }
     dragService.__awLoopChildDragPatched = true
+    registerPatchCleanup(dragService, () => {
+      dragService.resetContainerInternalPosition = resetContainerInternalPosition
+      dragService.__awLoopChildDragPatched = false
+    })
   }
 
   const layout = ctx.document.layout as unknown as {
@@ -98,6 +113,17 @@ export function patchLoopChildDragIsolation(ctx: FreeLayoutPluginContext) {
     updateAffectedTransform(node)
   }
   layout.__awLoopChildTransformPatched = true
+  registerPatchCleanup(layout, () => {
+    layout.updateAffectedTransform = updateAffectedTransform
+    layout.__awLoopChildTransformPatched = false
+  })
+}
+
+export function disposeLoopChildEditorPatches(ctx: FreeLayoutPluginContext) {
+  const dragService = ctx.get(WorkflowDragService) as unknown as PatchCleanupHost
+  const layout = ctx.document.layout as unknown as PatchCleanupHost
+  runPatchCleanups(dragService)
+  runPatchCleanups(layout)
 }
 
 export function lockAllLoopChildPositions(ctx: FreeLayoutPluginContext) {
@@ -105,6 +131,15 @@ export function lockAllLoopChildPositions(ctx: FreeLayoutPluginContext) {
   ctx.document.getAllNodes()
     .filter((node) => getWorkflowNodeType(node) === 'loop')
     .forEach((loopNode) => lockLoopChildPositions(ctx, loopNode, operationService))
+}
+
+export function syncLoopChildLayout(ctx: FreeLayoutPluginContext, loopNodeId: string) {
+  const loopNode = findFlowgramNodeById(ctx, loopNodeId)
+  if (!loopNode || getWorkflowNodeType(loopNode) !== 'loop') {
+    return
+  }
+  const operationService = ctx.get(WorkflowOperationBaseService) as WorkflowNodePositionService
+  lockLoopChildPositions(ctx, loopNode, operationService)
 }
 
 export function getWorkflowJSONWithLivePositions(ctx: FreeLayoutPluginContext): WorkflowJSON {
@@ -150,7 +185,7 @@ export function installNodeDragEndPersistence(
     return
   }
 
-  dragService.onNodesDrag((event) => {
+  const disposable = dragService.onNodesDrag((event) => {
     if (event.type !== 'onDragEnd') {
       return
     }
@@ -162,6 +197,10 @@ export function installNodeDragEndPersistence(
     }, 0)
   })
   dragService.__awNodeDragEndPersistenceInstalled = true
+  registerPatchCleanup(dragService, () => {
+    disposable?.dispose?.()
+    dragService.__awNodeDragEndPersistenceInstalled = false
+  })
 }
 
 function isNodeInsideLoopContainer(node: WorkflowNodeEntity) {
@@ -194,7 +233,7 @@ function installLoopParentPositionGuard(
   }>()
   const operationService = ctx.get(WorkflowOperationBaseService) as WorkflowNodePositionService
 
-  dragService.onNodesDrag((event) => {
+  const disposable = dragService.onNodesDrag((event) => {
     const eventNodes = event.nodes.filter(isWorkflowNodeEntity)
     const draggedLoopIds = getDraggedLoopNodeIds(eventNodes)
     const loopParents = eventNodes
@@ -241,6 +280,23 @@ function installLoopParentPositionGuard(
   })
 
   dragService.__awLoopParentPositionGuardInstalled = true
+  registerPatchCleanup(dragService, () => {
+    disposable?.dispose?.()
+    dragService.__awLoopParentPositionGuardInstalled = false
+  })
+}
+
+function registerPatchCleanup(host: object, cleanup: () => void) {
+  const cleanupHost = host as PatchCleanupHost
+  cleanupHost.__awLoopPatchCleanups = cleanupHost.__awLoopPatchCleanups ?? []
+  cleanupHost.__awLoopPatchCleanups.push(cleanup)
+}
+
+function runPatchCleanups(host: object) {
+  const cleanupHost = host as PatchCleanupHost
+  const cleanups = cleanupHost.__awLoopPatchCleanups ?? []
+  cleanupHost.__awLoopPatchCleanups = []
+  cleanups.slice().reverse().forEach((cleanup) => cleanup())
 }
 
 type WorkflowNodePositionService = {
@@ -267,10 +323,10 @@ function lockLoopChildPositions(
     ;(ctx.document.layout as unknown as { updateAffectedTransform?: (node: WorkflowNodeEntity) => void })
       .updateAffectedTransform?.(block)
   })
-  expandLoopCanvasForChildren(ctx, loopNode)
+  syncLoopCanvasSizeForChildren(ctx, loopNode)
 }
 
-function expandLoopCanvasForChildren(ctx: FreeLayoutPluginContext, loopNode: WorkflowNodeEntity) {
+function syncLoopCanvasSizeForChildren(ctx: FreeLayoutPluginContext, loopNode: WorkflowNodeEntity) {
   const loopJson = loopNode.toJSON() as WorkflowNodeJSON & { data?: Partial<FlowgramNodeData> }
   const currentData = normalizeNodeData(loopJson.data, 'loop')
   const bodyNodes = loopNode.blocks?.map((block) => {
@@ -323,12 +379,10 @@ function getLoopChildPositionLimits(node: WorkflowNodeEntity) {
   const bounds = node.transform.bounds
   const halfWidth = Math.max((bounds?.width ?? 320) / 2, 80)
   const margin = 24
-  const leftReserved = 220
-  const topReserved = 172
 
   return {
-    minX: Math.max(halfWidth + margin, leftReserved),
-    minY: topReserved,
+    minX: Math.max(halfWidth + margin, LOOP_CHILD_LEFT_RESERVED),
+    minY: LOOP_CHILD_TOP_RESERVED,
   }
 }
 

@@ -50,6 +50,7 @@ import { useWorkflowNodeActions } from '@/features/workflow/editor/hooks/use-wor
 import {
   findFlowgramNodeById,
   flattenFlowgramNodes,
+  disposeLoopChildEditorPatches,
   getWorkflowJSONWithLivePositions,
   installNodeDragEndPersistence,
   lockAllLoopChildPositions,
@@ -108,6 +109,7 @@ import {
 } from '@/features/workflow/utils/workflow-document'
 import type { SandboxSummary } from '@/api/sandbox-pool'
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
+import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 
 export interface WorkflowCanvasApi {
   addNode: (key: NodePaletteKey, options?: AddNodeOptions) => void
@@ -153,6 +155,18 @@ function trialRunExecutionStateKey(nodeId: string, loopNodeId?: string) {
   return loopNodeId ? `${loopNodeId}::${nodeId}` : nodeId
 }
 
+function getBlockingIssues(issues: WorkflowValidationIssue[]) {
+  return issues.filter((issue) => issue.severity === 'error')
+}
+
+function formatRunValidationMessage(scopeLabel: string, issues: WorkflowValidationIssue[]) {
+  const firstIssue = issues[0]
+  if (!firstIssue) {
+    return `${scopeLabel}还有必须修复的问题，请先完善节点配置。`
+  }
+  return `${scopeLabel}还有 ${issues.length} 个错误需要修复，已定位到：${firstIssue.title}。`
+}
+
 export function WorkflowEditor({
   workflowId,
   nodes,
@@ -189,6 +203,7 @@ export function WorkflowEditor({
     '{\n  "input2": {\n    "userInput": "我要查询订单进度",\n    "items": ["订单", "物流", "售后"],\n    "message": {\n      "content": "我要查询订单进度"\n    },\n    "session": {\n      "userId": "U20260428",\n      "channel": "app"\n    }\n  },\n  "ujsj": "test string"\n}',
   )
   const [globalDebugJsonError, setGlobalDebugJsonError] = useState('')
+  const [globalDebugValidationIssues, setGlobalDebugValidationIssues] = useState<WorkflowValidationIssue[]>([])
   const [trialRunExecutions, setTrialRunExecutions] = useState<Record<string, TrialRunNodeExecution>>({})
   const [trialRunning, setTrialRunning] = useState(false)
   const [singleNodeTrialOpen, setSingleNodeTrialOpen] = useState(false)
@@ -197,6 +212,7 @@ export function WorkflowEditor({
   const [singleNodeJsonMode, setSingleNodeJsonMode] = useState(false)
   const [singleNodeCombinedJson, setSingleNodeCombinedJson] = useState('{}')
   const [singleNodeJsonError, setSingleNodeJsonError] = useState('')
+  const [singleNodeValidationIssues, setSingleNodeValidationIssues] = useState<WorkflowValidationIssue[]>([])
   const singleNodeTrialFieldsRef = useRef<GlobalDebugFieldValue[]>([])
   const singleNodeCombinedJsonRef = useRef('{}')
   const runTimerIdsRef = useRef<number[]>([])
@@ -498,6 +514,7 @@ export function WorkflowEditor({
     setSingleNodeCombinedJson(combinedJson)
     setSingleNodeJsonMode(cached?.jsonMode ?? false)
     setSingleNodeJsonError('')
+    setSingleNodeValidationIssues([])
     const nextExecutions = { ...trialRunExecutionsRef.current }
     delete nextExecutions[nodeId]
     replaceTrialRunExecutions(nextExecutions)
@@ -551,6 +568,7 @@ export function WorkflowEditor({
       combinedJson: nextCombinedJson,
     })
     setSingleNodeJsonError('')
+    setSingleNodeValidationIssues([])
   }, [
     nodes,
     saveSingleNodeTrialCache,
@@ -566,6 +584,7 @@ export function WorkflowEditor({
     clearTrialRunTimers()
     abortTrialRunStream()
     setTrialRunOpen(false)
+    setGlobalDebugValidationIssues([])
     replaceTrialRunExecutions({})
     clearNodeTrialRunExecution()
     clearNodeExecutionPanelExpansion()
@@ -953,6 +972,9 @@ export function WorkflowEditor({
 
   useEffect(() => {
     return () => {
+      if (ctxRef.current) {
+        disposeLoopChildEditorPatches(ctxRef.current)
+      }
       clearTrialRunTimers()
       abortTrialRunStream()
       clearTrialRunEdgeStyles()
@@ -965,17 +987,14 @@ export function WorkflowEditor({
 
   const startTrialRun = useCallback(async () => {
     if (hasBlockingValidationErrors(validationResult)) {
-      const firstIssue = validationResult.issues.find((issue) => issue.severity === 'error')
+      const blockingIssues = getBlockingIssues(validationResult.issues)
       setTrialRunOpen(true)
       setSingleNodeTrialOpen(false)
-      if (firstIssue) {
-        onSelectNode(firstIssue.nodeId)
+      if (blockingIssues[0]) {
+        onSelectNode(blockingIssues[0].nodeId)
       }
-      setGlobalDebugJsonError(
-        firstIssue
-          ? `无法开始试运行：${firstIssue.title}。${firstIssue.message}`
-          : `无法开始试运行：当前工作流还有 ${validationResult.errorCount} 个必须修复的问题。`,
-      )
+      setGlobalDebugValidationIssues(blockingIssues)
+      setGlobalDebugJsonError(formatRunValidationMessage('当前工作流', blockingIssues))
       return
     }
 
@@ -1008,6 +1027,7 @@ export function WorkflowEditor({
         edges: runEdges,
       }
       setGlobalDebugJsonError('')
+      setGlobalDebugValidationIssues([])
 
       setTrialRunning(true)
       await streamWorkflow(workflow, payload, {
@@ -1041,6 +1061,7 @@ export function WorkflowEditor({
       clearNodeTrialRunExecution()
       clearTrialRunEdgeStyles()
       clearAllNodeTrialRunExecutions()
+      setGlobalDebugValidationIssues([])
       setGlobalDebugJsonError('运行失败，请检查 JSON、节点配置或后端服务')
     }
   }, [
@@ -1086,7 +1107,9 @@ export function WorkflowEditor({
           try {
             JSON.parse(value)
             setGlobalDebugJsonError('')
+            setGlobalDebugValidationIssues([])
           } catch {
+            setGlobalDebugValidationIssues([])
             setGlobalDebugJsonError('请输入正确的 JSON 结构')
           }
         }
@@ -1124,7 +1147,9 @@ export function WorkflowEditor({
         })
       })
       setGlobalDebugJsonError('')
+      setGlobalDebugValidationIssues([])
     } catch {
+      setGlobalDebugValidationIssues([])
       setGlobalDebugJsonError('请输入正确的 JSON 结构')
     }
   }, [])
@@ -1140,7 +1165,9 @@ export function WorkflowEditor({
           try {
             JSON.parse(value)
             setSingleNodeJsonError('')
+            setSingleNodeValidationIssues([])
           } catch {
+            setSingleNodeValidationIssues([])
             setSingleNodeJsonError('请输入正确的 JSON 结构')
           }
         }
@@ -1190,6 +1217,7 @@ export function WorkflowEditor({
         })
       }
       setSingleNodeJsonError('')
+      setSingleNodeValidationIssues([])
     } catch {
       if (singleNodeTrialNodeId) {
         saveSingleNodeTrialCache(singleNodeTrialNodeId, {
@@ -1198,6 +1226,7 @@ export function WorkflowEditor({
           combinedJson: value,
         })
       }
+      setSingleNodeValidationIssues([])
       setSingleNodeJsonError('请输入正确的 JSON 结构')
     }
   }, [saveSingleNodeTrialCache, singleNodeJsonMode, singleNodeTrialFields, singleNodeTrialNodeId])
@@ -1219,6 +1248,7 @@ export function WorkflowEditor({
         )
         setGlobalDebugCombinedJson(combined)
         setGlobalDebugJsonError('')
+        setGlobalDebugValidationIssues([])
       }
 
       return next
@@ -1233,6 +1263,7 @@ export function WorkflowEditor({
         combinedJson = JSON.stringify(buildPayloadFromFieldEntries(singleNodeTrialFields), null, 2)
         setSingleNodeCombinedJson(combinedJson)
         setSingleNodeJsonError('')
+        setSingleNodeValidationIssues([])
       }
       if (singleNodeTrialNodeId) {
         saveSingleNodeTrialCache(singleNodeTrialNodeId, {
@@ -1249,6 +1280,7 @@ export function WorkflowEditor({
     abortTrialRunStream()
     setTrialRunning(false)
     setSingleNodeTrialOpen(false)
+    setSingleNodeValidationIssues([])
   }, [abortTrialRunStream])
 
   const startSingleNodeTrialRun = useCallback(() => {
@@ -1258,12 +1290,9 @@ export function WorkflowEditor({
 
     const nodeValidationResult = validationResult.nodeResults[singleNodeTrialNodeId]
     if (nodeValidationResult && hasBlockingValidationErrors(nodeValidationResult)) {
-      const firstIssue = nodeValidationResult.issues.find((issue) => issue.severity === 'error')
-      setSingleNodeJsonError(
-        firstIssue
-          ? `无法开始试运行：${firstIssue.title}。${firstIssue.message}`
-          : `无法开始试运行：当前节点还有 ${nodeValidationResult.errorCount} 个必须修复的问题。`,
-      )
+      const blockingIssues = getBlockingIssues(nodeValidationResult.issues)
+      setSingleNodeValidationIssues(blockingIssues)
+      setSingleNodeJsonError(formatRunValidationMessage('当前节点', blockingIssues))
       return
     }
 
@@ -1272,8 +1301,10 @@ export function WorkflowEditor({
         ? JSON.parse(singleNodeCombinedJson) as Record<string, unknown>
         : buildPayloadFromFieldEntries(singleNodeTrialFields)
       setSingleNodeJsonError('')
+      setSingleNodeValidationIssues([])
       void runSingleNode(singleNodeTrialNodeId, payload)
     } catch {
+      setSingleNodeValidationIssues([])
       setSingleNodeJsonError('请输入正确的 JSON 结构')
     }
   }, [
@@ -1321,6 +1352,7 @@ export function WorkflowEditor({
             jsonMode={globalDebugJsonMode}
             combinedJson={globalDebugCombinedJson}
             jsonError={globalDebugJsonError}
+            validationIssues={globalDebugValidationIssues}
             onFieldChange={updateGlobalDebugField}
             onCombinedJsonChange={updateGlobalDebugCombinedJson}
             onToggleJsonMode={toggleGlobalDebugJsonMode}
@@ -1337,6 +1369,7 @@ export function WorkflowEditor({
             jsonMode={singleNodeJsonMode}
             combinedJson={singleNodeCombinedJson}
             jsonError={singleNodeJsonError}
+            validationIssues={singleNodeValidationIssues}
             onFieldChange={updateSingleNodeTrialField}
             onCombinedJsonChange={updateSingleNodeCombinedJson}
             onToggleJsonMode={toggleSingleNodeJsonMode}
@@ -1352,6 +1385,7 @@ export function WorkflowEditor({
                 const nextFields = createGlobalDebugFields(nodes, prev)
                 setGlobalDebugCombinedJson(JSON.stringify(buildPayloadFromFieldEntries(nextFields), null, 2))
                 setGlobalDebugJsonError('')
+                  setGlobalDebugValidationIssues([])
                 return nextFields
               })
               setTrialRunOpen(true)

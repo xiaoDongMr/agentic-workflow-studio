@@ -37,6 +37,7 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import { BrowserRuntimePreviewCard } from '@/features/workflow/editor/browser-runtime-preview-card'
 import type { WorkflowNode } from '@/types/workflow'
+import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 
 export function FlowgramNodePanel({
   position,
@@ -151,6 +152,7 @@ export function EditorTrialRunPanel({
   jsonMode,
   combinedJson,
   jsonError,
+  validationIssues,
   onFieldChange,
   onCombinedJsonChange,
   onToggleJsonMode,
@@ -164,6 +166,7 @@ export function EditorTrialRunPanel({
   jsonMode: boolean
   combinedJson: string
   jsonError?: string
+  validationIssues?: WorkflowValidationIssue[]
   onFieldChange: (fieldName: string, value: string) => void
   onCombinedJsonChange: (value: string) => void
   onToggleJsonMode: () => void
@@ -196,7 +199,7 @@ export function EditorTrialRunPanel({
           <BrowserRuntimePreviewCard preview={browserPreview} />
         ) : null}
 
-        {jsonError ? <TrialRunErrorCard message={jsonError} /> : null}
+        {jsonError ? <TrialRunErrorCard message={jsonError} issues={validationIssues} /> : null}
 
         <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/8 bg-white/[0.03]">
           <div className="shrink-0 flex items-center justify-between border-b border-white/8 px-4 py-3">
@@ -327,6 +330,7 @@ export function SingleNodeTrialPanel({
   jsonMode,
   combinedJson,
   jsonError,
+  validationIssues,
   onFieldChange,
   onCombinedJsonChange,
   onToggleJsonMode,
@@ -342,6 +346,7 @@ export function SingleNodeTrialPanel({
   jsonMode: boolean
   combinedJson: string
   jsonError?: string
+  validationIssues?: WorkflowValidationIssue[]
   onFieldChange: (fieldName: string, value: string) => void
   onCombinedJsonChange: (value: string) => void
   onToggleJsonMode: () => void
@@ -446,7 +451,7 @@ export function SingleNodeTrialPanel({
             <BrowserRuntimePreviewCard preview={browserPreview} />
           ) : null}
 
-          {jsonError ? <TrialRunErrorCard message={jsonError} compact /> : null}
+          {jsonError ? <TrialRunErrorCard message={jsonError} issues={validationIssues} compact /> : null}
 
           {execution && (
             <div className="mt-6 space-y-4 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
@@ -489,11 +494,16 @@ export function SingleNodeTrialPanel({
 
 function TrialRunErrorCard({
   message,
+  issues = [],
   compact = false,
 }: {
   message: string
+  issues?: WorkflowValidationIssue[]
   compact?: boolean
 }) {
+  const visibleIssues = issues.slice(0, compact ? 2 : 4)
+  const hiddenIssueCount = Math.max(issues.length - visibleIssues.length, 0)
+
   return (
     <div
       className={cn(
@@ -506,6 +516,24 @@ function TrialRunErrorCard({
         <div className="min-w-0">
           <p className="text-xs font-semibold">运行前校验未通过</p>
           <p className="mt-1 text-[11px] leading-4 text-rose-100/85">{message}</p>
+          {visibleIssues.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {visibleIssues.map((issue) => (
+                <div key={issue.id} className="rounded-xl border border-rose-300/12 bg-slate-950/24 px-2.5 py-2">
+                  <p className="text-[11px] font-semibold leading-4 text-rose-50">{issue.title}</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-rose-100/80">{issue.message}</p>
+                  {issue.suggestion && (
+                    <p className="mt-1 text-[10px] leading-4 text-rose-100/62">建议：{issue.suggestion}</p>
+                  )}
+                </div>
+              ))}
+              {hiddenIssueCount > 0 && (
+                <p className="text-[10px] leading-4 text-rose-100/60">
+                  还有 {hiddenIssueCount} 个错误，请查看节点右上角问题提示或右侧配置面板。
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -13,6 +13,8 @@ import {
   type WorkflowGraphContext,
 } from '@/features/workflow/validation/workflow-validation-utils'
 
+const SELECTOR_ELSE_PORT_ID = 'selector-else'
+
 export function validateNodeIO(node: WorkflowNode, graphContext: WorkflowGraphContext) {
   return [
     ...validateInputItems(node),
@@ -25,6 +27,9 @@ export function validateNodeIO(node: WorkflowNode, graphContext: WorkflowGraphCo
 }
 
 export function validateInputItems(node: WorkflowNode) {
+  if (!shouldValidateInputDefinitions(node)) {
+    return []
+  }
   return validateIOItems(node, 'input', node.inputs, '输入变量')
 }
 
@@ -33,7 +38,7 @@ export function validateOutputItems(node: WorkflowNode) {
 }
 
 export function validateInputMappings(node: WorkflowNode, graphContext: WorkflowGraphContext) {
-  if (node.type === 'start' || node.type === 'loop-start' || node.type === 'loop-end' || node.type === 'end') {
+  if (!shouldValidateInputDefinitions(node)) {
     return []
   }
 
@@ -123,6 +128,13 @@ export function validateInputMappings(node: WorkflowNode, graphContext: Workflow
   return issues
 }
 
+function shouldValidateInputDefinitions(node: WorkflowNode) {
+  if (node.type === 'start' || node.type === 'loop-start' || node.type === 'loop-end' || node.type === 'end') {
+    return false
+  }
+  return node.type !== 'loop' || node.config.loopMode !== 'count'
+}
+
 export function validateSelectorConditions(node: WorkflowNode, graphContext: WorkflowGraphContext) {
   if (node.type !== 'selector') {
     return []
@@ -196,8 +208,49 @@ export function validateSelectorConditions(node: WorkflowNode, graphContext: Wor
       }
     })
   })
+  issues.push(...validateSelectorBranchConnections(node, graphContext, branches.length))
 
   return issues
+}
+
+function validateSelectorBranchConnections(
+  node: WorkflowNode,
+  graphContext: WorkflowGraphContext,
+  branchCount: number,
+) {
+  const issues: WorkflowValidationIssue[] = []
+  const outgoingEdges = graphContext.outgoingEdges.get(node.id) ?? []
+
+  Array.from({ length: branchCount }, (_, index) => `selector-branch-${index}`).forEach((portID, index) => {
+    if (hasEdgeFromSelectorPort(outgoingEdges, portID)) {
+      return
+    }
+    issues.push(createIssue({
+      node,
+      scope: 'nodeConfig',
+      fieldPath: `config.selectorBranches.${index}`,
+      title: '条件分支未连接',
+      message: `条件分支 ${index + 1} 还没有连接下游节点。`,
+      suggestion: '请从该条件分支右侧端口连到后续节点，或连接到结束节点明确结束。',
+    }))
+  })
+
+  if (!hasEdgeFromSelectorPort(outgoingEdges, SELECTOR_ELSE_PORT_ID)) {
+    issues.push(createIssue({
+      node,
+      scope: 'nodeConfig',
+      fieldPath: 'config.selectorElseBranch',
+      title: '否则分支未连接',
+      message: `${node.title} 的否则分支还没有连接下游节点。`,
+      suggestion: '请从“否则”端口连到后续节点，或连接到结束节点明确结束。',
+    }))
+  }
+
+  return issues
+}
+
+function hasEdgeFromSelectorPort(edges: Array<{ sourcePortID?: string | number }>, portID: string) {
+  return edges.some((edge) => String(edge.sourcePortID ?? '') === portID)
 }
 
 function validateSelectorOperand({
@@ -452,6 +505,7 @@ function shouldValidateOutputDefinitions(node: WorkflowNode) {
 
 function shouldValidateOutputKey(node: WorkflowNode) {
   return node.type !== 'selector'
+    && node.type !== 'loop'
     && node.type !== 'loop-start'
     && node.type !== 'loop-end'
     && node.type !== 'end'

@@ -1,5 +1,6 @@
 import type { WorkflowEdge, WorkflowNode } from '@/types/workflow'
 import { validateNodeIO } from '@/features/workflow/validation/workflow-io-validation'
+import { validateNodeStructure } from '@/features/workflow/validation/workflow-structure-validation'
 import type {
   WorkflowNodeValidationResult,
   WorkflowValidationIssue,
@@ -8,13 +9,14 @@ import type {
 import { buildWorkflowGraphContext } from '@/features/workflow/validation/workflow-validation-utils'
 import { flattenWorkflowNodes } from '@/features/workflow/utils/workflow-document'
 
-export function validateWorkflowGraph(nodes: WorkflowNode[], _edges: WorkflowEdge[] = []): WorkflowValidationResult {
-  const graphContext = buildWorkflowGraphContext(nodes)
+export function validateWorkflowGraph(nodes: WorkflowNode[], edges: WorkflowEdge[] = []): WorkflowValidationResult {
+  const graphContext = buildWorkflowGraphContext(nodes, edges)
   const nodeResults: Record<string, WorkflowNodeValidationResult> = {}
   const issues: WorkflowValidationIssue[] = []
 
   flattenWorkflowNodes(nodes).forEach((node) => {
     const nodeIssues = validateNodeIO(node, graphContext)
+      .concat(validateNodeStructure(node, graphContext))
     const nodeResult = createNodeValidationResult(node.id, nodeIssues)
     nodeResults[node.id] = nodeResult
     issues.push(...nodeIssues)
@@ -31,11 +33,13 @@ export function validateWorkflowGraph(nodes: WorkflowNode[], _edges: WorkflowEdg
 export function validateWorkflowNode(
   node: WorkflowNode,
   nodes: WorkflowNode[],
-  _edges: WorkflowEdge[] = [],
+  edges: WorkflowEdge[] = [],
 ): WorkflowNodeValidationResult {
-  const graphContext = buildWorkflowGraphContext(nodes.length > 0 ? nodes : [node])
+  const graphContext = buildWorkflowGraphContext(nodes.length > 0 ? nodes : [node], edges)
   const targetNode = graphContext.nodeMap.get(node.id) ?? node
-  return createNodeValidationResult(targetNode.id, validateNodeIO(targetNode, graphContext))
+  const issues = validateNodeIO(targetNode, graphContext)
+    .concat(validateNodeStructure(targetNode, graphContext))
+  return createNodeValidationResult(targetNode.id, issues)
 }
 
 export function hasBlockingValidationErrors(result: WorkflowValidationResult | WorkflowNodeValidationResult) {

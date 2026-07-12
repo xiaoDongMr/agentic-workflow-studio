@@ -16,7 +16,9 @@ import type {
 } from '@/features/workflow/editor/workflow-editor.types'
 import {
   createLoopCanvasAnchorNode,
+  filterLoopBodyEdgesByNodes,
   filterLoopEndpointNodes,
+  getAutoLoopBodyCanvasSize,
   isLoopInternalNodeType,
   loopEdgeFromFlowgramEdge,
   LOOP_CANVAS_ANCHOR_NODE_TYPE,
@@ -222,19 +224,24 @@ function flowgramNodeToWorkflowNode(
     : data.config.loopBodyNodes
   const rawLoopBodyEdges = type === 'loop'
     ? Array.isArray(node.edges)
-      ? [
-        ...(data.config.loopBodyEdges ?? []),
-        ...node.edges.map((edge, edgeIndex) => loopEdgeFromFlowgramEdge(
-          String(node.id ?? `${type}-${index + 1}`),
-          edge,
-          edgeIndex,
-        )),
-      ]
+      ? node.edges.map((edge, edgeIndex) => loopEdgeFromFlowgramEdge(
+        String(node.id ?? `${type}-${index + 1}`),
+        edge,
+        edgeIndex,
+      ))
       : data.config.loopBodyEdges
     : data.config.loopBodyEdges
+  const loopNodeId = String(node.id ?? `${type}-${index + 1}`)
   const loopBodyEdges = type === 'loop'
-    ? normalizeLoopBodyEdges(String(node.id ?? `${type}-${index + 1}`), rawLoopBodyEdges ?? [])
+    ? filterLoopBodyEdgesByNodes(
+      loopNodeId,
+      normalizeLoopBodyEdges(loopNodeId, rawLoopBodyEdges ?? []),
+      loopBodyNodes ?? [],
+    )
     : data.config.loopBodyEdges
+  const loopCanvasSize = type === 'loop'
+    ? getAutoLoopBodyCanvasSize(loopBodyNodes ?? [])
+    : undefined
 
   return {
     id: String(node.id ?? `${type}-${index + 1}`),
@@ -252,6 +259,12 @@ function flowgramNodeToWorkflowNode(
       ...data.config,
       loopBodyNodes,
       loopBodyEdges,
+      ...(loopCanvasSize
+        ? {
+          loopCanvasWidth: loopCanvasSize.width,
+          loopCanvasHeight: loopCanvasSize.height,
+        }
+        : {}),
     },
   }
 }

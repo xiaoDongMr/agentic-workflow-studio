@@ -217,6 +217,23 @@ function getParentLoopNodeId(node: WorkflowNodeProps['node']) {
   return String(parentJson.id ?? '')
 }
 
+function getParentLoopNodePosition(node: WorkflowNodeProps['node']) {
+  const parent = (node as { parent?: WorkflowNodeProps['node'] }).parent
+  const parentJson = parent?.toJSON?.() as WorkflowJSON['nodes'][number] | undefined
+  if (!parentJson || String(parentJson.type ?? '') !== 'loop') {
+    return undefined
+  }
+  const meta = parentJson.meta as { position?: { x?: number; y?: number } } | undefined
+  const position = meta?.position
+  if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+    return undefined
+  }
+  return {
+    x: position.x,
+    y: position.y,
+  }
+}
+
 function getPortPanelPosition(port: WorkflowPortEntity): AddNodeOptions['panelPosition'] {
   const point = port.point
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
@@ -252,6 +269,7 @@ function getSelectorPortPanelPosition(
   nodeJson: WorkflowJSON['nodes'][number],
   renderSize: { width: number; height: number },
   topPercent: number,
+  parentPosition?: { x: number; y: number },
 ): AddNodeOptions['panelPosition'] {
   const meta = nodeJson.meta as { position?: { x?: number; y?: number } } | undefined
   const metaPosition = meta?.position
@@ -260,8 +278,8 @@ function getSelectorPortPanelPosition(
   }
 
   return {
-    x: Math.round((metaPosition.x ?? CANVAS_OFFSET_X) + renderSize.width + 72),
-    y: Math.round((metaPosition.y ?? CANVAS_OFFSET_Y) + (renderSize.height * topPercent) / 100 + 24),
+    x: Math.round((parentPosition?.x ?? 0) + (metaPosition.x ?? CANVAS_OFFSET_X) + renderSize.width + 72),
+    y: Math.round((parentPosition?.y ?? 0) + (metaPosition.y ?? CANVAS_OFFSET_Y) + (renderSize.height * topPercent) / 100 + 24),
   }
 }
 
@@ -269,6 +287,7 @@ function getSelectorPortNodePosition(
   nodeJson: WorkflowJSON['nodes'][number],
   renderSize: { width: number; height: number },
   topPercent: number,
+  isLoopChild = false,
 ): AddNodeOptions['position'] {
   const meta = nodeJson.meta as { position?: { x?: number; y?: number } } | undefined
   const metaPosition = meta?.position
@@ -276,8 +295,10 @@ function getSelectorPortNodePosition(
     return undefined
   }
 
-  const sourceX = Math.max((metaPosition.x ?? CANVAS_OFFSET_X) - CANVAS_OFFSET_X, 0)
-  const sourceY = Math.max((metaPosition.y ?? CANVAS_OFFSET_Y) - CANVAS_OFFSET_Y, 0)
+  const offsetX = isLoopChild ? 0 : CANVAS_OFFSET_X
+  const offsetY = isLoopChild ? 0 : CANVAS_OFFSET_Y
+  const sourceX = Math.max((metaPosition.x ?? offsetX) - offsetX, 0)
+  const sourceY = Math.max((metaPosition.y ?? offsetY) - offsetY, 0)
 
   return {
     x: Math.round(sourceX + renderSize.width + 88),
@@ -322,6 +343,7 @@ export function FlowgramNodeCard({
   const kind = String(data?.kind ?? nodeJson.type) as WorkflowNode['type'] | typeof LOOP_CANVAS_ANCHOR_NODE_TYPE
   const nodeId = String(nodeJson.id)
   const parentLoopNodeId = getParentLoopNodeId(node) || undefined
+  const parentLoopNodePosition = getParentLoopNodePosition(node)
   const subscribedExecution = useNodeTrialRunExecution(nodeId, parentLoopNodeId)
   const effectiveExecution = subscribedExecution ?? trialRunExecution ?? data?.trialRunExecution
   const isLoopBodyEndNode = kind === 'end' && Boolean(parentLoopNodeId)
@@ -336,7 +358,8 @@ export function FlowgramNodeCard({
   const isLoopEndpoint = kind === 'loop-start' || kind === 'loop-end'
   const inputItems: WorkflowNode['inputs'] = data?.inputs ?? []
   const outputItems: WorkflowNode['outputs'] = data?.outputs ?? []
-  const canDeleteOrCopy = kind !== 'start' && !isLoopEndpoint
+  const canDeleteNode = kind !== 'start' && !isLoopEndpoint
+  const canCopyNode = canDeleteNode && kind !== 'loop'
   const canRunNode = !isLoopEndpoint
   const canAddFromOutputPort = kind !== 'selector' && kind !== 'end' && kind !== 'loop-end'
   const isNodeRunning = nodeActionRunning || effectiveExecution?.status === 'running'
@@ -367,6 +390,14 @@ export function FlowgramNodeCard({
     width: nodeWidth ?? 320,
     height: loopNodeSize?.height ?? Math.max(nodeMinHeight ?? 154, 154),
   }
+  const handleAddFromSelectorPort = useCallback((sourcePortID: string | number, topPercent: number) => {
+    onToggleQuickAdd(
+      nodeId,
+      sourcePortID,
+      getSelectorPortPanelPosition(nodeJson, nodeRenderSize, topPercent, parentLoopNodePosition),
+      getSelectorPortNodePosition(nodeJson, nodeRenderSize, topPercent, Boolean(parentLoopNodeId)),
+    )
+  }, [nodeId, nodeJson, nodeRenderSize, onToggleQuickAdd, parentLoopNodeId, parentLoopNodePosition])
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen])
   useClickOutside(actionsRef, menuOpen, closeMenu)
 
@@ -486,7 +517,7 @@ export function FlowgramNodeCard({
             <div className="aw-flow-node__description" draggable={kind === 'loop'}>{nodeDescription}</div>
             <div className="aw-flow-node__io">
               {kind === 'selector' ? (
-                <SelectorBranchRows data={data} />
+                <SelectorBranchRows data={data} onAddFromPort={handleAddFromSelectorPort} />
               ) : kind === 'loop' ? (
                 <LoopNativeSubCanvas
                   data={data}
@@ -521,55 +552,52 @@ export function FlowgramNodeCard({
           >
             <Play className="h-3.5 w-3.5 fill-current" />
           </button>
-          {canDeleteOrCopy && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setMenuOpen((prev) => !prev)}
-                className="aw-flow-node__action-button aw-flow-node__action-button--menu"
-                aria-label="节点操作"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-              {menuOpen && (
-                <div className="aw-flow-node__action-menu">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onCopyNode(nodeId)
-                    }}
-                    className="aw-flow-node__action-menu-item"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    复制
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onDeleteNode(nodeId)
-                    }}
-                    className="aw-flow-node__action-menu-item aw-flow-node__action-menu-item--danger"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    删除
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          {canDeleteNode && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  className="aw-flow-node__action-button aw-flow-node__action-button--menu"
+                  aria-label="节点操作"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+                {menuOpen && (
+                  <div className="aw-flow-node__action-menu">
+                    {canCopyNode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false)
+                          onCopyNode(nodeId)
+                        }}
+                        className="aw-flow-node__action-menu-item"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        复制
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        onDeleteNode(nodeId)
+                      }}
+                      className="aw-flow-node__action-menu-item aw-flow-node__action-menu-item--danger"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      删除
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
       {kind === 'selector' && (
         <SelectorPortActions
           data={data}
-          onAddFromPort={(sourcePortID, topPercent) => onToggleQuickAdd(
-            nodeId,
-            sourcePortID,
-            getSelectorPortPanelPosition(nodeJson, nodeRenderSize, topPercent),
-            getSelectorPortNodePosition(nodeJson, nodeRenderSize, topPercent),
-          )}
+          onAddFromPort={handleAddFromSelectorPort}
         />
       )}
       {effectiveExecution && !isLoopEndpoint && (
@@ -1096,28 +1124,70 @@ function NodeMetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SelectorBranchRows({ data }: { data?: FlowgramNodeData }) {
+function SelectorBranchRows({
+  data,
+  onAddFromPort,
+}: {
+  data?: FlowgramNodeData
+  onAddFromPort: (sourcePortID: string | number, topPercent: number) => void
+}) {
   const branches = data?.config.selectorBranches ?? []
+  const ports = getSelectorBranchPortInfos(branches.length || 1)
+  const branchPorts = ports.filter((port) => port.kind === 'branch')
+  const elsePort = ports.find((port) => port.kind === 'else')
 
   return (
     <div className="aw-flow-selector-branch-list">
       {branches.length > 0 ? (
         branches.map((branch, index) => (
-          <div key={branch.id} className="aw-flow-selector-branch-row">
+          <button
+            key={branch.id}
+            type="button"
+            className="aw-flow-selector-branch-row aw-flow-ignore-deselect"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              const port = branchPorts[index]
+              if (port) {
+                onAddFromPort(port.portID, port.topPercent)
+              }
+            }}
+          >
             <span className="aw-flow-selector-branch-index">条件{index + 1}</span>
             <span className="aw-flow-selector-branch-value">{Math.max(branch.conditions.length, 1)} 个条件</span>
-          </div>
+          </button>
         ))
       ) : (
-        <div className="aw-flow-selector-branch-row">
+        <button
+          type="button"
+          className="aw-flow-selector-branch-row aw-flow-ignore-deselect"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            const port = branchPorts[0]
+            if (port) {
+              onAddFromPort(port.portID, port.topPercent)
+            }
+          }}
+        >
           <span className="aw-flow-selector-branch-index">条件1</span>
           <span className="aw-flow-selector-branch-value">未配置</span>
-        </div>
+        </button>
       )}
-      <div className="aw-flow-selector-branch-row aw-flow-selector-branch-row--else">
+      <button
+        type="button"
+        className="aw-flow-selector-branch-row aw-flow-selector-branch-row--else aw-flow-ignore-deselect"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (elsePort) {
+            onAddFromPort(elsePort.portID, elsePort.topPercent)
+          }
+        }}
+      >
         <span className="aw-flow-selector-branch-index">否则</span>
         <span className="aw-flow-selector-branch-value">{data?.config.selectorElseBranch || SELECTOR_ELSE_BRANCH}</span>
-      </div>
+      </button>
     </div>
   )
 }

@@ -49,7 +49,7 @@ class WorkflowGraphCompiler:
             target_edges = outgoing.get(node.id, [])
             if not target_edges:
                 graph.add_edge(node.id, END)
-            elif node.type == "selector" and len(target_edges) > 1:
+            elif node.type == "selector":
                 graph.add_conditional_edges(node.id, make_selector_router(node, target_edges, nodes_by_id))
             else:
                 for edge in target_edges:

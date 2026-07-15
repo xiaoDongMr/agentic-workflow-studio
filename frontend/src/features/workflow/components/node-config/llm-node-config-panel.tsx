@@ -1,4 +1,4 @@
-import { Braces, Check, ChevronDown, Maximize2, RotateCcw, Settings2, X } from 'lucide-react'
+import { Braces, Check, ChevronDown, FileText, Maximize2, RotateCcw, Settings2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
@@ -13,8 +13,6 @@ import {
   BasicInfoSection,
   ConfigSection,
   ConfigShell,
-  EditableArea,
-  EditableField,
   IOSection,
   SwitchRow,
   type NodeConfigPanelProps,
@@ -28,6 +26,8 @@ import {
 import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import { cn } from '@/lib/utils'
 import type { WorkflowNode, WorkflowReasoningEffort, WorkflowValueType } from '@/types/workflow'
+
+type LlmResponseMode = Extract<WorkflowNode['config']['responseMode'], 'text' | 'json'>
 
 const DEFAULT_MODEL_OPTION: ModelOption = {
   name: '',
@@ -62,6 +62,25 @@ const REASONING_OUTPUT_NAME = 'reasoning_content'
 const REASONING_OUTPUT_TYPE: WorkflowValueType = 'String'
 const LLM_PRIMARY_OUTPUT_LIMIT = 1
 const VISION_REFERENCE_TYPES = new Set<WorkflowValueType>(['Image', 'Video', 'Array<Image>', 'Array<Video>'])
+const RESPONSE_MODE_OPTIONS: Array<{
+  value: LlmResponseMode
+  label: string
+  tag: string
+  description: string
+}> = [
+  {
+    value: 'text',
+    label: '文本输出',
+    tag: 'Text',
+    description: '将模型回复写入一个主输出变量，适合生成文案、摘要和自然语言回复。',
+  },
+  {
+    value: 'json',
+    label: 'JSON 输出',
+    tag: 'JSON',
+    description: '尝试把模型回复解析为对象并展开字段，适合分类结果、结构化抽取和多字段产物。',
+  },
+]
 
 // 提示词编辑器的 Markdown 暗色语法高亮配色
 const promptMarkdownHighlightStyle = HighlightStyle.define([
@@ -134,18 +153,25 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
     () => modelOptions.find((model) => model.name === config.model) ?? DEFAULT_MODEL_OPTION,
     [config.model, modelOptions],
   )
+  const responseMode = resolveLlmResponseMode(config.responseMode)
+  const reasoningOutputEnabled = selectedModel.supportsThinking && Boolean(config.thinkingEnabled)
+  const outputLimit = responseMode === 'json'
+    ? undefined
+    : LLM_PRIMARY_OUTPUT_LIMIT + (reasoningOutputEnabled ? 1 : 0)
   const inputSources = useMemo(() => getAvailableInputSources(node, nodes, edges), [edges, node, nodes])
-  const availableInputSources = useMemo(
-    () => selectedModel.supportsVision
-      ? inputSources
-      : inputSources.filter((source) => !isVisionValueType(source.type)),
+  const disabledVisionSourceValues = useMemo(
+    () => new Set(
+      selectedModel.supportsVision
+        ? []
+        : inputSources
+          .filter((source) => isVisionValueType(source.type))
+          .map((source) => source.value),
+    ),
     [inputSources, selectedModel.supportsVision],
   )
   const visibleOutputs = useMemo(
-    () => selectedModel.supportsThinking
-      ? ensureReasoningOutput(node.outputs)
-      : removeReasoningOutput(node.outputs),
-    [node.outputs, selectedModel.supportsThinking],
+    () => normalizeOutputsForResponseMode(node.outputs, responseMode, reasoningOutputEnabled),
+    [node.outputs, reasoningOutputEnabled, responseMode],
   )
   const promptVariables = useMemo(
     () => node.inputs
@@ -166,18 +192,45 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
     const currentTimeout = config.timeoutSeconds ?? 0
     const nextTimeout =
       timeoutCap && currentTimeout > timeoutCap ? timeoutCap : currentTimeout
+    const visionSourceValues = new Set(inputSources.filter((source) => isVisionValueType(source.type)).map((source) => source.value))
+    const nextInputMappings = model.supportsVision
+      ? config.inputMappings
+      : config.inputMappings.map((mapping) => {
+        if (mapping.sourceType !== 'node' || !visionSourceValues.has(mapping.source)) {
+          return mapping
+        }
+        return { ...mapping, source: '' }
+      })
+
     onUpdateNode({
       config: {
         model: model.name,
         thinkingEnabled: false,
         reasoningEffort: 'medium',
+        inputMappings: nextInputMappings,
         ...(nextMaxTokens !== currentMaxTokens ? { maxTokens: nextMaxTokens } : {}),
         ...(nextTimeout !== currentTimeout ? { timeoutSeconds: nextTimeout } : {}),
         ...(model.supportsThinking ? { reasoningKey: REASONING_OUTPUT_NAME } : {}),
       },
-      outputs: model.supportsThinking ? ensureReasoningOutput(node.outputs) : removeReasoningOutput(node.outputs),
+      outputs: normalizeOutputsForResponseMode(node.outputs, responseMode, false),
     })
-  }, [config.maxTokens, config.timeoutSeconds, node.outputs, onUpdateNode])
+  }, [config.inputMappings, config.maxTokens, config.timeoutSeconds, inputSources, node.outputs, onUpdateNode, responseMode])
+
+  const handleModelParamsChange = useCallback((patch: Partial<WorkflowNode['config']>) => {
+    const nextThinkingEnabled = patch.thinkingEnabled ?? config.thinkingEnabled ?? false
+    const shouldShowReasoningOutput = selectedModel.supportsThinking && Boolean(nextThinkingEnabled)
+    onUpdateNode({
+      config: patch,
+      outputs: normalizeOutputsForResponseMode(node.outputs, responseMode, shouldShowReasoningOutput),
+    })
+  }, [config.thinkingEnabled, node.outputs, onUpdateNode, responseMode, selectedModel.supportsThinking])
+
+  const handleResponseModeChange = useCallback((nextMode: LlmResponseMode) => {
+    onUpdateNode({
+      config: { responseMode: nextMode },
+      outputs: normalizeOutputsForResponseMode(node.outputs, nextMode, reasoningOutputEnabled),
+    })
+  }, [node.outputs, onUpdateNode, reasoningOutputEnabled])
 
   const inputIssues = validationResult?.issues.filter((issue) => issue.scope === 'input' || issue.scope === 'inputMapping') ?? []
   const outputIssues = validationResult?.issues.filter((issue) => {
@@ -195,7 +248,9 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           title=""
           emptyLabel="输入变量"
           items={node.inputs}
-          sourceOptions={availableInputSources}
+          sourceOptions={inputSources}
+          disabledSourceValues={disabledVisionSourceValues}
+          disabledSourceReason="当前模型不支持视觉输入"
           inputMappings={config.inputMappings}
           onChange={(items) => onUpdateNode({ inputs: items })}
           onInputMappingsChange={(inputMappings) => onUpdateNode({ config: { inputMappings } })}
@@ -222,7 +277,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           supportsReasoningEffort={selectedModel.supportsReasoningEffort}
           thinkingEnabled={config.thinkingEnabled ?? false}
           reasoningEffort={config.reasoningEffort ?? 'medium'}
-          onChange={(patch) => onUpdateNode({ config: patch })}
+          onChange={handleModelParamsChange}
         />
         {selectedModel.supportsVision && (
           <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
@@ -262,13 +317,18 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
       </ConfigSection>
 
       <ConfigSection title="输出变量">
+        <ResponseModeSelect
+          value={responseMode}
+          onChange={handleResponseModeChange}
+        />
         <IOSection
           title=""
           emptyLabel="输出变量"
           items={visibleOutputs}
-          onChange={(items) => onUpdateNode({ outputs: normalizeReasoningOutputs(items, selectedModel.supportsThinking) })}
-          maxItems={selectedModel.supportsThinking ? LLM_PRIMARY_OUTPUT_LIMIT + 1 : LLM_PRIMARY_OUTPUT_LIMIT}
-          readonlyNames={selectedModel.supportsThinking ? [REASONING_OUTPUT_NAME] : []}
+          onChange={(items) => onUpdateNode({ outputs: normalizeOutputsForResponseMode(items, responseMode, reasoningOutputEnabled) })}
+          maxItems={outputLimit}
+          readonlyNames={reasoningOutputEnabled ? [REASONING_OUTPUT_NAME] : []}
+          hiddenValueTypes={VISION_REFERENCE_TYPES}
           validationIssues={outputIssues}
         />
       </ConfigSection>
@@ -484,6 +544,66 @@ function getThinkingOptions(supportsThinking: boolean, supportsReasoningEffort: 
     return THINKING_TOGGLE_OPTIONS.slice(0, 1)
   }
   return supportsReasoningEffort ? REASONING_EFFORT_OPTIONS : THINKING_TOGGLE_OPTIONS
+}
+
+function ResponseModeSelect({
+  value,
+  onChange,
+}: {
+  value: LlmResponseMode
+  onChange: (value: LlmResponseMode) => void
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-slate-400">输出模式</p>
+        <span className="rounded-full border border-white/8 bg-slate-950/55 px-2 py-0.5 text-[9px] text-slate-500">
+          后端支持 Text / JSON
+        </span>
+      </div>
+      <div className="mt-1.5 grid grid-cols-2 gap-1.5 rounded-2xl border border-white/8 bg-slate-950/55 p-1.5">
+        {RESPONSE_MODE_OPTIONS.map((option) => {
+          const selected = option.value === value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={cn(
+                'group min-w-0 rounded-xl border px-2.5 py-2 text-left transition',
+                selected
+                  ? 'border-blue-300/28 bg-blue-400/12 text-blue-50 shadow-inner shadow-blue-300/[0.04]'
+                  : 'border-transparent text-slate-400 hover:border-white/10 hover:bg-white/[0.045] hover:text-slate-100',
+              )}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {option.value === 'json'
+                    ? <Braces className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-blue-200' : 'text-slate-500 group-hover:text-slate-300')} />
+                    : <FileText className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-blue-200' : 'text-slate-500 group-hover:text-slate-300')} />}
+                  <span className="truncate text-[11px] font-semibold">{option.label}</span>
+                </span>
+                <span className={cn(
+                  'shrink-0 rounded-full px-1.5 py-0.5 text-[9px] leading-3',
+                  selected ? 'bg-blue-300/15 text-blue-100' : 'bg-white/5 text-slate-500',
+                )}>
+                  {option.tag}
+                </span>
+              </span>
+              <span className="mt-1.5 block text-[10px] leading-4 text-slate-500">
+                {option.description}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-1.5 rounded-xl border border-white/8 bg-slate-950/45 px-2.5 py-2 text-[10px] leading-4 text-slate-500">
+        {value === 'json'
+          ? 'JSON 模式会解析模型返回的对象并作为多个输出字段。请在提示词中明确要求返回合法 JSON，并在下方声明预期字段。解析失败或返回非对象时，会回退写入第一个输出变量。'
+          : '文本模式会把完整回复写入第一个输出变量，适合大多数自然语言生成场景。'}
+      </p>
+    </div>
+  )
 }
 
 function ThinkingEffortSelect({
@@ -1229,13 +1349,29 @@ function removeReasoningOutput(outputs: WorkflowNode['outputs']) {
   return outputs.filter((output) => output.name !== REASONING_OUTPUT_NAME)
 }
 
-function normalizeReasoningOutputs(outputs: WorkflowNode['outputs'], supportsThinking: boolean) {
-  if (!supportsThinking) {
-    return removeReasoningOutput(outputs)
-  }
-  return ensureReasoningOutput(outputs)
+function resolveLlmResponseMode(responseMode: WorkflowNode['config']['responseMode'] | string | undefined): LlmResponseMode {
+  return responseMode === 'json' ? 'json' : 'text'
+}
+
+function normalizeOutputsForResponseMode(
+  outputs: WorkflowNode['outputs'],
+  responseMode: LlmResponseMode,
+  reasoningOutputEnabled: boolean,
+) {
+  const businessOutputs = normalizeLlmOutputValueTypes(removeReasoningOutput(outputs))
+  const normalizedBusinessOutputs = responseMode === 'json'
+    ? businessOutputs
+    : businessOutputs.slice(0, LLM_PRIMARY_OUTPUT_LIMIT)
+  return reasoningOutputEnabled ? ensureReasoningOutput(normalizedBusinessOutputs) : normalizedBusinessOutputs
 }
 
 function isVisionValueType(type: string): boolean {
   return VISION_REFERENCE_TYPES.has(normalizeValueType(type))
+}
+
+function normalizeLlmOutputValueTypes(outputs: WorkflowNode['outputs']) {
+  return outputs.map((output) => {
+    const normalizedType = normalizeValueType(output.type)
+    return VISION_REFERENCE_TYPES.has(normalizedType) ? { ...output, type: 'String' } : output
+  })
 }

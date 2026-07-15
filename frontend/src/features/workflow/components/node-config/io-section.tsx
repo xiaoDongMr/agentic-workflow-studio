@@ -25,6 +25,9 @@ interface IOSectionProps {
   items: WorkflowNode['inputs']
   onChange: (items: WorkflowNodeIO[]) => void
   sourceOptions?: WorkflowVariableSource[]
+  disabledSourceValues?: Set<string>
+  disabledSourceReason?: string
+  hiddenValueTypes?: Set<WorkflowValueType>
   inputMappings?: WorkflowInputMapping[]
   onInputMappingsChange?: (mappings: WorkflowInputMapping[]) => void
   allowCustomValue?: boolean
@@ -40,6 +43,9 @@ export function IOSection({
   items,
   onChange,
   sourceOptions,
+  disabledSourceValues,
+  disabledSourceReason,
+  hiddenValueTypes,
   inputMappings,
   onInputMappingsChange,
   allowCustomValue = true,
@@ -111,8 +117,7 @@ export function IOSection({
     if (!canAddItem) {
       return
     }
-    const sourceOption = sourceOptions?.[0]
-    const nextItem = createEmptyIOItem(sourceOption)
+    const nextItem = createEmptyIOItem()
     onChange([...items, nextItem])
 
     if (inputMappings && onInputMappingsChange) {
@@ -120,8 +125,8 @@ export function IOSection({
         ...inputMappings,
         {
           field: nextItem.name,
-          sourceType: sourceOption ? 'node' : allowCustomValue ? 'literal' : 'node',
-          source: sourceOption?.value ?? '',
+          sourceType: sourceOptions ? 'node' : allowCustomValue ? 'literal' : 'node',
+          source: '',
           valueType: nextItem.type,
         },
       ])
@@ -175,6 +180,9 @@ export function IOSection({
             item={item}
             gridClass={gridClass}
             sourceOptions={sourceOptions}
+            disabledSourceValues={disabledSourceValues}
+            disabledSourceReason={disabledSourceReason}
+            hiddenValueTypes={hiddenValueTypes}
             mapping={inputMappings?.[index]}
             selectedSource={inputMappings?.[index]?.sourceType === 'node' ? inputMappings[index].source : ''}
             onChange={(nextItem) => updateItem(index, nextItem)}
@@ -228,6 +236,9 @@ function IOEditorRow({
   item,
   gridClass,
   sourceOptions,
+  disabledSourceValues,
+  disabledSourceReason,
+  hiddenValueTypes,
   mapping,
   selectedSource,
   onChange,
@@ -242,6 +253,9 @@ function IOEditorRow({
   item: WorkflowNodeIO
   gridClass: string
   sourceOptions?: WorkflowVariableSource[]
+  disabledSourceValues?: Set<string>
+  disabledSourceReason?: string
+  hiddenValueTypes?: Set<WorkflowValueType>
   mapping?: WorkflowInputMapping
   selectedSource?: string
   onChange: (item: WorkflowNodeIO) => void
@@ -284,6 +298,8 @@ function IOEditorRow({
             mapping={mapping}
             selectedSource={selectedSource}
             sourceOptions={sourceOptions}
+            disabledSourceValues={disabledSourceValues}
+            disabledSourceReason={disabledSourceReason}
             onChangeItem={onChange}
             onChangeSource={onChangeSource}
             onChangeMapping={onChangeMapping}
@@ -294,6 +310,7 @@ function IOEditorRow({
           <ValueTypeSelect
             value={normalizeValueType(item.type)}
             onChange={(type) => onChange({ ...item, type })}
+            hiddenValueTypes={hiddenValueTypes}
             disabled={readonly}
           />
         )}
@@ -334,6 +351,8 @@ function InputValueEditor({
   mapping,
   selectedSource,
   sourceOptions,
+  disabledSourceValues,
+  disabledSourceReason,
   onChangeItem,
   onChangeSource,
   onChangeMapping,
@@ -344,6 +363,8 @@ function InputValueEditor({
   mapping?: WorkflowInputMapping
   selectedSource?: string
   sourceOptions: WorkflowVariableSource[]
+  disabledSourceValues?: Set<string>
+  disabledSourceReason?: string
   onChangeItem: (item: WorkflowNodeIO) => void
   onChangeSource?: (source: string) => void
   onChangeMapping?: (mapping: WorkflowInputMapping) => void
@@ -402,6 +423,8 @@ function InputValueEditor({
           <VariableSourceSelect
             value={selectedSource ?? DESELECT_SOURCE_VALUE}
             options={sourceOptions}
+            disabledValues={disabledSourceValues}
+            disabledReason={disabledSourceReason}
             onChange={(value) => onChangeSource?.(value)}
             disabled={disabled}
           />
@@ -480,10 +503,12 @@ function InputModeSelect({
 function ValueTypeSelect({
   value,
   onChange,
+  hiddenValueTypes,
   disabled = false,
 }: {
   value: WorkflowValueType
   onChange: (value: WorkflowValueType) => void
+  hiddenValueTypes?: Set<WorkflowValueType>
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -522,13 +547,14 @@ function ValueTypeSelect({
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+5px)] z-50 w-36 rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur">
-          {BASE_VALUE_TYPES.map((type) => (
+          {BASE_VALUE_TYPES.filter((type) => !hiddenValueTypes?.has(type)).map((type) => (
             <TypeOption key={type} type={type} selected={value === type} onSelect={() => selectType(type)} />
           ))}
           <ArrayTypeOption
             value={value}
             arrayOpen={arrayOpen}
             onOpenArray={() => setArrayOpen(true)}
+            hiddenValueTypes={hiddenValueTypes}
             onSelect={selectType}
           />
         </div>
@@ -541,14 +567,17 @@ function ArrayTypeOption({
   value,
   arrayOpen,
   onOpenArray,
+  hiddenValueTypes,
   onSelect,
 }: {
   value: WorkflowValueType
   arrayOpen: boolean
   onOpenArray: () => void
+  hiddenValueTypes?: Set<WorkflowValueType>
   onSelect: (value: WorkflowValueType) => void
 }) {
   const selected = value.startsWith('Array')
+  const visibleArrayValueTypes = ARRAY_VALUE_TYPES.filter((type) => !hiddenValueTypes?.has(type))
 
   return (
     <div className="relative" onMouseEnter={onOpenArray}>
@@ -569,7 +598,7 @@ function ArrayTypeOption({
 
       {arrayOpen && (
         <div className="absolute right-[calc(100%+6px)] top-0 z-50 w-36 rounded-xl border border-white/10 bg-slate-950/98 p-1 shadow-2xl shadow-slate-950/70 backdrop-blur">
-          {ARRAY_VALUE_TYPES.map((type) => (
+          {visibleArrayValueTypes.map((type) => (
             <TypeOption
               key={type}
               type={type}
@@ -615,11 +644,15 @@ function TypeOption({
 function VariableSourceSelect({
   value,
   options,
+  disabledValues,
+  disabledReason,
   onChange,
   disabled = false,
 }: {
   value: string
   options: WorkflowVariableSource[]
+  disabledValues?: Set<string>
+  disabledReason?: string
   onChange: (value: string) => void
   disabled?: boolean
 }) {
@@ -672,7 +705,14 @@ function VariableSourceSelect({
       {open && (
         <div className="absolute right-0 top-[calc(100%+5px)] z-50 max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/98 p-1.5 shadow-2xl shadow-slate-950/70 backdrop-blur">
           {groupedOptions.map((group) => (
-            <VariableSourceGroup key={group.title} group={group} value={value} onSelect={selectSource} />
+            <VariableSourceGroup
+              key={group.title}
+              group={group}
+              value={value}
+              disabledValues={disabledValues}
+              disabledReason={disabledReason}
+              onSelect={selectSource}
+            />
           ))}
         </div>
       )}
@@ -683,10 +723,14 @@ function VariableSourceSelect({
 function VariableSourceGroup({
   group,
   value,
+  disabledValues,
+  disabledReason,
   onSelect,
 }: {
   group: { title: string; options: WorkflowVariableSource[] }
   value: string
+  disabledValues?: Set<string>
+  disabledReason?: string
   onSelect: (value: string) => void
 }) {
   const isLoopEntryGroup = group.title === '循环入口'
@@ -703,32 +747,43 @@ function VariableSourceGroup({
           </p>
         )}
       </div>
-      {group.options.map((option) => (
-        isLoopEntryGroup ? (
+      {group.options.map((option) => {
+        const optionDisabled = disabledValues?.has(option.value) ?? false
+        return isLoopEntryGroup ? (
           <LoopEntryMenuItem
             key={option.value}
             option={option}
             selected={value === option.value}
+            disabled={optionDisabled}
+            disabledReason={disabledReason}
             onSelect={() => onSelect(option.value)}
           />
         ) : (
           <button
             key={option.value}
             type="button"
+            disabled={optionDisabled}
+            title={optionDisabled ? disabledReason : undefined}
             onClick={() => onSelect(option.value)}
             className={cn(
               'aw-variable-menu-item flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-slate-300 transition-colors hover:bg-white/8 hover:text-white',
               value === option.value && 'bg-white/8 text-white',
+              optionDisabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-slate-300',
             )}
           >
             <span className="flex h-3 w-3 items-center justify-center">
               {value === option.value && <Check className="h-3 w-3 text-blue-300" />}
             </span>
-            <span className="min-w-0 flex-1 truncate">{option.outputName || option.value}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{option.outputName || option.value}</span>
+              {optionDisabled && disabledReason && (
+                <span className="mt-0.5 block truncate text-[9px] leading-3 text-amber-200/80">{disabledReason}</span>
+              )}
+            </span>
             <TypeBadge type={option.type} muted />
           </button>
         )
-      ))}
+      })}
     </div>
   )
 }
@@ -736,10 +791,14 @@ function VariableSourceGroup({
 function LoopEntryMenuItem({
   option,
   selected,
+  disabled,
+  disabledReason,
   onSelect,
 }: {
   option: WorkflowVariableSource
   selected: boolean
+  disabled?: boolean
+  disabledReason?: string
   onSelect: () => void
 }) {
   const meta = getLoopEntryOptionMeta(option)
@@ -747,11 +806,13 @@ function LoopEntryMenuItem({
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onSelect}
-      title={`${meta.title}：${option.outputName}。${meta.description}`}
+      title={disabled ? disabledReason : `${meta.title}：${option.outputName}。${meta.description}`}
       className={cn(
         'aw-variable-menu-item mt-1 flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition-colors',
         selected ? 'bg-blue-400/14 text-blue-50' : 'text-slate-300 hover:bg-white/8 hover:text-white',
+        disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-slate-300',
       )}
     >
       <span className={cn('mt-0.5 flex h-5 min-w-12 items-center justify-center rounded-full border px-1.5 text-[9px] leading-none', meta.badgeClass)}>
@@ -762,7 +823,9 @@ function LoopEntryMenuItem({
           <span className="truncate text-[11px] font-semibold leading-4">{option.outputName}</span>
           {selected && <Check className="h-3 w-3 shrink-0 text-blue-200" />}
         </span>
-        <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-500">{meta.description}</span>
+        <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-500">
+          {disabled && disabledReason ? disabledReason : meta.description}
+        </span>
       </span>
       <TypeBadge type={option.type} muted />
     </button>

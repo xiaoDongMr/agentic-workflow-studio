@@ -141,7 +141,8 @@ class LlmNodeExecutor:
                 output = {output_key: content}
         else:
             output = {output_key: content}
-        output.setdefault(reasoning_key, reasoning_content)
+        if node.config.thinkingEnabled:
+            output.setdefault(reasoning_key, reasoning_content)
         return output
 
 

@@ -106,7 +106,7 @@ export interface WorkflowNodeConfig {
   maxTokens: number
   enabled: boolean
   fallbackToHuman: boolean
-  responseMode: 'text' | 'json' | 'stream'
+  responseMode: 'text' | 'json'
   outputKey: string
   reasoningKey?: string
   inputMappings: WorkflowInputMapping[]

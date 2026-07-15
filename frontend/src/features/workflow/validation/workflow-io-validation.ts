@@ -504,7 +504,8 @@ function shouldValidateOutputDefinitions(node: WorkflowNode) {
 }
 
 function shouldValidateOutputKey(node: WorkflowNode) {
-  return node.type !== 'selector'
+  return node.type !== 'start'
+    && node.type !== 'selector'
     && node.type !== 'loop'
     && node.type !== 'loop-start'
     && node.type !== 'loop-end'

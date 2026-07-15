@@ -78,7 +78,7 @@ class WorkflowNodeConfig(BaseModel):
     maxTokens: int = 0
     enabled: bool = True
     fallbackToHuman: bool = False
-    responseMode: Literal["text", "json", "stream"] = "text"
+    responseMode: Literal["text", "json"] = "text"
     outputKey: str = "output"
     reasoningKey: str = "reasoning_content"
     inputMappings: list[WorkflowInputMapping] = Field(default_factory=list)

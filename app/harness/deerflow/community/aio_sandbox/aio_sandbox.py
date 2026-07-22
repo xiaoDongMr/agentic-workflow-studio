@@ -12,6 +12,8 @@ from deerflow.sandbox.search import GrepMatch, path_matches, should_ignore_path,
 logger = logging.getLogger(__name__)
 
 _ERROR_OBSERVATION_SIGNATURE = "'ErrorObservation' object has no attribute 'exit_code'"
+_SANDBOX_COMMAND_LOCKS: dict[str, threading.Lock] = {}
+_SANDBOX_COMMAND_LOCKS_GUARD = threading.Lock()
 
 
 class AioSandbox(Sandbox):
@@ -34,7 +36,7 @@ class AioSandbox(Sandbox):
         self._base_url = base_url
         self._client = AioSandboxClient(base_url=base_url, timeout=600)
         self._home_dir = home_dir
-        self._lock = threading.Lock()
+        self._lock = _get_sandbox_command_lock(base_url)
 
     @property
     def base_url(self) -> str:
@@ -236,3 +238,12 @@ class AioSandbox(Sandbox):
             except Exception as e:
                 logger.error(f"Failed to update file in sandbox: {e}")
                 raise
+
+
+def _get_sandbox_command_lock(base_url: str) -> threading.Lock:
+    with _SANDBOX_COMMAND_LOCKS_GUARD:
+        lock = _SANDBOX_COMMAND_LOCKS.get(base_url)
+        if lock is None:
+            lock = threading.Lock()
+            _SANDBOX_COMMAND_LOCKS[base_url] = lock
+        return lock

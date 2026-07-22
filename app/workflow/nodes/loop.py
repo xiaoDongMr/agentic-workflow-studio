@@ -30,7 +30,6 @@ class LoopNodeExecutor:
             (output.name or output.fieldPath or f"result_{index + 1}"): []
             for index, output in enumerate(output_refs)
         }
-        results: list[dict[str, Any]] = []
 
         for index, item in enumerate(items):
             body_state = build_loop_iteration_state(node, state, item, index)
@@ -47,23 +46,8 @@ class LoopNodeExecutor:
             iteration_output = collect_iteration_outputs(output_refs, body_state)
             for key, value in iteration_output.items():
                 aggregated_outputs.setdefault(key, []).append(value)
-            iteration_record: dict[str, Any] = {
-                "index": index,
-                "output": body_state.get("output", {}),
-                "collected": iteration_output,
-            }
-            if node.config.loopMode == "array":
-                iteration_record["item"] = item
-            results.append(iteration_record)
 
-        output_key = node.config.outputKey or "loop_results"
-        output: dict[str, Any] = {
-            output_key: aggregated_outputs or results,
-            "count": len(items),
-            "results": results,
-        }
-        output.update(aggregated_outputs)
-        return output
+        return aggregated_outputs
 
 
 def resolve_loop_items(node: WorkflowNode, node_input: dict[str, Any]) -> list[Any]:
@@ -87,6 +71,7 @@ def build_loop_iteration_state(
 ) -> WorkflowState:
     loop_entry = build_loop_entry_variables(node, item, index)
     return {
+        "workflow": state.get("workflow", {}),
         "input": build_loop_body_input(state, loop_entry, index),
         "variables": {
             **state.get("variables", {}),

@@ -14,6 +14,10 @@ from app.workflow.state import WorkflowState
 class WorkflowCodeSandbox(Protocol):
     def execute_command(self, command: str) -> str: ...
 
+    def read_file(self, path: str) -> str: ...
+
+    def write_file(self, path: str, content: str, append: bool = False) -> None: ...
+
 
 class CodeSandboxConfigurationError(RuntimeError):
     """Raised when a code node cannot resolve a usable workflow sandbox."""

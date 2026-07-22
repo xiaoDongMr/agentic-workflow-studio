@@ -163,13 +163,18 @@ export function CodeNodeConfigPanel({
       )
       const shouldUseBrowserOutputs = codeCapability === 'browser'
       const shouldMigrateLegacyOutput = isLegacyCodeResultOutput(node.outputs)
+      const shouldInitializeBrowserInputs = shouldUseBrowserOutputs && node.inputs.length === 0
+      const shouldInitializeBrowserOutputs = shouldUseBrowserOutputs && node.outputs.length === 0
+      const nextInputs = shouldInitializeBrowserInputs ? DEFAULT_BROWSER_CODE_NODE_INPUTS : node.inputs
       const nextOutputs = shouldUseBrowserOutputs
-        ? DEFAULT_BROWSER_CODE_NODE_OUTPUTS
+        ? shouldInitializeBrowserOutputs || shouldMigrateLegacyOutput
+          ? DEFAULT_BROWSER_CODE_NODE_OUTPUTS
+          : node.outputs
         : shouldMigrateLegacyOutput
           ? DEFAULT_CODE_NODE_OUTPUTS
           : node.outputs
       onUpdateNode({
-        inputs: shouldUseBrowserOutputs ? DEFAULT_BROWSER_CODE_NODE_INPUTS : node.inputs,
+        inputs: nextInputs,
         outputs: nextOutputs,
         config: {
           codeFilePath: workspace.entryFilePath,
@@ -415,6 +420,7 @@ export function CodeNodeConfigPanel({
           />
         ) : (
           <CodeSnippetCard
+            key={`${node.id}:snippet-card`}
             code={resolveCodeSnippet(node.config.prompt)}
             language={formatCodeLanguage(node.config.codeLanguage)}
             sandboxMessage={openState.canOpen ? '运行时会在当前调试沙箱中执行脚本片段。' : openState.message}
@@ -501,6 +507,7 @@ export function CodeNodeConfigPanel({
       ) : null}
       {snippetDrawerOpen ? (
         <CodeSnippetDrawer
+          key={`${node.id}:snippet-drawer`}
           code={resolveCodeSnippet(node.config.prompt)}
           onClose={() => setSnippetDrawerOpen(false)}
           onChange={(value) =>

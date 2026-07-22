@@ -155,6 +155,11 @@ function trialRunExecutionStateKey(nodeId: string, loopNodeId?: string) {
   return loopNodeId ? `${loopNodeId}::${nodeId}` : nodeId
 }
 
+function parseTrialRunExecutionStateKey(stateKey: string) {
+  const [loopNodeId, nodeId] = stateKey.split('::')
+  return nodeId ? { loopNodeId, nodeId } : { nodeId: stateKey }
+}
+
 function getBlockingIssues(issues: WorkflowValidationIssue[]) {
   return issues.filter((issue) => issue.severity === 'error')
 }
@@ -165,6 +170,10 @@ function formatRunValidationMessage(scopeLabel: string, issues: WorkflowValidati
     return `${scopeLabel}还有必须修复的问题，请先完善节点配置。`
   }
   return `${scopeLabel}还有 ${issues.length} 个错误需要修复，已定位到：${firstIssue.title}。`
+}
+
+function getRunErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : '运行失败，请检查 JSON、节点配置或后端服务'
 }
 
 export function WorkflowEditor({
@@ -355,6 +364,31 @@ export function WorkflowEditor({
     },
     [],
   )
+
+  const preserveGlobalTrialRunFailureSnapshot = useCallback((errorMessage: string) => {
+    const nextExecutions = Object.fromEntries(
+      Object.entries(trialRunExecutionsRef.current).map(([stateKey, execution]) => {
+        if (execution.status !== 'running') {
+          return [stateKey, execution]
+        }
+        return [stateKey, {
+          ...execution,
+          status: 'error',
+          log: execution.log || errorMessage,
+          error: execution.error ?? errorMessage,
+          summaryOutput: execution.summaryOutput && execution.summaryOutput !== '执行中…'
+            ? execution.summaryOutput
+            : '运行失败',
+        } satisfies TrialRunNodeExecution]
+      }),
+    )
+
+    replaceTrialRunExecutions(nextExecutions)
+    Object.entries(nextExecutions).forEach(([stateKey, execution]) => {
+      const scope = parseTrialRunExecutionStateKey(stateKey)
+      syncNodeTrialRunExecution(scope.nodeId, execution, scope.loopNodeId)
+    })
+  }, [replaceTrialRunExecutions, syncNodeTrialRunExecution])
 
   const applyTrialRunEdgeStyles = useCallback(() => {
     const ctx = ctxRef.current
@@ -687,10 +721,12 @@ export function WorkflowEditor({
     workflowId,
   ])
 
-  const closeDebugPanels = useCallback(() => {
+  const closeDebugPanels = useCallback((options?: { clearEdgeStyles?: boolean }) => {
     clearTrialRunTimers()
     abortTrialRunStream()
-    clearTrialRunEdgeStyles()
+    if (options?.clearEdgeStyles !== false) {
+      clearTrialRunEdgeStyles()
+    }
     setTrialRunning(false)
     setTrialRunOpen(false)
     setSingleNodeTrialOpen(false)
@@ -699,11 +735,14 @@ export function WorkflowEditor({
   const selectNodeForConfig = useCallback(
     (nodeId: string) => {
       if (nodeId) {
-        closeDebugPanels()
+        closeDebugPanels({ clearEdgeStyles: false })
       }
       onSelectNode(nodeId)
+      if (nodeId) {
+        window.requestAnimationFrame(applyTrialRunEdgeStyles)
+      }
     },
-    [closeDebugPanels, onSelectNode],
+    [applyTrialRunEdgeStyles, closeDebugPanels, onSelectNode],
   )
 
   const {
@@ -1056,13 +1095,11 @@ export function WorkflowEditor({
       if (error instanceof DOMException && error.name === 'AbortError') {
         return
       }
+      const errorMessage = getRunErrorMessage(error)
       setTrialRunning(false)
-      replaceTrialRunExecutions({})
-      clearNodeTrialRunExecution()
-      clearTrialRunEdgeStyles()
-      clearAllNodeTrialRunExecutions()
+      preserveGlobalTrialRunFailureSnapshot(errorMessage)
       setGlobalDebugValidationIssues([])
-      setGlobalDebugJsonError('运行失败，请检查 JSON、节点配置或后端服务')
+      setGlobalDebugJsonError(errorMessage)
     }
   }, [
     clearAllNodeTrialRunExecutions,
@@ -1078,6 +1115,7 @@ export function WorkflowEditor({
     globalDebugJsonMode,
     nodes,
     onSelectNode,
+    preserveGlobalTrialRunFailureSnapshot,
     replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
     validationResult,

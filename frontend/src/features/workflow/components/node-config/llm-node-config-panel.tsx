@@ -297,6 +297,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
 
       <ConfigSection title="提示词">
         <PromptEditor
+          key={`${node.id}:systemPrompt`}
           label="系统提示词"
           value={config.systemPrompt ?? config.prompt ?? ''}
           variables={textPromptVariables}
@@ -306,6 +307,7 @@ export function LlmNodeConfigPanel({ node, nodes, edges, onUpdateNode, className
           rows={6}
         />
         <PromptEditor
+          key={`${node.id}:userPrompt`}
           label="用户提示词"
           value={config.userPrompt ?? '{{input}}'}
           variables={promptVariables}
@@ -987,6 +989,7 @@ function PromptEditorCore({
   const onChangeRef = useRef(onChange)
   const variablesRef = useRef(variables)
   const initialValueRef = useRef(value)
+  const syncingExternalValueRef = useRef(false)
   const menuRef = useRef<HTMLDivElement>(null)
   useClickOutside(menuRef, menuOpen, useCallback(() => setMenuOpen(false), []))
 
@@ -1072,6 +1075,9 @@ function PromptEditorCore({
           createPromptVariableAutocomplete(() => variablesRef.current),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
+              if (syncingExternalValueRef.current) {
+                return
+              }
               onChangeRef.current(update.state.doc.toString())
             }
           }),
@@ -1091,9 +1097,14 @@ function PromptEditorCore({
     if (!view || view.state.doc.toString() === value) {
       return
     }
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-    })
+    syncingExternalValueRef.current = true
+    try {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: value },
+      })
+    } finally {
+      syncingExternalValueRef.current = false
+    }
   }, [value])
 
   const insertFromMenu = useCallback((name: string) => {

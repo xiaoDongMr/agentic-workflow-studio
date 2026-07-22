@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
   Clipboard,
   AlertTriangle,
   ImageUp,
@@ -225,13 +224,6 @@ export function EditorTrialRunPanel({
                   )}
                 />
               </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 transition-colors hover:bg-violet-500/16"
-              >
-                AI 补全
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
 
@@ -416,13 +408,6 @@ export function SingleNodeTrialPanel({
                     jsonMode ? 'translate-x-4' : 'translate-x-0.5',
                   )}
                 />
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-lg border border-violet-400/20 bg-violet-500/10 px-2 py-1.5 text-xs font-semibold text-violet-100 transition-colors hover:bg-violet-500/16"
-              >
-                AI 补全
-                <ChevronDown className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

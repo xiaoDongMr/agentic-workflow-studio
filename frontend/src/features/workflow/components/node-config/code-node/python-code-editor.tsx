@@ -58,6 +58,7 @@ export function PythonCodeEditor({
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const initialValueRef = useRef(value)
+  const syncingExternalValueRef = useRef(false)
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -137,6 +138,9 @@ export function PythonCodeEditor({
           }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
+              if (syncingExternalValueRef.current) {
+                return
+              }
               onChangeRef.current(update.state.doc.toString())
             }
           }),
@@ -156,9 +160,14 @@ export function PythonCodeEditor({
     if (!view || view.state.doc.toString() === value) {
       return
     }
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-    })
+    syncingExternalValueRef.current = true
+    try {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: value },
+      })
+    } finally {
+      syncingExternalValueRef.current = false
+    }
   }, [value])
 
   return <div ref={hostRef} className={cn('overflow-hidden bg-transparent', fill ? 'h-full' : 'min-h-0')} />

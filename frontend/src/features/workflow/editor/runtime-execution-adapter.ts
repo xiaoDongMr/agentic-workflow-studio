@@ -308,7 +308,7 @@ function mergeTimelineItem(
 }
 
 function statusFromRuntimeEvent(event: WorkflowRuntimeEvent, current?: Pick<TrialRunNodeExecution, 'status'>) {
-  if (event.type === 'node_failed') {
+  if (event.type === 'node_failed' || event.type === 'llm_failed' || event.type === 'tool_failed') {
     return 'error' as const
   }
   if (event.type === 'node_completed') {

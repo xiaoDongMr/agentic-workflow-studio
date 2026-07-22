@@ -66,19 +66,21 @@ class CodeNodeExecutor:
             return await self._run_sandbox_snippet(node, node_input, state)
         if code_source == "sandbox_file":
             return await self._run_sandbox_file(node, node_input, state)
-        return safe_exec(node.config.prompt, node_input, state.get("variables", {}))
+        return safe_exec(node.config.prompt, node_input)
 
     async def _run_sandbox_snippet(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> Any:
         code = node.config.prompt.strip()
         if not code:
             raise CodeNodeConfigurationError("脚本片段为空")
         sandbox = await resolve_bound_workflow_sandbox(app_config=self._app_config, state=state)
-        return execute_sandbox_snippet(
-            sandbox=sandbox,
-            code=code,
-            node_input=node_input,
-            variables=state.get("variables", {}),
-        )
+        try:
+            return execute_sandbox_snippet(
+                sandbox=sandbox,
+                code=code,
+                node_input=node_input,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"{format_code_node_context(node, state)}\n{exc}") from exc
 
     async def _run_sandbox_file(self, node: WorkflowNode, node_input: dict[str, Any], state: WorkflowState) -> Any:
         file_path = node.config.codeFilePath.strip()
@@ -90,13 +92,16 @@ class CodeNodeExecutor:
                 validate_browser_runtime(sandbox)
             except RuntimeError as exc:
                 raise CodeNodeConfigurationError(str(exc)) from exc
-        return execute_sandbox_file(
-            sandbox=sandbox,
-            file_path=file_path,
-            entry_function=(node.config.codeEntryFunction or "main").strip() or "main",
-            node_input=node_input,
-            variables=state.get("variables", {}),
-        )
+        entry_function = (node.config.codeEntryFunction or "main").strip() or "main"
+        try:
+            return execute_sandbox_file(
+                sandbox=sandbox,
+                file_path=file_path,
+                entry_function=entry_function,
+                node_input=node_input,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"{format_code_node_context(node, state, file_path=file_path, entry_function=entry_function)}\n{exc}") from exc
 
     @staticmethod
     def _is_non_retryable_error(error: Exception) -> bool:
@@ -115,3 +120,24 @@ class CodeNodeExecutor:
                 )
             return {name: result[name] for name in output_names}
         return {output_key(node): result}
+
+
+def format_code_node_context(
+    node: WorkflowNode,
+    state: WorkflowState,
+    *,
+    file_path: str = "",
+    entry_function: str = "",
+) -> str:
+    workflow_id = str(state.get("workflow", {}).get("id") or "")
+    details = [
+        f"编码节点执行失败：{node.title} ({node.id})",
+        f"workflowId: {workflow_id or '<missing>'}",
+        f"codeSource: {node.config.codeSource}",
+        f"codeCapability: {node.config.codeCapability}",
+    ]
+    if file_path:
+        details.append(f"codeFilePath: {file_path}")
+    if entry_function:
+        details.append(f"codeEntryFunction: {entry_function}")
+    return "\n".join(details)

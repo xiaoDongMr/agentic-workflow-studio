@@ -190,6 +190,7 @@ function App() {
                     {selectedNode && (
                       <div className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[min(480px,calc(100%_-_24px))] 2xl:w-[min(540px,calc(100%_-_24px))]">
                         <NodeConfigPanel
+                          key={selectedNode.id}
                           className="h-full"
                           node={selectedNode}
                           nodes={allWorkflowNodes}

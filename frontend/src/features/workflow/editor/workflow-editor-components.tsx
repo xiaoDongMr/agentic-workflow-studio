@@ -966,12 +966,18 @@ function formatJsonValue(value: unknown) {
 
 export function EditorBottomBar({
   trialRunOpen,
+  hasExecutionRecords,
+  clearExecutionRecordsDisabled,
   onAddNode,
   onToggleTrialRun,
+  onClearExecutionRecords,
 }: {
   trialRunOpen: boolean
+  hasExecutionRecords: boolean
+  clearExecutionRecordsDisabled: boolean
   onAddNode: () => void
   onToggleTrialRun: () => void
+  onClearExecutionRecords: () => void
 }) {
   const { history } = useClientContext()
   const tools = usePlaygroundTools()
@@ -1030,6 +1036,24 @@ export function EditorBottomBar({
             <Plus className="h-4 w-4" />
             添加节点
           </button>
+
+          {hasExecutionRecords && (
+            <button
+              type="button"
+              onClick={onClearExecutionRecords}
+              disabled={clearExecutionRecordsDisabled}
+              className={cn(
+                'flex items-center gap-2 rounded-2xl border px-5 py-2.5 text-sm font-semibold transition-colors',
+                clearExecutionRecordsDisabled
+                  ? 'cursor-not-allowed border-white/8 bg-white/[0.03] text-slate-500'
+                  : 'border-rose-300/18 bg-rose-500/[0.08] text-rose-100 hover:border-rose-300/30 hover:bg-rose-500/[0.14] hover:text-white',
+              )}
+              title={clearExecutionRecordsDisabled ? '运行中暂不能清除执行记录' : '清除节点下方的执行记录'}
+            >
+              <Trash2 className="h-4 w-4" />
+              清除执行记录
+            </button>
+          )}
 
           <button
             type="button"

@@ -512,6 +512,13 @@ export function WorkflowEditor({
     })
   }, [])
 
+  const clearTrialRunExecutionRecords = useCallback(() => {
+    replaceTrialRunExecutions({})
+    clearNodeExecutionPanelExpansion()
+    clearAllNodeTrialRunExecutions()
+    clearTrialRunEdgeStyles()
+  }, [clearAllNodeTrialRunExecutions, clearTrialRunEdgeStyles, replaceTrialRunExecutions])
+
   const handleEditorRef = useCallback((ctx: FreeLayoutPluginContext | null) => {
     ctxRef.current = ctx
   }, [])
@@ -538,9 +545,6 @@ export function WorkflowEditor({
       ? syncCombinedJsonWithFields(cached.combinedJson, fields)
       : JSON.stringify(buildPayloadFromFieldEntries(fields), null, 2)
 
-    clearTrialRunTimers()
-    abortTrialRunStream()
-    clearTrialRunEdgeStyles()
     onSelectNode('')
     setTrialRunOpen(false)
     setSingleNodeTrialNodeId(nodeId)
@@ -549,24 +553,13 @@ export function WorkflowEditor({
     setSingleNodeJsonMode(cached?.jsonMode ?? false)
     setSingleNodeJsonError('')
     setSingleNodeValidationIssues([])
-    const nextExecutions = { ...trialRunExecutionsRef.current }
-    delete nextExecutions[nodeId]
-    replaceTrialRunExecutions(nextExecutions)
-    clearNodeTrialRunExecution({ runId: activeTrialRunIdRef.current, nodeId })
-    clearNodeExecutionPanelExpansion(nodeId)
-    syncNodeTrialRunExecution(nodeId, undefined)
     setSingleNodeTrialOpen(true)
   }, [
-    abortTrialRunStream,
-    clearTrialRunEdgeStyles,
-    clearTrialRunTimers,
     globalDebugCombinedJson,
     globalDebugFields,
     globalDebugJsonMode,
     nodes,
     onSelectNode,
-    replaceTrialRunExecutions,
-    syncNodeTrialRunExecution,
   ])
 
   useEffect(() => {
@@ -619,11 +612,7 @@ export function WorkflowEditor({
     abortTrialRunStream()
     setTrialRunOpen(false)
     setGlobalDebugValidationIssues([])
-    replaceTrialRunExecutions({})
-    clearNodeTrialRunExecution()
-    clearNodeExecutionPanelExpansion()
-    clearTrialRunEdgeStyles()
-    clearAllNodeTrialRunExecutions()
+    clearTrialRunExecutionRecords()
 
     const ctx = ctxRef.current
     const [latestNodes] = ctx ? fromFlowgramJSON(ctx.document.toJSON()) : [nodes]
@@ -708,34 +697,26 @@ export function WorkflowEditor({
   }, [
     abortTrialRunStream,
     applyRuntimeEventToNode,
-    clearAllNodeTrialRunExecutions,
-    clearTrialRunEdgeStyles,
+    clearTrialRunExecutionRecords,
     clearTrialRunTimers,
     enqueueTrialRunExecution,
     globalDebugCombinedJson,
     globalDebugFields,
     globalDebugJsonMode,
     nodes,
-    replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
     workflowId,
   ])
 
-  const closeDebugPanels = useCallback((options?: { clearEdgeStyles?: boolean }) => {
-    clearTrialRunTimers()
-    abortTrialRunStream()
-    if (options?.clearEdgeStyles !== false) {
-      clearTrialRunEdgeStyles()
-    }
-    setTrialRunning(false)
+  const closeDebugPanels = useCallback(() => {
     setTrialRunOpen(false)
     setSingleNodeTrialOpen(false)
-  }, [abortTrialRunStream, clearTrialRunEdgeStyles, clearTrialRunTimers])
+  }, [])
 
   const selectNodeForConfig = useCallback(
     (nodeId: string) => {
       if (nodeId) {
-        closeDebugPanels({ clearEdgeStyles: false })
+        closeDebugPanels()
       }
       onSelectNode(nodeId)
       if (nodeId) {
@@ -1042,13 +1023,9 @@ export function WorkflowEditor({
     setActiveTrialRunId(runId)
     clearTrialRunTimers()
     abortTrialRunStream()
-    clearTrialRunEdgeStyles()
     setTrialRunOpen(true)
     setSingleNodeTrialOpen(false)
-    replaceTrialRunExecutions({})
-    clearNodeTrialRunExecution()
-    clearNodeExecutionPanelExpansion()
-    clearAllNodeTrialRunExecutions()
+    clearTrialRunExecutionRecords()
 
     try {
       const abortController = new AbortController()
@@ -1102,9 +1079,8 @@ export function WorkflowEditor({
       setGlobalDebugJsonError(errorMessage)
     }
   }, [
-    clearAllNodeTrialRunExecutions,
+    clearTrialRunExecutionRecords,
     clearTrialRunTimers,
-    clearTrialRunEdgeStyles,
     abortTrialRunStream,
     applyGlobalTrialRunEdgeEvent,
     applyRuntimeEventToNode,
@@ -1116,23 +1092,14 @@ export function WorkflowEditor({
     nodes,
     onSelectNode,
     preserveGlobalTrialRunFailureSnapshot,
-    replaceTrialRunExecutions,
     syncNodeTrialRunExecution,
     validationResult,
     workflowId,
   ])
 
   const closeTrialRun = useCallback(() => {
-    clearTrialRunTimers()
-    abortTrialRunStream()
-    setTrialRunning(false)
     setTrialRunOpen(false)
-    replaceTrialRunExecutions({})
-    clearNodeTrialRunExecution()
-    clearNodeExecutionPanelExpansion()
-    clearTrialRunEdgeStyles()
-    clearAllNodeTrialRunExecutions()
-  }, [abortTrialRunStream, clearAllNodeTrialRunExecutions, clearTrialRunEdgeStyles, clearTrialRunTimers, replaceTrialRunExecutions])
+  }, [])
 
   const updateGlobalDebugField = useCallback((fieldName: string, value: string) => {
     setGlobalDebugFields((prev) =>
@@ -1315,11 +1282,8 @@ export function WorkflowEditor({
   }, [saveSingleNodeTrialCache, singleNodeCombinedJson, singleNodeTrialFields, singleNodeTrialNodeId])
 
   const closeSingleNodeTrial = useCallback(() => {
-    abortTrialRunStream()
-    setTrialRunning(false)
     setSingleNodeTrialOpen(false)
-    setSingleNodeValidationIssues([])
-  }, [abortTrialRunStream])
+  }, [])
 
   const startSingleNodeTrialRun = useCallback(() => {
     if (!singleNodeTrialNodeId) {
@@ -1416,7 +1380,10 @@ export function WorkflowEditor({
           />
           <EditorBottomBar
             trialRunOpen={trialRunOpen}
+            hasExecutionRecords={Object.keys(trialRunExecutions).length > 0}
+            clearExecutionRecordsDisabled={trialRunning}
             onAddNode={openBottomNodePanel}
+            onClearExecutionRecords={clearTrialRunExecutionRecords}
             onToggleTrialRun={() => {
               setSingleNodeTrialOpen(false)
               setGlobalDebugFields((prev) => {

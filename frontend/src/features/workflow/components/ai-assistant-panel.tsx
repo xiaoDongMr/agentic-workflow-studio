@@ -1,5 +1,16 @@
 import { type HTMLAttributes, type KeyboardEvent, useCallback, useEffect, useRef } from 'react'
-import { ChevronsUp, Coins, FileText, History, PanelLeftClose, RefreshCw, SendHorizontal, Sparkles, Square } from 'lucide-react'
+import {
+  Bot,
+  ChevronsUp,
+  Coins,
+  FileText,
+  History,
+  PanelLeftClose,
+  RefreshCw,
+  SendHorizontal,
+  Sparkles,
+  Square,
+} from 'lucide-react'
 
 import { useAssistantThreadStream } from '@/features/workflow/hooks/use-assistant-thread-stream'
 import { cn } from '@/lib/utils'
@@ -16,11 +27,10 @@ interface AiAssistantPanelProps extends HTMLAttributes<HTMLDivElement> {
   onCollapse?: () => void
 }
 
-const SUGGESTED_PROMPTS = [
-  '帮我生成一个订单查询工作流',
-  '给当前画布补一套客服投诉处理链路',
-  '检查这个工作流还缺哪些节点',
-  '把流程改成先校验权限再调用工具',
+const ASSISTANT_CAPABILITIES = [
+  { label: '生成节点', description: '按目标补齐流程骨架' },
+  { label: '优化链路', description: '调整节点顺序与依赖' },
+  { label: '检查缺口', description: '发现输入输出风险' },
 ]
 
 export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistantPanelProps) {
@@ -132,25 +142,44 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
   return (
     <section
       className={cn(
-        'relative flex h-full flex-col overflow-hidden rounded-[28px] border border-white/8 bg-slate-950/92 shadow-[0_20px_60px_rgba(2,6,23,0.46)] backdrop-blur',
+        'relative flex h-full flex-col overflow-hidden rounded-[30px] border border-white/10 bg-slate-950/88 shadow-[0_24px_70px_rgba(2,6,23,0.5)] backdrop-blur-xl',
         className,
       )}
       {...props}
     >
-      <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <p className="text-base font-semibold text-white">AI 助手</p>
-          <span className="text-slate-500">·</span>
-          <p className="text-xs font-medium text-slate-300">
-            {isStreaming ? '统一流式收口中' : '已连接 LangGraph 兼容接口'}
-          </p>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_12%,rgba(96,165,250,0.24),transparent_34%),radial-gradient(circle_at_84%_8%,rgba(168,85,247,0.16),transparent_30%)]" />
+
+      <div className="relative flex items-start justify-between gap-4 border-b border-white/8 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-500/12 text-blue-100 shadow-[0_10px_30px_rgba(59,130,246,0.18)]">
+            <Bot className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-base font-semibold text-white">工作流 AI 助手</p>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium',
+                  isStreaming
+                    ? 'border-blue-300/25 bg-blue-500/12 text-blue-100'
+                    : 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100',
+                )}
+              >
+                <span className={cn('h-1.5 w-1.5 rounded-full', isStreaming ? 'animate-pulse bg-blue-300' : 'bg-emerald-300')} />
+                {isStreaming ? '生成中' : '在线'}
+              </span>
+            </div>
+            <p className="mt-1 line-clamp-1 text-xs text-slate-400">
+              描述目标，我会辅助生成、补全和检查画布节点。
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={openHistoryDrawer}
             className={cn(
-              'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-slate-400 transition-colors hover:bg-white/6 hover:text-white',
+              'flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-xs text-slate-400 transition-colors hover:bg-white/8 hover:text-white',
               historyDrawerOpen && 'bg-white/8 text-white',
             )}
             aria-label="打开历史会话"
@@ -161,7 +190,7 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
           <button
             type="button"
             onClick={resetConversation}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/6 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/8 hover:text-white"
             aria-label="新建会话"
           >
             <RefreshCw className="h-4 w-4" />
@@ -169,7 +198,7 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
           <button
             type="button"
             onClick={onCollapse}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/6 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/8 hover:text-white"
             aria-label="收起 AI 助手"
           >
             <PanelLeftClose className="h-4 w-4" />
@@ -193,8 +222,8 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
           onSelectThread={selectThread}
         />
 
-        <div className="min-h-0 flex flex-1 flex-col">
-          <div className="border-b border-white/8 px-4 py-3">
+        <div className="relative min-h-0 flex flex-1 flex-col">
+          <div className="border-b border-white/8 bg-slate-950/35 px-4 py-3">
             <div className="line-clamp-1 text-sm font-medium text-white">
               {activeThread ? getThreadSummaryTitle(activeThread) : currentThreadTitle || '当前会话'}
             </div>
@@ -223,32 +252,26 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
 
               {messages.length === 0 && (
                 <>
-                  <div className="flex items-start gap-3 rounded-[24px] border border-blue-400/15 bg-blue-500/8 p-4">
-                    <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-400/20 bg-blue-500/10 text-blue-200">
-                      <Sparkles className="h-4 w-4" />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-white">欢迎使用工作流 AI 助手</div>
-                      <div className="text-sm leading-6 text-slate-300">
-                        我会把 LangGraph 的流式消息统一收口后再渲染，支持展示思考过程、工具调用、工具结果关联、澄清问题和子任务执行。
+                  <div className="overflow-hidden rounded-[24px] border border-blue-300/16 bg-gradient-to-br from-blue-500/14 via-slate-900/70 to-violet-500/10 p-4 shadow-[0_18px_44px_rgba(2,6,23,0.24)]">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-400/12 text-blue-100">
+                        <Sparkles className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-sm font-semibold text-white">告诉我业务目标，我来整理成可执行工作流</div>
+                        <div className="text-sm leading-6 text-slate-300">
+                          支持从零生成节点、补全当前画布、检查输入输出映射，并在需要时先向你确认关键约束。
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-xs leading-5 text-slate-400">
-                    试试输入「帮我生成一个订单查询工作流」或「给当前画布补一套客服投诉处理链路」。
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {SUGGESTED_PROMPTS.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => void sendMessage(prompt)}
-                        disabled={isStreaming || historyLoading}
-                        className="rounded-2xl border border-white/8 bg-white/4 px-3 py-2 text-left text-xs leading-5 text-slate-300 transition-colors hover:border-blue-400/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      {ASSISTANT_CAPABILITIES.map((item) => (
+                        <div key={item.label} className="rounded-2xl border border-white/8 bg-slate-950/36 px-3 py-2">
+                          <div className="text-xs font-medium text-slate-100">{item.label}</div>
+                          <div className="mt-1 text-[11px] leading-4 text-slate-500">{item.description}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </>
               )}
@@ -264,14 +287,14 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
               />
 
               {isStreaming && !hasAssistantOutput && (
-                <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-xs text-slate-300">
-                  已发送到后端，正在等待首个流式响应片段...
+                <div className="rounded-2xl border border-blue-300/18 bg-blue-500/8 px-4 py-3 text-xs text-blue-100">
+                  已收到请求，正在分析工作流结构...
                 </div>
               )}
             </div>
           </div>
 
-          <div className="border-t border-white/8 px-4 py-4">
+          <div className="border-t border-white/8 bg-slate-950/42 px-4 py-4">
             {(artifactPaths.length > 0 || tokenUsage.totalTokens > 0) && (
               <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
                 {tokenUsage.totalTokens > 0 && (
@@ -299,21 +322,21 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
                 )}
               </div>
             )}
-            <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-slate-950/85 px-4 py-3">
+            <div className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-slate-950/86 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors focus-within:border-blue-300/35">
               <input
                 type="text"
                 value={inputValue}
                 onChange={(event) => setInputValue(event.target.value)}
                 onKeyDown={handleInputKeyDown}
-                placeholder="在这里输入你的提示语，可继续回答澄清问题"
-                className="flex-1 bg-transparent text-xs text-slate-300 outline-none placeholder:text-slate-500"
+                placeholder="描述要生成或调整的工作流..."
+                className="flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-500"
               />
               <button
                 type="button"
                 onClick={() => (isStreaming ? stopStreaming() : void sendMessage())}
                 disabled={(!inputValue.trim() && !isStreaming) || historyLoading}
                 className={cn(
-                  'flex h-10 w-10 items-center justify-center rounded-xl text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-700',
+                  'flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-[0_10px_24px_rgba(59,130,246,0.2)] transition-colors disabled:cursor-not-allowed disabled:bg-slate-700 disabled:shadow-none',
                   isStreaming ? 'bg-rose-500 hover:bg-rose-400' : 'bg-blue-500 hover:bg-blue-400',
                 )}
                 aria-label={isStreaming ? '停止生成' : '发送'}
@@ -330,7 +353,7 @@ export function AiAssistantPanel({ className, onCollapse, ...props }: AiAssistan
                   (historyLoading
                     ? '正在加载历史消息'
                     : isStreaming
-                      ? '正在通过 langgraph-sdk/react useStream 接收结构化流式消息'
+                      ? '正在生成工作流建议'
                       : '等待输入')}
               </span>
             </div>

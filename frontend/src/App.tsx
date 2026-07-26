@@ -166,7 +166,7 @@ function App() {
 
                     <AiAssistantPanel
                       className={cn(
-                        'absolute bottom-3 left-3 top-3 z-20 hidden w-[min(680px,calc(100%_-_400px))] xl:flex 2xl:w-[720px]',
+                        'absolute bottom-4 left-4 top-4 z-20 hidden w-[min(560px,calc(100%_-_420px))] xl:flex 2xl:w-[600px]',
                         aiAssistantCollapsed && 'pointer-events-none opacity-0',
                       )}
                       onCollapse={() => setAiAssistantCollapsed(true)}

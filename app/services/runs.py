@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import uuid
 from dataclasses import dataclass
 from collections.abc import Mapping
@@ -13,12 +12,14 @@ from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
+from app.agent_platform.definition import AgentDefinition
+from app.agent_platform.registry import get_agent_registry
+from app.agent_platform.runtime_factory import AgentRuntimeFactory
 from app.schemas.run import RunCreateRequest
 from deerflow.runtime import END_SENTINEL, HEARTBEAT_SENTINEL, ConflictError, DisconnectMode, RunContext, RunManager, RunRecord, RunStatus, StreamBridge, UnsupportedStrategyError, run_agent
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_ASSISTANT_ID = "lead_agent"
 _CONTEXT_CONFIGURABLE_KEYS: frozenset[str] = frozenset(
     {
         "model_name",
@@ -106,10 +107,12 @@ def _inject_authenticated_user_context(config: dict[str, Any], request: Request)
         runtime_context["user_id"] = str(user_id)
 
 
-def _resolve_agent_factory():
-    from deerflow.agents.lead_agent.agent import make_lead_agent
-
-    return make_lead_agent
+def _resolve_agent(
+    assistant_id: str | None,
+) -> tuple[AgentDefinition, Any]:
+    definition = get_agent_registry().resolve(assistant_id)
+    factory = AgentRuntimeFactory().create_factory(definition)
+    return definition, factory
 
 
 def _build_run_config(
@@ -117,7 +120,7 @@ def _build_run_config(
     request_config: dict[str, Any] | None,
     metadata: dict[str, Any] | None,
     *,
-    assistant_id: str | None = None,
+    agent_definition: AgentDefinition | None = None,
 ) -> dict[str, Any]:
     config: dict[str, Any] = {"recursion_limit": 100}
 
@@ -141,11 +144,7 @@ def _build_run_config(
     else:
         config["configurable"] = {"thread_id": thread_id}
 
-    if assistant_id and assistant_id != _DEFAULT_ASSISTANT_ID:
-        normalized = assistant_id.strip().lower().replace("_", "-")
-        if not normalized or not re.fullmatch(r"[a-z0-9-]+", normalized):
-            raise ValueError(f"Invalid assistant_id {assistant_id!r}: must contain only letters, digits, and hyphens after normalization.")
-
+    if agent_definition is not None and not agent_definition.builtin:
         if "configurable" in config:
             target = config["configurable"]
         elif "context" in config:
@@ -154,7 +153,9 @@ def _build_run_config(
             target = config.setdefault("configurable", {})
 
         if isinstance(target, dict) and "agent_name" not in target:
-            target["agent_name"] = normalized
+            target["agent_name"] = str(
+                agent_definition.metadata.get("agent_name") or agent_definition.id
+            )
 
     if metadata:
         config.setdefault("metadata", {}).update(metadata)
@@ -232,9 +233,14 @@ class RunService:
             logger.warning("Failed to sync thread metadata for %s", thread_id, exc_info=True)
 
     def _create_run_task(self, record: RunRecord, body: RunCreateRequest, thread_id: str, request: Request) -> asyncio.Task:
-        agent_factory = _resolve_agent_factory()
+        agent_definition, agent_factory = _resolve_agent(body.assistant_id)
         graph_input = _normalize_input(body.input)
-        config = _build_run_config(thread_id, body.config, body.metadata, assistant_id=body.assistant_id)
+        config = _build_run_config(
+            thread_id,
+            body.config,
+            body.metadata,
+            agent_definition=agent_definition,
+        )
         _merge_run_context_overrides(config, body.context)
         _inject_authenticated_user_context(config, request)
         stream_modes = _normalize_stream_modes(body.stream_mode)

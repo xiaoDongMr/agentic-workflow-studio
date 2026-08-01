@@ -112,40 +112,44 @@ export function ThreadHistoryDrawer({
         type="button"
         aria-label="关闭历史会话"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-slate-950/64 backdrop-blur-[3px]"
       />
-      <aside className="absolute top-0 bottom-0 left-0 flex w-[min(340px,88%)] flex-col border-r border-white/10 bg-slate-950/95 shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <History className="h-4 w-4 text-blue-200" />
-              历史会话
+      <aside className="absolute bottom-0 left-0 top-0 flex w-[min(360px,90%)] flex-col border-r border-white/10 bg-slate-950/98 shadow-[24px_0_80px_rgba(2,6,23,0.52)]">
+        <div className="flex items-center justify-between gap-3 border-b border-white/8 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_42%),rgba(255,255,255,0.015)] px-4 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-sky-300/16 bg-sky-400/[0.08] text-sky-200">
+              <History className="h-4 w-4" />
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">选择一个会话后自动回到对话区</p>
+            <div>
+              <div className="text-sm font-semibold text-white">
+                历史会话
+              </div>
+              <p className="mt-0.5 text-[10px] text-slate-500">继续之前的工作流规划</p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/8 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-white/8 hover:bg-white/[0.05] hover:text-white"
             aria-label="关闭历史会话"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="space-y-3 border-b border-white/8 px-4 py-3">
+        <div className="space-y-2.5 border-b border-white/8 px-4 py-3.5">
           <button
             type="button"
             onClick={handleNewThread}
             disabled={isStreaming}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-left text-xs font-medium text-slate-200 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-blue-300/14 bg-blue-400/[0.07] px-3 text-left text-xs font-medium text-blue-100 transition hover:border-blue-300/24 hover:bg-blue-400/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             新建会话
           </button>
 
           {threads.length > 0 && (
-            <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-slate-950/75 px-3 py-2 text-xs text-slate-400 focus-within:border-blue-300/35">
+            <label className="flex h-9 items-center gap-2 rounded-xl border border-white/8 bg-slate-950/72 px-3 text-xs text-slate-400 transition focus-within:border-blue-300/28">
               <Search className="h-3.5 w-3.5 shrink-0" />
               <input
                 value={searchValue}
@@ -167,7 +171,7 @@ export function ThreadHistoryDrawer({
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(15,23,42,0.16),transparent_28%)] px-3 py-3">
           <div className="space-y-2">
             {threadsLoading && threads.length === 0 && (
               <div className="rounded-xl border border-white/8 bg-white/4 px-3 py-3 text-[11px] text-slate-400">
@@ -200,10 +204,10 @@ export function ThreadHistoryDrawer({
                     onClick={() => handleSelectThread(item.thread_id)}
                     disabled={isStreaming || historyLoading}
                     className={cn(
-                      'w-full rounded-2xl border px-3 py-3 pr-10 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                      'w-full rounded-2xl border px-3 py-3 pr-10 text-left transition disabled:cursor-not-allowed disabled:opacity-60',
                       active
-                        ? 'border-blue-400/30 bg-blue-500/10 text-white shadow-[0_10px_28px_rgba(59,130,246,0.12)]'
-                        : 'border-white/8 bg-white/4 text-slate-300 hover:border-white/12 hover:bg-white/8',
+                        ? 'border-sky-300/24 bg-[linear-gradient(135deg,rgba(14,165,233,0.1),rgba(59,130,246,0.055))] text-white shadow-[0_10px_28px_rgba(14,165,233,0.09)]'
+                        : 'border-white/8 bg-white/[0.025] text-slate-300 hover:border-white/12 hover:bg-white/[0.05]',
                     )}
                   >
                     <div className="line-clamp-2 text-xs font-medium leading-5">{getThreadSummaryTitle(item)}</div>

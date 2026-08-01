@@ -22,6 +22,7 @@ import {
 } from '@/features/workflow/utils/workflow-document'
 import { getErrorMessage } from '@/features/workflow/utils/error-message'
 import { useWorkflowStore } from '@/store/workflow-store'
+import type { WorkflowDocument } from '@/types/workflow'
 
 type WorkflowSaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -273,6 +274,13 @@ export function useWorkflowWorkspace() {
   const handleSaveWorkflow = useCallback(() => {
     void saveCurrentWorkflowDraft()
   }, [saveCurrentWorkflowDraft])
+
+  const applyAssistantWorkflow = useCallback((nextWorkflow: WorkflowDocument) => {
+    setWorkflow(nextWorkflow)
+    upsertLocalDraft(nextWorkflow)
+    setSelectedNodeId('')
+    setCanvasApi(null)
+  }, [setSelectedNodeId, setWorkflow, upsertLocalDraft])
 
   const restoreSavedWorkflowVersion = useCallback(
     async (versionId: string) => {
@@ -668,6 +676,7 @@ export function useWorkflowWorkspace() {
     versionsError,
     versionsLoading,
     cancelPendingLeave,
+    applyAssistantWorkflow,
     changeActiveView,
     closeWorkflowEditor,
     createWorkflow,

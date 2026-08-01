@@ -127,6 +127,7 @@ interface WorkflowEditorProps {
   sandbox?: SandboxSummary | null
   selectedNodeId: string
   onSelectNode: (nodeId: string) => void
+  onGraphChange?: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void
   onReady?: (api: WorkflowCanvasApi) => void
   className?: string
 }
@@ -183,6 +184,7 @@ export function WorkflowEditor({
   sandbox,
   selectedNodeId,
   onSelectNode,
+  onGraphChange,
   onReady,
   className,
 }: WorkflowEditorProps) {
@@ -192,8 +194,13 @@ export function WorkflowEditor({
   const [initialData] = useState<WorkflowJSON>(() => toFlowgramJSON(...sanitizeWorkflowGraph(nodes, edges)))
   const setWorkflowGraph = useWorkflowStore((state) => state.setWorkflowGraph)
   const commitSanitizedWorkflowGraph = useCallback((nextNodes: WorkflowNode[], nextEdges: WorkflowEdge[]) => {
-    setWorkflowGraph(...sanitizeWorkflowGraph(nextNodes, nextEdges))
-  }, [setWorkflowGraph])
+    const [sanitizedNodes, sanitizedEdges] = sanitizeWorkflowGraph(nextNodes, nextEdges)
+    if (onGraphChange) {
+      onGraphChange(sanitizedNodes, sanitizedEdges)
+      return
+    }
+    setWorkflowGraph(sanitizedNodes, sanitizedEdges)
+  }, [onGraphChange, setWorkflowGraph])
   const [trialRunOpen, setTrialRunOpen] = useState(false)
   const [globalDebugFields, setGlobalDebugFields] = useState<GlobalDebugFieldValue[]>([
     {
@@ -987,8 +994,8 @@ export function WorkflowEditor({
     if (isWorkflowGraphEqual(nodes, edges, sanitizedNodes, sanitizedEdges)) {
       return
     }
-    setWorkflowGraph(sanitizedNodes, sanitizedEdges)
-  }, [edges, nodes, setWorkflowGraph])
+    commitSanitizedWorkflowGraph(sanitizedNodes, sanitizedEdges)
+  }, [commitSanitizedWorkflowGraph, edges, nodes])
 
   useEffect(() => {
     return () => {

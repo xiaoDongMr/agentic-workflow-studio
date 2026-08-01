@@ -18,6 +18,7 @@ interface WorkflowCanvasProps {
   sandbox?: SandboxSummary | null
   selectedNodeId: string
   onSelectNode: (nodeId: string) => void
+  onGraphChange?: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void
   onReady?: (api: import('@/features/workflow/editor/workflow-editor').WorkflowCanvasApi) => void
   className?: string
 }

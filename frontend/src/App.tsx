@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   LoaderCircle,
   PanelLeftOpen,
@@ -18,10 +18,13 @@ import { useWorkflowWorkspace } from '@/features/workflow/hooks/use-workflow-wor
 import { validateWorkflowGraph } from '@/features/workflow/validation/workflow-validation-service'
 import { SandboxPoolPage } from '@/features/sandbox/sandbox-pool-page'
 import { cn } from '@/lib/utils'
+import type { WorkflowDocument } from '@/types/workflow'
 
 function App() {
   const [aiAssistantCollapsed, setAiAssistantCollapsed] = useState(false)
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)
+  const [assistantPreviewWorkflow, setAssistantPreviewWorkflow] = useState<WorkflowDocument | null>(null)
+  const [assistantPreviewRevision, setAssistantPreviewRevision] = useState(0)
   const workspace = useWorkflowWorkspace()
   const {
     activeView,
@@ -54,6 +57,7 @@ function App() {
     workflowVersions,
     versionsError,
     versionsLoading,
+    applyAssistantWorkflow,
     cancelPendingLeave,
     changeActiveView,
     closeWorkflowEditor,
@@ -79,13 +83,30 @@ function App() {
     updateSelectedNode,
     updateWorkflowMetadata,
   } = workspace
+  const displayedWorkflow = assistantPreviewWorkflow ?? workflow
+
+  const handleAssistantPreviewWorkflow = useCallback((nextWorkflow: WorkflowDocument | null) => {
+    setAssistantPreviewWorkflow(nextWorkflow)
+    setAssistantPreviewRevision((current) => current + 1)
+  }, [])
+
+  const handleAssistantApplyWorkflow = useCallback((nextWorkflow: WorkflowDocument) => {
+    applyAssistantWorkflow(nextWorkflow)
+    setAssistantPreviewWorkflow(null)
+    setAssistantPreviewRevision((current) => current + 1)
+  }, [applyAssistantWorkflow])
+
+  useEffect(() => {
+    setAssistantPreviewWorkflow(null)
+    setAssistantPreviewRevision((current) => current + 1)
+  }, [workflow.id])
   const workflowSandboxSession = useWorkflowSandboxSession({
     enabled: workflowEditorOpen && currentWorkflowSaved,
     workflowId: workflow.id,
   })
   const validationResult = useMemo(
-    () => validateWorkflowGraph(workflow.nodes, workflow.edges),
-    [workflow.edges, workflow.nodes],
+    () => validateWorkflowGraph(displayedWorkflow.nodes, displayedWorkflow.edges),
+    [displayedWorkflow.edges, displayedWorkflow.nodes],
   )
 
   return (
@@ -145,14 +166,21 @@ function App() {
                   <div className="relative min-h-0 flex-1">
                     {draftHydrated ? (
                       <WorkflowCanvas
-                        key={`${workflow.id}:${workflow.version}`}
+                        key={`${workflow.id}:${workflow.version}:${assistantPreviewRevision}`}
                         className="h-full"
                         workflowId={workflow.id}
-                        nodes={workflow.nodes}
-                        edges={workflow.edges}
+                        nodes={displayedWorkflow.nodes}
+                        edges={displayedWorkflow.edges}
                         sandbox={workflowSandboxSession.sandbox}
                         selectedNodeId={selectedNodeId}
                         onSelectNode={setSelectedNodeId}
+                        onGraphChange={assistantPreviewWorkflow
+                          ? (nodes, edges) => {
+                              setAssistantPreviewWorkflow((current) => current
+                                ? { ...current, nodes, edges }
+                                : current)
+                            }
+                          : undefined}
                         onReady={setCanvasApi}
                       />
                     ) : (
@@ -169,6 +197,10 @@ function App() {
                         'absolute bottom-4 left-4 top-4 z-20 hidden w-[min(560px,calc(100%_-_420px))] xl:flex 2xl:w-[600px]',
                         aiAssistantCollapsed && 'pointer-events-none opacity-0',
                       )}
+                      workflow={displayedWorkflow}
+                      selectedNodeId={selectedNodeId}
+                      onPreviewWorkflow={handleAssistantPreviewWorkflow}
+                      onApplyWorkflow={handleAssistantApplyWorkflow}
                       onCollapse={() => setAiAssistantCollapsed(true)}
                     />
 
@@ -187,7 +219,7 @@ function App() {
                       </button>
                     )}
 
-                    {selectedNode && (
+                    {selectedNode && !assistantPreviewWorkflow && (
                       <div className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[min(480px,calc(100%_-_24px))] 2xl:w-[min(540px,calc(100%_-_24px))]">
                         <NodeConfigPanel
                           key={selectedNode.id}

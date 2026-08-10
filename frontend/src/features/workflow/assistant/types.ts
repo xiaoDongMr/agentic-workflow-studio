@@ -8,12 +8,15 @@ export type WorkflowAssistantClientEvent =
   | 'cancel_plan'
   | 'stage_validated'
   | 'validation_failed'
+  | 'sandbox_bound'
 
 export interface WorkflowAssistantStreamRequest {
   threadId?: string
   message: string
   workflow: WorkflowDocument
   selectedNodeId?: string
+  sandboxId?: string
+  sandboxBindingStatus?: 'unbound' | 'bound' | 'unavailable'
   clientEvent?: WorkflowAssistantClientEvent
   validation?: WorkflowValidationResult
 }
@@ -57,6 +60,13 @@ export interface WorkflowClarificationAnswer {
   other?: string
 }
 
+export interface WorkflowSandboxRequirement {
+  type: 'workflow.sandboxRequired'
+  workflowId: string
+  reason: string
+  requestedCapabilities: string[]
+}
+
 export interface WorkflowPatchStage {
   stageId: string
   sequence: number
@@ -71,6 +81,7 @@ export type WorkflowPatchOperation =
   | { op: 'delete_node'; nodeId: string }
   | { op: 'add_edge'; edge: WorkflowEdge }
   | { op: 'delete_edge'; edgeId: string }
+  | { op: 'update_metadata'; name?: string; description?: string }
   | { op: 'replace_workflow'; workflow: WorkflowDocument }
 
 export interface WorkflowPatch {

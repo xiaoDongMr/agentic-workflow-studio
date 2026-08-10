@@ -78,6 +78,32 @@ class WorkflowPatchTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "edge source does not exist"):
             apply_workflow_patch(workflow, patch)
 
+    def test_update_metadata_preserves_graph(self) -> None:
+        workflow = WorkflowDocument(
+            id="workflow-1",
+            name="Old name",
+            description="Old description",
+            nodes=[],
+            edges=[],
+        )
+        patch = build_workflow_patch(
+            [
+                {
+                    "op": "update_metadata",
+                    "name": "New name",
+                    "description": "New description",
+                }
+            ],
+            1,
+        )
+
+        result = apply_workflow_patch(workflow, patch)
+
+        self.assertEqual(result.name, "New name")
+        self.assertEqual(result.description, "New description")
+        self.assertEqual(result.nodes, workflow.nodes)
+        self.assertEqual(result.edges, workflow.edges)
+
 
 if __name__ == "__main__":
     unittest.main()

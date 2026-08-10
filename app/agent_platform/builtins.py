@@ -23,7 +23,7 @@ WORKFLOW_AGENT_DEFINITION = AgentDefinition(
     description="生成、修改工作流画布和指定节点",
     builtin=True,
     runtime=AgentRuntimeDefinition(
-        kind="workflow_graph",
+        kind="react_agent",
         factory="app.agents.workflow_agent.graph:make_workflow_agent",
         max_turns=30,
         timeout_seconds=900,
@@ -33,6 +33,7 @@ WORKFLOW_AGENT_DEFINITION = AgentDefinition(
     tools=AgentToolConfig(
         allowed=[
             "describe_workflow",
+            "inspect_workflow_node",
             "build_workflow_patch",
             "validate_workflow_patch",
             "run_node_skill",

@@ -44,6 +44,7 @@ interface WorkflowEditorHeaderProps {
   sandboxSessionError: string
   sandboxSessionLoading: boolean
   sandboxSessionUpdating: boolean
+  sandboxMenuOpenRequestKey?: number
   canUseSandboxSession: boolean
   onBack: () => void
   onAssociateSandbox: (sandboxId: string) => Promise<unknown>
@@ -83,6 +84,7 @@ export function WorkflowEditorHeader({
   sandboxSessionError,
   sandboxSessionLoading,
   sandboxSessionUpdating,
+  sandboxMenuOpenRequestKey,
   canUseSandboxSession,
   onBack,
   onAssociateSandbox,
@@ -130,6 +132,7 @@ export function WorkflowEditorHeader({
           canUseSandboxSession={canUseSandboxSession}
           error={sandboxSessionError}
           loading={sandboxSessionLoading}
+          openRequestKey={sandboxMenuOpenRequestKey}
           sandbox={sandbox}
           sandboxImages={sandboxImages}
           sandboxImagesLoading={sandboxImagesLoading}

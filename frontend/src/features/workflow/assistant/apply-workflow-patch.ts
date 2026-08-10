@@ -55,6 +55,15 @@ export function applyWorkflowPatch(
       return
     }
 
+    if (operation.op === 'update_metadata') {
+      next = {
+        ...next,
+        name: operation.name ?? next.name,
+        description: operation.description ?? next.description,
+      }
+      return
+    }
+
     next.edges = next.edges.filter((edge) => edge.id !== operation.edgeId)
   })
 
@@ -99,4 +108,3 @@ function assertWorkflowReferences(workflow: WorkflowDocument) {
     }
   })
 }
-

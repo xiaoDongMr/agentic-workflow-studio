@@ -3,6 +3,7 @@ import type {
   WorkflowClarification,
   WorkflowPatchStage,
   WorkflowPlanPreview,
+  WorkflowSandboxRequirement,
 } from '@/features/workflow/assistant/types'
 import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import type { WorkflowDocument } from '@/types/workflow'
@@ -20,6 +21,7 @@ export interface WorkflowAssistantSessionSnapshot {
   threadId: string
   messages: WorkflowAssistantMessage[]
   clarification?: WorkflowClarification
+  sandboxRequirement?: WorkflowSandboxRequirement
   plan?: WorkflowPlanPreview
   currentStage?: WorkflowPatchStage
   completedStages: WorkflowPatchStage[]

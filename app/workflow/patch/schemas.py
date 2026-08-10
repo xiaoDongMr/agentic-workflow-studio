@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.workflow import WorkflowDocument, WorkflowEdge, WorkflowNode
 
@@ -33,6 +33,18 @@ class DeleteEdgeOperation(BaseModel):
     edgeId: str
 
 
+class UpdateWorkflowMetadataOperation(BaseModel):
+    op: Literal["update_metadata"]
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "UpdateWorkflowMetadataOperation":
+        if self.name is None and self.description is None:
+            raise ValueError("update_metadata requires name or description")
+        return self
+
+
 class ReplaceWorkflowOperation(BaseModel):
     op: Literal["replace_workflow"]
     workflow: WorkflowDocument
@@ -44,6 +56,7 @@ WorkflowPatchOperation = Annotated[
     | DeleteNodeOperation
     | AddEdgeOperation
     | DeleteEdgeOperation
+    | UpdateWorkflowMetadataOperation
     | ReplaceWorkflowOperation,
     Field(discriminator="op"),
 ]

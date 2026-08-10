@@ -79,6 +79,11 @@ def apply_workflow_patch(
             edges = [
                 edge for edge in edges if _resolved_edge_id(edge) != operation.edgeId
             ]
+        elif operation.op == "update_metadata":
+            if operation.name is not None:
+                document.name = operation.name.strip()
+            if operation.description is not None:
+                document.description = operation.description.strip()
 
     document.nodes = nodes
     document.edges = edges

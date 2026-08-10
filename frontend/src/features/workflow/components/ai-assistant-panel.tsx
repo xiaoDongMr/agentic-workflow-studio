@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   RefreshCw,
   SendHorizontal,
+  Server,
   ShieldCheck,
   Sparkles,
   Square,
@@ -36,16 +37,22 @@ import { WorkflowClarificationCard } from './assistant/workflow-clarification-ca
 interface AiAssistantPanelProps extends HTMLAttributes<HTMLDivElement> {
   workflow: WorkflowDocument
   selectedNodeId?: string
+  sandboxId?: string
+  sandboxBindingStatus: 'unbound' | 'bound' | 'unavailable'
   onPreviewWorkflow: (workflow: WorkflowDocument | null) => void
   onApplyWorkflow: (workflow: WorkflowDocument) => void
+  onOpenSandbox: () => void
   onCollapse?: () => void
 }
 export function AiAssistantPanel({
   className,
   workflow,
   selectedNodeId,
+  sandboxId,
+  sandboxBindingStatus,
   onPreviewWorkflow,
   onApplyWorkflow,
+  onOpenSandbox,
   onCollapse,
   ...props
 }: AiAssistantPanelProps) {
@@ -56,6 +63,7 @@ export function AiAssistantPanel({
     closeHistoryDrawer,
     completedStages,
     confirmPlan,
+    continueAfterSandboxBinding,
     currentStage,
     currentThreadTitle,
     deleteThread,
@@ -72,6 +80,7 @@ export function AiAssistantPanel({
     previewWorkflow,
     renameThread,
     resetConversation,
+    sandboxRequirement,
     sendMessage,
     selectThread,
     setInputValue,
@@ -84,6 +93,8 @@ export function AiAssistantPanel({
   } = useWorkflowAssistantStream({
     workflow,
     selectedNodeId,
+    sandboxId,
+    sandboxBindingStatus,
     onPreviewWorkflow,
   })
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -93,7 +104,7 @@ export function AiAssistantPanel({
     if (viewport) {
       viewport.scrollTop = viewport.scrollHeight
     }
-  }, [clarification, completedStages, currentStage, isStreaming, messages, plan])
+  }, [clarification, completedStages, currentStage, isStreaming, messages, plan, sandboxRequirement])
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -208,7 +219,7 @@ export function AiAssistantPanel({
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(15,23,42,0.18),transparent_22%)] px-5 py-5">
         <div className="space-y-4">
-          {messages.length === 0 && !plan && !clarification && (
+          {messages.length === 0 && !plan && !clarification && !sandboxRequirement && (
             <div className="overflow-hidden rounded-[24px] border border-sky-300/14 bg-[linear-gradient(145deg,rgba(14,165,233,0.11),rgba(15,23,42,0.66)_48%,rgba(99,102,241,0.08))] shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
               <div className="flex items-start gap-3.5 px-4 pb-4 pt-[18px]">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-sky-300/18 bg-sky-400/10 text-sky-100">
@@ -244,6 +255,18 @@ export function AiAssistantPanel({
               clarification={clarification}
               isStreaming={isStreaming}
               onSubmit={(answers) => void submitClarification(answers)}
+            />
+          )}
+
+          {sandboxRequirement && (
+            <WorkflowSandboxRequirementCard
+              bound={sandboxBindingStatus === 'bound' && Boolean(sandboxId)}
+              isStreaming={isStreaming}
+              reason={sandboxRequirement.reason}
+              requestedCapabilities={sandboxRequirement.requestedCapabilities}
+              sandboxId={sandboxId}
+              onContinue={() => void continueAfterSandboxBinding()}
+              onOpenSandbox={onOpenSandbox}
             />
           )}
 
@@ -458,6 +481,78 @@ function AssistantMessageBubble({ message }: { message: WorkflowAssistantMessage
           <UserRound className="h-3.5 w-3.5" />
         </span>
       )}
+    </div>
+  )
+}
+
+function WorkflowSandboxRequirementCard({
+  bound,
+  isStreaming,
+  reason,
+  requestedCapabilities,
+  sandboxId,
+  onContinue,
+  onOpenSandbox,
+}: {
+  bound: boolean
+  isStreaming: boolean
+  reason: string
+  requestedCapabilities: string[]
+  sandboxId?: string
+  onContinue: () => void
+  onOpenSandbox: () => void
+}) {
+  return (
+    <div className="overflow-hidden rounded-[22px] border border-emerald-300/16 bg-emerald-400/[0.055]">
+      <div className="flex items-start gap-3 border-b border-white/8 bg-emerald-400/[0.05] px-4 py-3.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-300/18 bg-emerald-400/10 text-emerald-100">
+          <Server className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-emerald-50">需要工作流沙箱</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-400">{reason}</p>
+        </div>
+      </div>
+      <div className="space-y-3 p-4">
+        {requestedCapabilities.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {requestedCapabilities.map((capability) => (
+              <span
+                key={capability}
+                className="rounded-lg border border-white/8 bg-slate-950/44 px-2 py-1 font-mono text-[10px] text-slate-300"
+              >
+                {capability}
+              </span>
+            ))}
+          </div>
+        )}
+        {bound ? (
+          <p className="truncate rounded-xl border border-emerald-300/14 bg-emerald-400/[0.07] px-3 py-2 font-mono text-[11px] text-emerald-100">
+            已绑定：{sandboxId}
+          </p>
+        ) : (
+          <p className="text-[11px] leading-5 text-amber-100/80">
+            请先人工创建或关联沙箱，绑定完成后再继续当前任务。
+          </p>
+        )}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onOpenSandbox}
+            className="flex h-9 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.035] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.07]"
+          >
+            {bound ? '查看沙箱' : '打开沙箱绑定'}
+          </button>
+          <button
+            type="button"
+            disabled={!bound || isStreaming}
+            onClick={onContinue}
+            className="flex h-9 flex-1 items-center justify-center rounded-xl border border-emerald-300/18 bg-emerald-500 px-3 text-xs font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            已完成绑定，继续
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

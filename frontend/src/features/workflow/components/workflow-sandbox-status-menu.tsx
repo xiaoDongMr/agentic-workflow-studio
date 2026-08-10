@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   AlertCircle,
   ChevronDown,
@@ -28,6 +28,7 @@ interface WorkflowSandboxStatusMenuProps {
   canUseSandboxSession: boolean
   error: string
   loading: boolean
+  openRequestKey?: number
   sandbox: SandboxSummary | null
   sandboxImages: SandboxImageSummary[]
   sandboxImagesLoading: boolean
@@ -52,6 +53,7 @@ export function WorkflowSandboxStatusMenu({
   canUseSandboxSession,
   error,
   loading,
+  openRequestKey = 0,
   sandbox,
   sandboxImages,
   sandboxImagesLoading,
@@ -101,6 +103,15 @@ export function WorkflowSandboxStatusMenu({
       return nextOpen
     })
   }, [onRefreshAvailableSandboxes, onRefreshSandboxImages])
+
+  useEffect(() => {
+    if (openRequestKey <= 0) {
+      return
+    }
+    setOpen(true)
+    void onRefreshAvailableSandboxes()
+    void onRefreshSandboxImages()
+  }, [onRefreshAvailableSandboxes, onRefreshSandboxImages, openRequestKey])
 
   const selectActionMode = useCallback(
     (mode: WorkflowSandboxActionMode) => {

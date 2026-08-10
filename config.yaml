@@ -17,6 +17,26 @@ object_storage:
   public_url_prefix: /api/storage/files
   max_file_size_mb: 20
 
+token_usage:
+  enabled: true
+
+workflow_agent:
+  skills_container_path_template: /workflows/{workflow_id}/skills
+  max_output_tokens: 8192
+  max_tool_output_chars: 20000
+
+summarization:
+  enabled: true
+  trigger:
+    - type: messages
+      value: 120
+    - type: tokens
+      value: 120000
+  keep:
+    type: messages
+    value: 40
+  trim_tokens_to_summarize: 30000
+
 sandbox_pool:
   provider: kubernetes_api
   kubernetes_api:

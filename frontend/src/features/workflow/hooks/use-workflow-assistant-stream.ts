@@ -16,6 +16,7 @@ import type {
   WorkflowPatchResult,
   WorkflowPatchStage,
   WorkflowPlanPreview,
+  WorkflowSandboxRequirement,
 } from '@/features/workflow/assistant/types'
 import { useWorkflowAssistantHistory } from '@/features/workflow/hooks/use-workflow-assistant-history'
 import { validateWorkflowGraph } from '@/features/workflow/validation/workflow-validation-service'
@@ -33,6 +34,8 @@ const TRANSIENT_STAGE_ERRORS = new Set([
 interface UseWorkflowAssistantStreamOptions {
   workflow: WorkflowDocument
   selectedNodeId?: string
+  sandboxId?: string
+  sandboxBindingStatus: 'unbound' | 'bound' | 'unavailable'
   onPreviewWorkflow: (workflow: WorkflowDocument | null) => void
 }
 
@@ -46,6 +49,8 @@ interface PendingRequest {
 export function useWorkflowAssistantStream({
   workflow,
   selectedNodeId,
+  sandboxId,
+  sandboxBindingStatus,
   onPreviewWorkflow,
 }: UseWorkflowAssistantStreamOptions) {
   const [initialSession] = useState(() => readWorkflowAssistantSession(workflow.id))
@@ -53,6 +58,9 @@ export function useWorkflowAssistantStream({
   const [inputValue, setInputValue] = useState('')
   const [messages, setMessages] = useState<WorkflowAssistantMessage[]>(initialSession?.messages ?? [])
   const [clarification, setClarification] = useState<WorkflowClarification | undefined>(initialSession?.clarification)
+  const [sandboxRequirement, setSandboxRequirement] = useState<WorkflowSandboxRequirement | undefined>(
+    initialSession?.sandboxRequirement,
+  )
   const [plan, setPlan] = useState<WorkflowPlanPreview | undefined>(initialSession?.plan)
   const [currentStage, setCurrentStage] = useState<WorkflowPatchStage | undefined>(initialSession?.currentStage)
   const [completedStages, setCompletedStages] = useState<WorkflowPatchStage[]>(initialSession?.completedStages ?? [])
@@ -83,6 +91,7 @@ export function useWorkflowAssistantStream({
       threadId,
       messages,
       clarification,
+      sandboxRequirement,
       plan,
       currentStage,
       completedStages,
@@ -97,6 +106,7 @@ export function useWorkflowAssistantStream({
     isComplete,
     messages,
     plan,
+    sandboxRequirement,
     threadId,
     warnings,
     workflow.id,
@@ -128,6 +138,7 @@ export function useWorkflowAssistantStream({
     workflowRef.current = workflow
     setMessages([])
     setClarification(undefined)
+    setSandboxRequirement(undefined)
     setPlan(undefined)
     setCurrentStage(undefined)
     setCompletedStages([])
@@ -165,6 +176,7 @@ export function useWorkflowAssistantStream({
     setThreadId(snapshot.threadId)
     setMessages(snapshot.messages)
     setClarification(snapshot.clarification)
+    setSandboxRequirement(snapshot.sandboxRequirement)
     setPlan(snapshot.plan)
     setCurrentStage(snapshot.currentStage)
     setCompletedStages(snapshot.completedStages)
@@ -203,6 +215,8 @@ export function useWorkflowAssistantStream({
           message: pending.message,
           workflow: pending.workflow,
           selectedNodeId,
+          sandboxId,
+          sandboxBindingStatus,
           clientEvent: pending.event,
           validation: pending.validation,
         }
@@ -253,14 +267,23 @@ export function useWorkflowAssistantStream({
           if (workflowEvent === 'clarification') {
             const next = data as unknown as WorkflowClarification
             setClarification(next)
+            setSandboxRequirement(undefined)
             setPlan(undefined)
             appendMessage('assistant', next.summary || '需要补充少量关键信息')
+            return
+          }
+          if (workflowEvent === 'sandboxRequired') {
+            const next = data as unknown as WorkflowSandboxRequirement
+            setSandboxRequirement(next)
+            setClarification(undefined)
+            setPlan(undefined)
             return
           }
           if (workflowEvent === 'planPreview') {
             const next = data as unknown as WorkflowPlanPreview
             setPlan(next)
             setClarification(undefined)
+            setSandboxRequirement(undefined)
             appendMessage('assistant', next.summary)
             return
           }
@@ -329,7 +352,14 @@ export function useWorkflowAssistantStream({
       abortControllerRef.current = null
       void history.refreshThreads()
     }
-  }, [appendMessage, history.refreshThreads, onPreviewWorkflow, selectedNodeId])
+  }, [
+    appendMessage,
+    history.refreshThreads,
+    onPreviewWorkflow,
+    sandboxBindingStatus,
+    sandboxId,
+    selectedNodeId,
+  ])
 
   const sendMessage = useCallback(async () => {
     const message = inputValue.trim()
@@ -339,6 +369,7 @@ export function useWorkflowAssistantStream({
     const isNewThread = !threadIdRef.current
     setInputValue('')
     appendMessage('user', message)
+    setSandboxRequirement(undefined)
     setIsComplete(false)
     await runRequest({
       event: 'user_message',
@@ -350,6 +381,26 @@ export function useWorkflowAssistantStream({
       await history.nameThread(activeThreadId, message)
     }
   }, [appendMessage, history.nameThread, inputValue, isStreaming, runRequest])
+
+  const continueAfterSandboxBinding = useCallback(async () => {
+    if (!sandboxRequirement || !sandboxId || sandboxBindingStatus !== 'bound' || isStreaming) {
+      return
+    }
+    setSandboxRequirement(undefined)
+    appendMessage('system', `已绑定沙箱 ${sandboxId}，继续执行当前任务。`, 'success')
+    await runRequest({
+      event: 'sandbox_bound',
+      message: '沙箱已绑定，继续执行中断前的任务',
+      workflow: workflowRef.current,
+    })
+  }, [
+    appendMessage,
+    isStreaming,
+    runRequest,
+    sandboxBindingStatus,
+    sandboxId,
+    sandboxRequirement,
+  ])
 
   const submitClarification = useCallback(async (
     answers: WorkflowClarificationAnswer[],
@@ -404,6 +455,7 @@ export function useWorkflowAssistantStream({
     }
     setPlan(undefined)
     setClarification(undefined)
+    setSandboxRequirement(undefined)
     setCurrentStage(undefined)
     setCompletedStages([])
     setWarnings([])
@@ -438,10 +490,12 @@ export function useWorkflowAssistantStream({
     plan,
     renameThread: history.renameThread,
     sendMessage,
+    sandboxRequirement,
     selectThread: history.selectThread,
     setInputValue,
     stopStreaming,
     submitClarification,
+    continueAfterSandboxBinding,
     resetConversation,
     threadId,
     threads: history.threads,

@@ -1,5 +1,29 @@
 config_version: 1
 
+token_usage:
+  enabled: true
+
+workflow_agent:
+  # Workflow-scoped Skill mount path inside the sandbox.
+  skills_container_path_template: /workflows/{workflow_id}/skills
+  # Independent output limit for each workflow-agent model call.
+  max_output_tokens: 8192
+  # Large tool results are reduced to a bounded preview and SHA-256 digest.
+  max_tool_output_chars: 20000
+
+summarization:
+  enabled: true
+  # Summarize when either threshold is reached.
+  trigger:
+    - type: messages
+      value: 120
+    - type: tokens
+      value: 120000
+  keep:
+    type: messages
+    value: 40
+  trim_tokens_to_summarize: 30000
+
 # Persistence backend. SQLite is fine for local single-node development.
 # Use PostgreSQL for shared development machines and production.
 database:

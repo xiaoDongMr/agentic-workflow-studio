@@ -5,6 +5,7 @@ WORKFLOW_EVENT_NAMES = frozenset(
         "session",
         "message",
         "clarification",
+        "sandboxRequired",
         "planPreview",
         "patchStage",
         "workflowPatch",

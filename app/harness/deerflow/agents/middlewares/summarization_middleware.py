@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Any, Protocol, override, runtime_checkable
 
@@ -36,6 +36,12 @@ class BeforeSummarizationHook(Protocol):
     """Hook invoked before summarization removes messages from state."""
 
     def __call__(self, event: SummarizationEvent) -> None: ...
+
+
+SkillContainerPathResolver = Callable[
+    [AgentState, Runtime],
+    str | Collection[str] | None,
+]
 
 
 def _resolve_thread_id(runtime: Runtime) -> str | None:
@@ -101,7 +107,7 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
     def __init__(
         self,
         *args,
-        skills_container_path: str | None = None,
+        skills_container_path: str | SkillContainerPathResolver | None = None,
         skill_file_read_tool_names: Collection[str] | None = None,
         before_summarization: list[BeforeSummarizationHook] | None = None,
         preserve_recent_skill_count: int = 5,
@@ -135,7 +141,8 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         if cutoff_index <= 0:
             return None
 
-        messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index)
+        skills_roots = self._resolve_skills_container_paths(state, runtime)
+        messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index, skills_roots)
         messages_to_summarize, preserved_messages = self._preserve_dynamic_context_reminders(messages_to_summarize, preserved_messages)
         self._fire_hooks(messages_to_summarize, preserved_messages, runtime)
         summary = self._create_summary(messages_to_summarize)
@@ -161,7 +168,8 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         if cutoff_index <= 0:
             return None
 
-        messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index)
+        skills_roots = self._resolve_skills_container_paths(state, runtime)
+        messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index, skills_roots)
         messages_to_summarize, preserved_messages = self._preserve_dynamic_context_reminders(messages_to_summarize, preserved_messages)
         self._fire_hooks(messages_to_summarize, preserved_messages, runtime)
         summary = await self._acreate_summary(messages_to_summarize)
@@ -204,6 +212,7 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         self,
         messages: list[AnyMessage],
         cutoff_index: int,
+        skills_roots: tuple[str, ...],
     ) -> tuple[list[AnyMessage], list[AnyMessage]]:
         """Partition like the parent, then rescue recently-loaded skill bundles."""
         to_summarize, preserved = self._partition_messages(messages, cutoff_index)
@@ -212,7 +221,9 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
             return to_summarize, preserved
 
         try:
-            bundles = self._find_skill_bundles(to_summarize, self._skills_container_path)
+            bundles = []
+            for skills_root in skills_roots:
+                bundles.extend(self._find_skill_bundles(to_summarize, skills_root))
         except Exception:
             logger.exception("Skill-preserving summarization rescue failed; falling back to default partition")
             return to_summarize, preserved
@@ -247,6 +258,38 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
             remaining.append(msg)
 
         return remaining, rescued + preserved
+
+    def _resolve_skills_container_paths(
+        self,
+        state: AgentState,
+        runtime: Runtime,
+    ) -> tuple[str, ...]:
+        resolver = self._skills_container_path
+        if callable(resolver):
+            try:
+                value = resolver(state, runtime)
+            except Exception:
+                logger.exception("Skill container path resolver failed; falling back to /mnt/skills")
+                value = "/mnt/skills"
+        else:
+            value = resolver
+
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            values = [value]
+        else:
+            values = [item for item in value if isinstance(item, str)]
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            path = item.rstrip("/")
+            if not path or path in seen:
+                continue
+            normalized.append(path)
+            seen.add(path)
+        return tuple(normalized)
 
     def _find_skill_bundles(
         self,

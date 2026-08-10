@@ -13,7 +13,7 @@ invocation time.  Full config-free runtime is a Phase 2 goal.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
@@ -68,6 +68,7 @@ def create_deerflow_agent(
     extra_middleware: list[AgentMiddleware] | None = None,
     plan_mode: bool = False,
     state_schema: type | None = None,
+    response_format: Any = None,
     checkpointer: BaseCheckpointSaver | None = None,
     name: str = "default",
 ) -> CompiledStateGraph:
@@ -97,6 +98,8 @@ def create_deerflow_agent(
         Enable TodoMiddleware for task tracking.
     state_schema:
         LangGraph state type.  Defaults to ``ThreadState``.
+    response_format:
+        Optional LangChain structured response strategy or schema.
     checkpointer:
         Optional persistence backend.
     name:
@@ -142,6 +145,7 @@ def create_deerflow_agent(
         middleware=effective_middleware,
         system_prompt=system_prompt,
         state_schema=effective_state,
+        response_format=response_format,
         checkpointer=checkpointer,
         name=name,
     )

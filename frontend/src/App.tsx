@@ -25,6 +25,7 @@ function App() {
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   const [assistantPreviewWorkflow, setAssistantPreviewWorkflow] = useState<WorkflowDocument | null>(null)
   const [assistantPreviewRevision, setAssistantPreviewRevision] = useState(0)
+  const [sandboxMenuOpenRequestKey, setSandboxMenuOpenRequestKey] = useState(0)
   const workspace = useWorkflowWorkspace()
   const {
     activeView,
@@ -149,6 +150,7 @@ function App() {
                     sandboxSessionError={workflowSandboxSession.error}
                     sandboxSessionLoading={workflowSandboxSession.loading}
                     sandboxSessionUpdating={workflowSandboxSession.updating}
+                    sandboxMenuOpenRequestKey={sandboxMenuOpenRequestKey}
                     canUseSandboxSession={workflowSandboxSession.canLoad}
                     onBack={closeWorkflowEditor}
                     onAssociateSandbox={workflowSandboxSession.associateSandboxById}
@@ -199,8 +201,15 @@ function App() {
                       )}
                       workflow={displayedWorkflow}
                       selectedNodeId={selectedNodeId}
+                      sandboxId={workflowSandboxSession.session?.sandboxId}
+                      sandboxBindingStatus={
+                        workflowSandboxSession.session?.sandboxId ? 'bound' : 'unbound'
+                      }
                       onPreviewWorkflow={handleAssistantPreviewWorkflow}
                       onApplyWorkflow={handleAssistantApplyWorkflow}
+                      onOpenSandbox={() => {
+                        setSandboxMenuOpenRequestKey((current) => current + 1)
+                      }}
                       onCollapse={() => setAiAssistantCollapsed(true)}
                     />
 

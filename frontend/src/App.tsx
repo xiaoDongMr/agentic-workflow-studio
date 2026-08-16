@@ -60,7 +60,6 @@ function App() {
     workflowVersions,
     versionsError,
     versionsLoading,
-    applyAssistantWorkflow,
     cancelPendingLeave,
     changeActiveView,
     closeWorkflowEditor,
@@ -105,12 +104,6 @@ function App() {
     setAssistantPreviewRevision((current) => current + 1)
   }, [])
 
-  const handleAssistantApplyWorkflow = useCallback((nextWorkflow: WorkflowDocument) => {
-    applyAssistantWorkflow(nextWorkflow)
-    setAssistantPreviewWorkflow(null)
-    setAssistantPreviewRevision((current) => current + 1)
-  }, [applyAssistantWorkflow])
-
   const handleAssistantPreviewGraphChange = useCallback((
     nodes: WorkflowDocument['nodes'],
     edges: WorkflowDocument['edges'],
@@ -119,6 +112,14 @@ function App() {
       current ? { ...current, nodes, edges } : current
     ))
   }, [])
+
+  const handleDisplayedWorkflowSave = useCallback(async () => {
+    const saved = await handleSaveWorkflow(displayedWorkflow)
+    if (saved && assistantPreviewWorkflow) {
+      setAssistantPreviewWorkflow(null)
+      setAssistantPreviewRevision((current) => current + 1)
+    }
+  }, [assistantPreviewWorkflow, displayedWorkflow, handleSaveWorkflow])
 
   useEffect(() => {
     setAssistantPreviewWorkflow(null)
@@ -184,7 +185,7 @@ function App() {
                     onRefreshSandboxImages={workflowSandboxSession.refreshSandboxImages}
                     onRefreshSandboxSession={workflowSandboxSession.refresh}
                     onRestoreVersion={restoreSavedWorkflowVersion}
-                    onSave={handleSaveWorkflow}
+                    onSave={() => void handleDisplayedWorkflowSave()}
                     onUpdateMetadata={updateWorkflowMetadata}
                   />
 
@@ -224,7 +225,6 @@ function App() {
                         workflowSandboxSession.session?.sandboxId ? 'bound' : 'unbound'
                       }
                       onPreviewWorkflow={handleAssistantPreviewWorkflow}
-                      onApplyWorkflow={handleAssistantApplyWorkflow}
                       onOpenSandbox={() => {
                         setSandboxMenuOpenRequestKey((current) => current + 1)
                       }}

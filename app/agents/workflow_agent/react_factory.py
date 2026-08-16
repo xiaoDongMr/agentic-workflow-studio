@@ -1,21 +1,29 @@
 from __future__ import annotations
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.structured_output import ToolStrategy
 from langchain_core.runnables import RunnableConfig
 
 from app.agents.workflow_agent.middleware import (
     WorkflowClarificationMiddleware,
+    WorkflowFinalOutputGuardMiddleware,
+    WorkflowLLMErrorHandlingMiddleware,
+    WorkflowLoopDetectionMiddleware,
     WorkflowMetadataMiddleware,
+    WorkflowOutputMiddleware,
+    WorkflowPrepareMiddleware,
     WorkflowSandboxMiddleware,
+    WorkflowToolActivityMiddleware,
 )
+from app.agents.workflow_agent.graph_builder import WorkflowGraphBuilder
 from app.agents.workflow_agent.prompt import WORKFLOW_REACT_SYSTEM_PROMPT
-from app.agents.workflow_agent.schemas import WorkflowReactDecision
 from app.agents.workflow_agent.skills import (
     workflow_skills_container_path_from_state,
 )
 from app.agents.workflow_agent.state import WorkflowAgentState
 from app.agents.workflow_agent.tools import WORKFLOW_AGENT_TOOLS
+from app.agents.workflow_agent.tools.generate_patch import (
+    make_generate_workflow_patch_tool,
+)
 from deerflow.agents.factory import create_deerflow_agent
 from deerflow.agents.lead_agent.prompt import (
     get_enabled_skills_for_config,
@@ -23,12 +31,6 @@ from deerflow.agents.lead_agent.prompt import (
 )
 from deerflow.agents.middlewares.dangling_tool_call_middleware import (
     DanglingToolCallMiddleware,
-)
-from deerflow.agents.middlewares.llm_error_handling_middleware import (
-    LLMErrorHandlingMiddleware,
-)
-from deerflow.agents.middlewares.loop_detection_middleware import (
-    LoopDetectionMiddleware,
 )
 from deerflow.agents.middlewares.summarization_middleware import (
     DeerFlowSummarizationMiddleware,
@@ -47,9 +49,13 @@ from deerflow.skills.tool_policy import filter_tools_by_skill_allowed_tools
 
 WORKFLOW_SKILL_NAMES = {"workflow-canvas", "workflow-node-mapping"}
 WORKFLOW_CONTROL_TOOL_NAMES = {
+    "generate_workflow_patch",
     "workflow_ask_clarification",
     "generate_workflow_metadata",
     "request_workflow_sandbox",
+    "return_workflow_answer",
+    "return_workflow_plan",
+    "return_workflow_error",
 }
 
 
@@ -76,6 +82,14 @@ def make_workflow_react_agent(
         app_config=resolved_app_config,
         **model_kwargs,
     )
+    graph_builder = WorkflowGraphBuilder(
+        model=model,
+        app_config=resolved_app_config,
+    )
+    workflow_tools = [
+        *WORKFLOW_AGENT_TOOLS,
+        make_generate_workflow_patch_tool(graph_builder),
+    ]
     skills = [
         skill
         for skill in get_enabled_skills_for_config(resolved_app_config)
@@ -83,7 +97,7 @@ def make_workflow_react_agent(
     ]
     available_tools = [
         tool
-        for tool in WORKFLOW_AGENT_TOOLS
+        for tool in workflow_tools
         if tool.name != "run_node_skill" or skills
     ]
     filtered_tools = filter_tools_by_skill_allowed_tools(
@@ -118,7 +132,6 @@ def make_workflow_react_agent(
         system_prompt=prompt,
         middleware=_build_middlewares(resolved_app_config),
         state_schema=WorkflowAgentState,
-        response_format=ToolStrategy(WorkflowReactDecision),
         name="workflow-agent",
     )
 
@@ -126,6 +139,7 @@ def make_workflow_react_agent(
 def _build_middlewares(app_config: AppConfig) -> list[AgentMiddleware]:
     middlewares: list[AgentMiddleware] = [
         ThreadDataMiddleware(lazy_init=True),
+        WorkflowPrepareMiddleware(),
         DanglingToolCallMiddleware(),
         ToolErrorHandlingMiddleware(),
     ]
@@ -136,16 +150,21 @@ def _build_middlewares(app_config: AppConfig) -> list[AgentMiddleware]:
         middlewares.append(TokenUsageMiddleware())
     middlewares.extend(
         [
-            WorkflowClarificationMiddleware(),
+            WorkflowToolActivityMiddleware(),
+            WorkflowOutputMiddleware(),
             WorkflowMetadataMiddleware(),
             WorkflowSandboxMiddleware(),
-            LLMErrorHandlingMiddleware(app_config=app_config),
+            WorkflowFinalOutputGuardMiddleware(),
+            WorkflowLLMErrorHandlingMiddleware(app_config=app_config),
         ]
     )
     if app_config.loop_detection.enabled:
         middlewares.append(
-            LoopDetectionMiddleware.from_config(app_config.loop_detection)
+            WorkflowLoopDetectionMiddleware.from_config(
+                app_config.loop_detection
+            )
         )
+    middlewares.append(WorkflowClarificationMiddleware())
     return middlewares
 
 

@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Check,
   Combine,
   FileText,
   GitBranch,
@@ -58,16 +59,16 @@ export function ExecutionTraceItem({
   activity,
   isLatest,
   latestPreviewGraphSummary,
-  plannedNodeCount,
+  progressSteps,
 }: {
   activity: WorkflowToolActivity
   isLatest: boolean
   latestPreviewGraphSummary?: WorkflowPreviewGraphSummary
-  plannedNodeCount?: number
+  progressSteps?: string[]
 }) {
   const statusStyle = toolActivityStatusStyle(activity.status)
   const displayLabel = toolActivityDisplayLabel(activity)
-  const displayDetail = toolActivityDisplayDetail(activity, latestPreviewGraphSummary, plannedNodeCount)
+  const displayDetail = toolActivityDisplayDetail(activity, latestPreviewGraphSummary)
   const kindStyle = activityKindStyle(activity.kind)
   const isPreviewSync = Boolean(activity.previewGraphSummary)
   const modelOutput = activity.modelOutput?.trim()
@@ -113,6 +114,12 @@ export function ExecutionTraceItem({
         {displayDetail ? (
           <p className="mt-1.5 line-clamp-2 text-[10px] leading-4 text-slate-400/80">{displayDetail}</p>
         ) : null}
+        {progressSteps?.length ? (
+          <GenerationProgress
+            running={activity.status === 'running'}
+            steps={progressSteps}
+          />
+        ) : null}
         {modelOutput ? (
           <div className="mt-2 rounded-lg border border-blue-300/10 bg-blue-400/[0.025] px-3 py-2.5">
             {hasLongModelOutput ? (
@@ -139,11 +146,8 @@ export function ExecutionTraceItem({
             )}
           </div>
         ) : null}
-        {isWorkflowGraphGenerationActivity(activity) && activity.status === 'running' && latestPreviewGraphSummary ? (
-          <RunningGraphGenerationSummary
-            plannedNodeCount={plannedNodeCount}
-            summary={latestPreviewGraphSummary}
-          />
+        {isWorkflowGraphGenerationActivity(activity) && latestPreviewGraphSummary ? (
+          <RunningGraphGenerationSummary summary={latestPreviewGraphSummary} />
         ) : null}
         {activity.previewGraphSummary ? (
           <CanvasUpdateSummary summary={activity.previewGraphSummary} />
@@ -156,6 +160,52 @@ export function ExecutionTraceItem({
           <span aria-hidden="true">·</span>
           <span>{activityKindLabel(activity.kind)}</span>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function GenerationProgress({
+  running,
+  steps,
+}: {
+  running: boolean
+  steps: string[]
+}) {
+  const visibleSteps = steps.slice(-4)
+  const hiddenCount = Math.max(steps.length - visibleSteps.length, 0)
+  return (
+    <div className="mt-3 border-t border-white/[0.06] pt-2.5">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[9px]">
+        <span className="text-slate-500">生成过程</span>
+        <span className="text-slate-600">
+          {hiddenCount ? `已收起 ${hiddenCount} 步` : `${steps.length} 步`}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {visibleSteps.map((step, index) => {
+          const isCurrent = running && index === visibleSteps.length - 1
+          return (
+            <div key={`${step}:${index}`} className="flex min-w-0 items-center gap-2">
+              <span className={cn(
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                isCurrent
+                  ? 'border-blue-300/24 bg-blue-400/10 text-blue-200'
+                  : 'border-emerald-300/16 bg-emerald-400/[0.06] text-emerald-300/80',
+              )}>
+                {isCurrent
+                  ? <LoaderCircle className="h-2.5 w-2.5 animate-spin" />
+                  : <Check className="h-2.5 w-2.5" />}
+              </span>
+              <span className={cn(
+                'min-w-0 truncate text-[10px]',
+                isCurrent ? 'text-slate-200' : 'text-slate-500',
+              )}>
+                {step}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -211,17 +261,13 @@ function toolActivityDisplayLabel(activity: WorkflowToolActivity) {
 function toolActivityDisplayDetail(
   activity: WorkflowToolActivity,
   latestPreviewGraphSummary?: WorkflowPreviewGraphSummary,
-  plannedNodeCount?: number,
 ) {
   if (activity.previewGraphSummary) {
     return undefined
   }
   if (isWorkflowGraphGenerationActivity(activity) && activity.status === 'running') {
     if (latestPreviewGraphSummary) {
-      const nodeProgress = plannedNodeCount && plannedNodeCount > latestPreviewGraphSummary.nodeCount
-        ? `${latestPreviewGraphSummary.nodeCount} / ${plannedNodeCount} 个规划节点`
-        : `${latestPreviewGraphSummary.nodeCount} 个节点`
-      return `正在继续生成完整结构；已同步 ${nodeProgress} 和 ${latestPreviewGraphSummary.edgeCount} 条连线到预览画布`
+      return `正在继续生成完整结构；已同步 ${latestPreviewGraphSummary.nodeCount} 个节点和 ${latestPreviewGraphSummary.edgeCount} 条连线到预览画布`
     }
     return '正在持续生成节点和连线；下方预览画布会同步当前已生成的快照'
   }
@@ -303,10 +349,6 @@ const TOOL_ACTIVITY_PRESENTATION: Record<string, {
     title: '提交执行错误',
     description: '说明当前无法继续执行的原因',
   },
-  return_workflow_graph: {
-    title: '提交结构快照',
-    description: '将当前生成出的节点和连线交给预览画布同步',
-  },
   'frontend.apply_preview_graph': {
     title: '同步预览快照',
     description: '展示当前已生成的节点和连线快照',
@@ -315,7 +357,6 @@ const TOOL_ACTIVITY_PRESENTATION: Record<string, {
 
 function isWorkflowGraphGenerationActivity(activity: WorkflowToolActivity) {
   return activity.toolName === 'generate_workflow_patch'
-    || activity.toolName === 'return_workflow_graph'
 }
 
 function toolActivityStatusStyle(status: WorkflowToolActivity['status']) {

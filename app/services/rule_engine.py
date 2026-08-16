@@ -41,9 +41,13 @@ class OperandResolver:
         if not node_id and source:
             node_id, _, field_path = source.partition(".")
         if source and source in context.node_input:
-            return context.node_input.get(source)
+            value = context.node_input.get(source)
+            if value is not None:
+                return value
         if source and source in context.run_input:
-            return context.run_input.get(source)
+            value = context.run_input.get(source)
+            if value is not None:
+                return value
 
         node_value = context.variables.get(node_id)
         if isinstance(node_value, dict):

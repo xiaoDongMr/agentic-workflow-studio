@@ -2,6 +2,7 @@ import json
 import logging
 
 from langchain.tools import ToolRuntime, tool
+from langgraph.errors import GraphRecursionError
 
 from app.agents.workflow_agent.graph_builder import WorkflowGraphBuilder
 from app.agents.workflow_agent.graph_payload import graph_business_payload
@@ -25,10 +26,11 @@ def make_generate_workflow_patch_tool(builder: WorkflowGraphBuilder):
         Args:
             goal: Final workflow result to generate.
         """
-        parsed_graph, confirmed_mermaid = _generation_inputs(runtime)
+        parsed_graph, confirmed_mermaid, workflow_id = _generation_inputs(runtime)
         thread_id = _thread_id(runtime)
         logger.info(
-            "generate_workflow_patch start: goal_len=%d nodes=%d edges=%d mermaid=%s thread_id=%s",
+            "generate_workflow_patch start: workflow_id=%s goal_len=%d nodes=%d edges=%d mermaid=%s thread_id=%s",
+            workflow_id,
             len(goal),
             len(parsed_graph.nodes),
             len(parsed_graph.edges),
@@ -38,11 +40,27 @@ def make_generate_workflow_patch_tool(builder: WorkflowGraphBuilder):
         try:
             generated, summary = await builder.build(
                 goal=goal,
+                workflow_id=workflow_id,
                 graph=parsed_graph,
                 confirmed_mermaid=confirmed_mermaid,
                 stream_writer=runtime.stream_writer,
                 thread_id=thread_id,
             )
+        except GraphRecursionError as exc:
+            logger.exception(
+                "generate_workflow_patch exhausted graph builder recursion budget: "
+                "workflow_id=%s nodes=%d edges=%d thread_id=%s",
+                workflow_id,
+                len(parsed_graph.nodes),
+                len(parsed_graph.edges),
+                thread_id,
+            )
+            raise RuntimeError(
+                "Graph Builder exceeded its execution-step budget before "
+                "publishing the final Graph. This indicates repeated subagent "
+                "tool calls or an unexpectedly large generation task; it does "
+                "not indicate a cycle in the generated workflow topology."
+            ) from exc
         except Exception:
             logger.exception(
                 "generate_workflow_patch failed: nodes=%d edges=%d thread_id=%s",
@@ -69,7 +87,7 @@ def make_generate_workflow_patch_tool(builder: WorkflowGraphBuilder):
 
 def _generation_inputs(
     runtime: ToolRuntime,
-) -> tuple[WorkflowGraphInput, str | None]:
+) -> tuple[WorkflowGraphInput, str | None, str]:
     state = runtime.state
     if not isinstance(state, dict):
         raise ValueError("Workflow runtime state is unavailable")
@@ -101,7 +119,7 @@ def _generation_inputs(
         if context.plan is not None and not context.pendingConfirmation
         else None
     )
-    return graph, confirmed_mermaid
+    return graph, confirmed_mermaid, request.workflowId
 
 
 def _thread_id(runtime: ToolRuntime) -> str:

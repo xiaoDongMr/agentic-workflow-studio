@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -19,8 +20,11 @@ def make_execute_node_skill_script_tool(
     skills: list[BuiltinNodeSkill],
     read_node_types: set[str],
     runtime_context: dict[str, Any],
+    on_node_result: Callable[[dict[str, Any]], None] | None = None,
+    before_execute: Callable[[], None] | None = None,
 ):
     skills_by_name = {skill.name: skill for skill in skills}
+    reusable_results: set[str] = set()
 
     @tool("execute_node_skill_script", parse_docstring=True)
     async def execute_node_skill_script(
@@ -47,7 +51,34 @@ def make_execute_node_skill_script_tool(
             raise ValueError(f"Node Skill {requested.parts[0]!r} is not available")
         if skill.node_type not in read_node_types:
             raise ValueError(f"Read {skill.name}/SKILL.md before executing scripts")
+        if before_execute is not None:
+            before_execute()
         relative_path = str(PurePosixPath(*requested.parts[1:]))
+        reusable_key = json.dumps(
+            {
+                "nodeType": skill.node_type,
+                "path": relative_path,
+                "function": function_name,
+                "arguments": arguments,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if (
+            function_name in {"list_models", "resolve_model_config"}
+            and reusable_key in reusable_results
+        ):
+            return json.dumps(
+                {
+                    "reused": True,
+                    "instruction": (
+                        "Reuse the previous result for this identical "
+                        f"{function_name} request."
+                    ),
+                },
+                ensure_ascii=False,
+            )
         logger.info(
             "execute_node_skill_script start: skill=%s node_type=%s path=%s function=%s arg_keys=%s",
             skill.name,
@@ -70,6 +101,20 @@ def make_execute_node_skill_script_tool(
             sorted(result.keys()),
             isinstance(result.get("node"), dict),
         )
+        node = result.get("node")
+        if isinstance(node, dict):
+            if on_node_result is not None:
+                on_node_result(node)
+            return json.dumps(
+                {
+                    "nodeId": node.get("id"),
+                    "nodeType": node.get("type"),
+                    "cached": True,
+                },
+                ensure_ascii=False,
+            )
+        if function_name in {"list_models", "resolve_model_config"}:
+            reusable_results.add(reusable_key)
         return json.dumps(result, ensure_ascii=False)
 
     return execute_node_skill_script

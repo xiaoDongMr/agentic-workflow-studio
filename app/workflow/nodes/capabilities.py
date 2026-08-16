@@ -146,9 +146,9 @@ CAPABILITIES: dict[str, WorkflowNodeCapability] = {
     ),
     "selector": WorkflowNodeCapability(
         "selector",
-        "选择器",
-        "确定性条件分支",
-        (_io("input", "String", "判断输入"),),
+        "选择器节点",
+        "按条件命中一个下游分支，未命中时进入否则分支。",
+        (),
         (),
         {
             **_BASE_CONFIG,
@@ -156,7 +156,7 @@ CAPABILITIES: dict[str, WorkflowNodeCapability] = {
             "responseMode": "json",
             "outputKey": "branch",
             "selectorBranches": [],
-            "selectorElseBranch": "default",
+            "selectorElseBranch": "else",
         },
     ),
     "code": WorkflowNodeCapability(

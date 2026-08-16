@@ -1,11 +1,11 @@
 import type {
   WorkflowAssistantMessage,
   WorkflowClarification,
-  WorkflowPatchStage,
+  WorkflowConfirmedClarification,
   WorkflowPlanPreview,
   WorkflowSandboxRequirement,
+  WorkflowToolActivity,
 } from '@/features/workflow/assistant/types'
-import type { WorkflowValidationIssue } from '@/features/workflow/validation/workflow-validation.types'
 import type { WorkflowDocument } from '@/types/workflow'
 
 const STORAGE_KEY = 'workflow-ai-assistant-sessions'
@@ -21,11 +21,12 @@ export interface WorkflowAssistantSessionSnapshot {
   threadId: string
   messages: WorkflowAssistantMessage[]
   clarification?: WorkflowClarification
+  confirmedClarifications: WorkflowConfirmedClarification[]
   sandboxRequirement?: WorkflowSandboxRequirement
   plan?: WorkflowPlanPreview
-  currentStage?: WorkflowPatchStage
-  completedStages: WorkflowPatchStage[]
-  warnings: WorkflowValidationIssue[]
+  planTimestamp?: number
+  planConfirmed: boolean
+  toolActivities: WorkflowToolActivity[]
   isComplete: boolean
   previewWorkflow: WorkflowDocument
 }
@@ -139,7 +140,10 @@ function isValidSnapshot(
     && typeof snapshot.threadId === 'string'
     && snapshot.previewWorkflow
     && Array.isArray(snapshot.messages)
-    && Array.isArray(snapshot.completedStages)
-    && Array.isArray(snapshot.warnings),
+    && Array.isArray(snapshot.confirmedClarifications)
+    && typeof snapshot.planConfirmed === 'boolean'
+    && (!snapshot.plan || typeof snapshot.planTimestamp === 'number')
+    && Array.isArray(snapshot.toolActivities)
+    && typeof snapshot.isComplete === 'boolean',
   )
 }

@@ -119,8 +119,11 @@ def build_node_input(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]
 
     ensure_declared_inputs_are_mapped(node)
     result = build_mapped_values(node.config.inputMappings, state)
-    if not result and node.type == "selector" and node.config.selectorBranches:
-        result = build_selector_reference_values(node, state)
+    if node.type == "selector" and node.config.selectorBranches:
+        reference_values = build_selector_reference_values(node, state)
+        for field, value in reference_values.items():
+            if field not in result or result[field] is None:
+                result[field] = value
     if not result:
         return {}
     return coerce_by_io_definitions(result, node.inputs, scope="输入变量")

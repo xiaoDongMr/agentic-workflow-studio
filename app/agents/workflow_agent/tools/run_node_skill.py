@@ -6,7 +6,8 @@ from typing import Any
 from langchain.tools import tool
 
 from app.agents.workflow_agent.skills import (
-    workflow_skills_container_path_from_payload,
+    workflow_id_from_state,
+    workflow_skills_container_path,
 )
 from app.agents.workflow_agent.tools.output import (
     bounded_tool_json,
@@ -37,7 +38,7 @@ def run_node_skill_tool(
     Args:
         skill_name: Enabled Skill name containing the node mapping script.
         script_name: Python filename under the Skill's scripts directory.
-        payload: Structured node intent and workflow context for the script.
+        payload: Structured node intent for the script.
     """
     if not _SCRIPT_NAME.fullmatch(script_name):
         raise ValueError("script_name must be a Python filename without path segments")
@@ -61,9 +62,13 @@ def run_node_skill_tool(
         raise FileNotFoundError(f"Workflow Skill script not found: {script_name}")
 
     sandbox = ensure_sandbox_initialized(runtime)
-    container_base_path = (
-        workflow_skills_container_path_from_payload(payload, app_config)
-        or app_config.skills.container_path
+    state = runtime.state if isinstance(runtime.state, dict) else {}
+    workflow_id = workflow_id_from_state(state)
+    if not workflow_id:
+        raise ValueError("Workflow ID is unavailable in the current runtime state")
+    container_base_path = workflow_skills_container_path(
+        workflow_id,
+        app_config,
     )
     container_script = (
         f"{skill.get_container_path(container_base_path)}/scripts/{script_name}"
@@ -72,7 +77,7 @@ def run_node_skill_tool(
         sandbox=sandbox,
         file_path=container_script,
         entry_function="main",
-        node_input=payload,
+        node_input={**payload, "workflowId": workflow_id},
     )
     if not isinstance(result, dict):
         raise ValueError("Workflow Skill script must return an object")

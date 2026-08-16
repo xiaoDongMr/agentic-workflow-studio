@@ -22,32 +22,17 @@ def workflow_skills_container_path_from_state(
     state: dict[str, Any],
     app_config: AppConfig,
 ) -> str | None:
-    workflow_id = _workflow_id_from_state(state)
+    workflow_id = workflow_id_from_state(state)
     if not workflow_id:
         return None
     return workflow_skills_container_path(workflow_id, app_config)
 
 
-def workflow_skills_container_path_from_payload(
-    payload: dict[str, Any],
-    app_config: AppConfig,
-) -> str | None:
-    workflow_id = _first_string(
-        payload.get("workflowId"),
-        _nested(payload, "workflow", "id"),
-        _nested(payload, "workflowSummary", "id"),
-        _nested(payload, "context", "workflowId"),
-        _nested(payload, "context", "workflow", "id"),
-    )
-    if not workflow_id:
-        return None
-    return workflow_skills_container_path(workflow_id, app_config)
-
-
-def _workflow_id_from_state(state: dict[str, Any]) -> str | None:
+def workflow_id_from_state(state: dict[str, Any]) -> str | None:
     request = state.get("workflowAssistant")
     task = state.get("workflowTask")
     return _first_string(
+        _nested(request, "workflowId"),
         _nested(request, "workflow", "id"),
         _nested(task, "workflowSummary", "id"),
         _nested(task, "workflow", "id"),

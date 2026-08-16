@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 from app.agents.workflow_agent.events import workflow_event_type
-from app.agents.workflow_agent.graph_payload import graph_business_payload
 from app.agents.workflow_agent.policy import WorkflowPolicyGate
 from app.agents.workflow_agent.schemas import (
     WorkflowActionPlan,
     WorkflowAgentContext,
-    WorkflowAssistantGraphResult,
     WorkflowAssistantStreamRequest,
     WorkflowClarificationQuestion,
-    WorkflowGraphInput,
     WorkflowMetadataProposal,
     WorkflowPlanPreviewResult,
-    WorkflowPlanStage,
     WorkflowPolicyDecision,
     WorkflowSandboxRequirement,
 )
-from app.schemas.workflow import WorkflowEdge, WorkflowNode
 
 
 class WorkflowOutputEmitter:
@@ -96,12 +91,15 @@ class WorkflowOutputEmitter:
         *,
         request: WorkflowAssistantStreamRequest,
         context: WorkflowAgentContext,
-        action: WorkflowActionPlan,
         message: str,
     ) -> WorkflowPolicyDecision:
+        action = WorkflowActionPlan(
+            intent="explain_workflow",
+            scope="read_only",
+            riskLevel="low",
+            summary=message,
+        )
         policy = self._assess_action(action, request)
-        if action.scope != "read_only":
-            raise ValueError("workflow answer requires read_only scope")
         if not message.strip():
             raise ValueError("answer result is missing message")
         writer(
@@ -130,19 +128,15 @@ class WorkflowOutputEmitter:
         action: WorkflowActionPlan,
         summary: str,
         mermaid: str,
-        assumptions: list[str],
-        stages: list[WorkflowPlanStage],
     ) -> tuple[WorkflowAgentContext, WorkflowPolicyDecision]:
         policy = self._assess_action(action, request)
         if not policy.requiresConfirmation:
             raise ValueError("workflow plan requires a confirmable action")
-        if not mermaid.strip() or not stages:
-            raise ValueError("workflow plan requires mermaid and stages")
+        if not mermaid.strip():
+            raise ValueError("workflow plan requires mermaid")
         plan = WorkflowPlanPreviewResult(
             summary=summary,
             mermaid=mermaid,
-            assumptions=assumptions,
-            stages=_normalize_stages(stages),
         )
         next_context = _update_action_context(context, request, action)
         next_context.pendingConfirmation = True
@@ -157,39 +151,24 @@ class WorkflowOutputEmitter:
         self.emit_end(writer, context.threadId)
         return next_context, policy
 
-    def emit_graph(
+    def complete_generated_graph(
         self,
         writer,
         *,
         request: WorkflowAssistantStreamRequest,
         context: WorkflowAgentContext,
         action: WorkflowActionPlan,
-        summary: str,
-        nodes: list[WorkflowNode],
-        edges: list[WorkflowEdge],
     ) -> tuple[WorkflowAgentContext, WorkflowPolicyDecision]:
         if request.clientEvent == "confirm_plan":
             _require_confirmed_action(context, action)
         policy = self._assess_action(action, request)
         if policy.requiresConfirmation and request.clientEvent != "confirm_plan":
             raise ValueError("workflow change requires user confirmation")
-        result = WorkflowAssistantGraphResult(
-            summary=summary,
-            graph=WorkflowGraphInput(nodes=nodes, edges=edges),
-        )
-        writer(
-            {
-                "threadId": context.threadId,
-                "summary": result.summary,
-                "graph": graph_business_payload(result.graph),
-                "type": workflow_event_type("workflowGraph"),
-            }
-        )
         writer(
             {
                 "type": workflow_event_type("complete"),
                 "threadId": context.threadId,
-                "message": "工作流已生成，可以应用到正式画布",
+                "message": "工作流已生成并同步到当前画布",
             }
         )
         self.emit_end(writer, context.threadId)
@@ -212,7 +191,7 @@ class WorkflowOutputEmitter:
             {
                 "type": workflow_event_type("complete"),
                 "threadId": thread_id,
-                "message": "工作流已生成，可以应用到正式画布",
+                "message": "工作流已生成并同步到当前画布",
             }
         )
         self.emit_end(writer, thread_id)
@@ -306,15 +285,3 @@ def _require_confirmed_action(
         raise ValueError(
             "generated Graph action does not match the user-confirmed plan"
         )
-
-
-def _normalize_stages(
-    stages: list[WorkflowPlanStage],
-) -> list[WorkflowPlanStage]:
-    ordered = sorted(stages, key=lambda item: item.sequence)
-    return [
-        item.model_copy(
-            update={"sequence": index, "final": index == len(ordered)}
-        )
-        for index, item in enumerate(ordered, start=1)
-    ]

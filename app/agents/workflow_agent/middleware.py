@@ -22,15 +22,19 @@ from langgraph.types import Command
 
 from app.agents.workflow_agent.emitter import WorkflowOutputEmitter
 from app.agents.workflow_agent.events import workflow_event_type
+from app.agents.workflow_agent.graph_payload import node_business_payload
 from app.agents.workflow_agent.sandbox import WorkflowSandboxResolver
 from app.agents.workflow_agent.schemas import (
     WorkflowActionPlan,
+    WorkflowAgentContext,
+    WorkflowAssistantStreamRequest,
+    WorkflowClarificationInput,
+    WorkflowClarificationOption,
     WorkflowClarificationQuestion,
+    WorkflowGraphInput,
     WorkflowMetadataProposal,
-    WorkflowPlanStage,
     WorkflowSandboxRequirement,
 )
-from app.schemas.workflow import WorkflowEdge, WorkflowNode
 from app.agents.workflow_agent.state import WorkflowAgentState
 from app.agents.workflow_agent.turn import (
     build_task,
@@ -55,11 +59,102 @@ SANDBOX_TOOL_CAPABILITIES = {
 FINAL_OUTPUT_TOOL_NAMES = {
     "return_workflow_answer",
     "return_workflow_plan",
-    "return_workflow_graph",
     "return_workflow_error",
 }
 
 WORKFLOW_TERMINAL_ERROR_KEY = "workflow_terminal_error"
+
+
+def _plan_action(
+    request: WorkflowAssistantStreamRequest,
+    summary: str,
+) -> WorkflowActionPlan:
+    start_only = (
+        len(request.workflow.nodes) <= 1
+        and not request.workflow.edges
+        and all(node.type == "start" for node in request.workflow.nodes)
+    )
+    if start_only:
+        return WorkflowActionPlan(
+            intent="create_workflow",
+            scope="full_workflow",
+            riskLevel="high",
+            requiresConfirmation=True,
+            summary=summary,
+        )
+    return WorkflowActionPlan(
+        intent="modify_workflow",
+        scope="full_workflow",
+        riskLevel="high",
+        requiresConfirmation=True,
+        summary=summary,
+    )
+
+
+def _generated_graph_action(
+    request: WorkflowAssistantStreamRequest,
+    context: WorkflowAgentContext,
+    graph: WorkflowGraphInput,
+    summary: str,
+) -> WorkflowActionPlan:
+    if request.clientEvent == "confirm_plan":
+        if (
+            context.lastIntent is None
+            or context.lastScope is None
+            or context.lastRiskLevel is None
+        ):
+            raise ValueError("Confirmed workflow action is unavailable")
+        return WorkflowActionPlan(
+            intent=context.lastIntent,
+            scope=context.lastScope,
+            riskLevel=context.lastRiskLevel,
+            targetNodeIds=context.targetNodeIds,
+            requiresConfirmation=True,
+            summary=summary,
+        )
+
+    current_nodes = {
+        node.id: node_business_payload(node)
+        for node in request.workflow.nodes
+    }
+    generated_nodes = {
+        node.id: node_business_payload(node)
+        for node in graph.nodes
+    }
+    current_edges = [edge.model_dump() for edge in request.workflow.edges]
+    generated_edges = [edge.model_dump() for edge in graph.edges]
+    if current_nodes.keys() != generated_nodes.keys() or current_edges != generated_edges:
+        return WorkflowActionPlan(
+            intent="modify_workflow",
+            scope="full_workflow",
+            riskLevel="high",
+            requiresConfirmation=True,
+            summary=summary,
+        )
+
+    changed_node_ids = [
+        node_id
+        for node_id, node in generated_nodes.items()
+        if current_nodes[node_id] != node
+    ]
+    if request.selectedNodeId and changed_node_ids == [request.selectedNodeId]:
+        return WorkflowActionPlan(
+            intent="modify_selected_node",
+            scope="selected_node_only",
+            riskLevel="low",
+            targetNodeIds=changed_node_ids,
+            summary=summary,
+        )
+    return WorkflowActionPlan(
+        intent="modify_workflow",
+        scope="target_nodes",
+        riskLevel="low",
+        targetNodeIds=changed_node_ids,
+        summary=summary,
+    )
+
+
+
 
 TOOL_ACTIVITY_LABELS = {
     "generate_workflow_patch": ("委派完整画布生成任务", "graph"),
@@ -71,7 +166,6 @@ TOOL_ACTIVITY_LABELS = {
     "request_workflow_sandbox": ("申请工作流沙箱", "sandbox"),
     "return_workflow_answer": ("提交工作流答复", "output"),
     "return_workflow_plan": ("提交流程草图", "output"),
-    "return_workflow_graph": ("提交完整画布", "output"),
     "return_workflow_error": ("提交执行错误", "output"),
 }
 
@@ -244,23 +338,16 @@ def _generate_mode_final_tool_error(
         return None
     patch_attempted = _has_generate_workflow_patch_attempt(state)
     patch_failed = _has_generate_workflow_patch_error(state)
-    if tool_name == "return_workflow_graph":
-        if patch_attempted:
-            return None
-        return (
-            "本轮是已确认方案生成任务，必须先调用 generate_workflow_patch，"
-            "不能由主 Agent 直接提交 Graph。"
-        )
     if tool_name == "return_workflow_error" and patch_failed:
         return None
     if patch_attempted:
         return (
-            "generate_workflow_patch 已返回结果后，必须调用 return_workflow_graph "
-            "提交完整 nodes 和 edges；不要调用其他最终输出工具。"
+            "generate_workflow_patch 失败后应重试，或调用 "
+            "return_workflow_error 结束；不要调用其他最终输出工具。"
         )
     return (
         "本轮是已确认方案生成任务，必须调用 generate_workflow_patch，"
-        "并在成功后调用 return_workflow_graph；不要直接回答或重新返回方案。"
+        "成功后运行会自动完成；不要直接回答或重新返回方案。"
     )
 
 
@@ -621,6 +708,44 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
         super().__init__()
         self._emitter = emitter or WorkflowOutputEmitter()
 
+    def _complete_generated_graph(
+        self,
+        request: ToolCallRequest,
+        result: ToolMessage | Command,
+    ) -> ToolMessage | Command:
+        if not isinstance(result, ToolMessage) or result.status == "error":
+            return result
+        content = result.content
+        if not isinstance(content, str):
+            raise ValueError("generate_workflow_patch returned invalid content")
+        payload = json.loads(content)
+        if not isinstance(payload, dict):
+            raise ValueError("generate_workflow_patch returned invalid payload")
+        graph = WorkflowGraphInput.model_validate(payload.get("graph") or {})
+        summary = str(payload.get("summary") or "工作流已生成")
+        _state, workflow_request, context, writer = _workflow_runtime(request)
+        action = _generated_graph_action(
+            workflow_request,
+            context,
+            graph,
+            summary,
+        )
+        next_context, _policy = self._emitter.complete_generated_graph(
+            writer,
+            request=workflow_request,
+            context=context,
+            action=action,
+        )
+        return Command(
+            update={
+                "messages": [_tool_message(request, summary)],
+                "workflowAssistant": None,
+                "workflowContext": next_context.model_dump(),
+                "workflowError": None,
+            },
+            goto=END,
+        )
+
     def _handle(self, request: ToolCallRequest) -> Command:
         tool_name = str(request.tool_call.get("name") or "")
         state = _state_from_request(request)
@@ -645,8 +770,8 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
         _state, workflow_request, context, writer = _workflow_runtime(request)
         args = request.tool_call.get("args") or {}
         action = (
-            WorkflowActionPlan.model_validate(args.get("action") or {})
-            if tool_name != "return_workflow_error"
+            _plan_action(workflow_request, str(args.get("summary") or ""))
+            if tool_name == "return_workflow_plan"
             else None
         )
 
@@ -656,7 +781,6 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
                 writer,
                 request=workflow_request,
                 context=context,
-                action=action,
                 message=message,
             )
             update = {
@@ -666,10 +790,6 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
             }
             content = message
         elif tool_name == "return_workflow_plan":
-            stages = [
-                WorkflowPlanStage.model_validate(item)
-                for item in args.get("stages") or []
-            ]
             next_context, _policy = self._emitter.emit_plan(
                 writer,
                 request=workflow_request,
@@ -677,32 +797,6 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
                 action=action,
                 summary=str(args.get("summary") or ""),
                 mermaid=str(args.get("mermaid") or ""),
-                assumptions=[
-                    str(item) for item in args.get("assumptions") or []
-                ],
-                stages=stages,
-            )
-            update = {
-                "workflowAssistant": None,
-                "workflowContext": next_context.model_dump(),
-                "workflowError": None,
-            }
-            content = str(args.get("summary") or "")
-        elif tool_name == "return_workflow_graph":
-            next_context, _policy = self._emitter.emit_graph(
-                writer,
-                request=workflow_request,
-                context=context,
-                action=action,
-                summary=str(args.get("summary") or ""),
-                nodes=[
-                    WorkflowNode.model_validate(item)
-                    for item in args.get("nodes") or []
-                ],
-                edges=[
-                    WorkflowEdge.model_validate(item)
-                    for item in args.get("edges") or []
-                ],
             )
             update = {
                 "workflowAssistant": None,
@@ -728,6 +822,8 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        if request.tool_call.get("name") == "generate_workflow_patch":
+            return self._complete_generated_graph(request, handler(request))
         if request.tool_call.get("name") not in FINAL_OUTPUT_TOOL_NAMES:
             return handler(request)
         return self._handle(request)
@@ -741,6 +837,11 @@ class WorkflowOutputMiddleware(AgentMiddleware[WorkflowAgentState]):
             Awaitable[ToolMessage | Command],
         ],
     ) -> ToolMessage | Command:
+        if request.tool_call.get("name") == "generate_workflow_patch":
+            return self._complete_generated_graph(
+                request,
+                await handler(request),
+            )
         if request.tool_call.get("name") not in FINAL_OUTPUT_TOOL_NAMES:
             return await handler(request)
         return self._handle(request)
@@ -893,11 +994,11 @@ class WorkflowClarificationMiddleware(AgentMiddleware[WorkflowAgentState]):
     def _handle(self, request: ToolCallRequest) -> Command:
         _state, _workflow_request, context, writer = _workflow_runtime(request)
         args = request.tool_call.get("args") or {}
-        questions = [
-            WorkflowClarificationQuestion.model_validate(item)
+        inputs = [
+            WorkflowClarificationInput.model_validate(item)
             for item in args.get("questions") or []
         ]
-        if not questions:
+        if not inputs:
             return Command(
                 update={
                     "messages": [
@@ -909,7 +1010,25 @@ class WorkflowClarificationMiddleware(AgentMiddleware[WorkflowAgentState]):
                     ]
                 }
             )
-        summary = str(args.get("summary") or "需要补充关键信息")
+        questions: list[WorkflowClarificationQuestion] = []
+        for index, item in enumerate(inputs, start=1):
+            input_type = "text"
+            if item.options:
+                input_type = "multiple" if item.multiple else "single"
+            questions.append(
+                WorkflowClarificationQuestion(
+                    id=f"question-{index}",
+                    question=item.question,
+                    required=False,
+                    inputType=input_type,
+                    options=[
+                        WorkflowClarificationOption(label=option, value=option)
+                        for option in item.options
+                    ],
+                    allowOther=True,
+                )
+            )
+        summary = "需要补充关键信息"
         next_context = self._emitter.emit_clarification(
             writer,
             context=context,

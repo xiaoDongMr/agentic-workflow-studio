@@ -1,7 +1,6 @@
 import { useEffect, useRef, type HTMLAttributes, type KeyboardEvent } from 'react'
 import {
   Bot,
-  Check,
   History,
   PanelLeftClose,
   RefreshCw,
@@ -32,7 +31,7 @@ import {
   type ExecutionState,
 } from './assistant/execution-trace'
 import {
-  countPlannedNodes,
+  compactExecutionActivities,
   isActivityRepresentedByResult,
 } from './assistant/execution-trace-utils'
 import { WorkflowCompleteSummary } from './assistant/preview-graph-summary'
@@ -46,7 +45,6 @@ interface AiAssistantPanelProps extends HTMLAttributes<HTMLDivElement> {
   sandboxId?: string
   sandboxBindingStatus: 'unbound' | 'bound' | 'unavailable'
   onPreviewWorkflow: (workflow: WorkflowDocument | null) => void
-  onApplyWorkflow: (workflow: WorkflowDocument) => void
   onOpenSandbox: () => void
   onCollapse?: () => void
 }
@@ -66,7 +64,6 @@ export function AiAssistantPanel({
   sandboxId,
   sandboxBindingStatus,
   onPreviewWorkflow,
-  onApplyWorkflow,
   onOpenSandbox,
   onCollapse,
   ...props
@@ -93,7 +90,6 @@ export function AiAssistantPanel({
     plan,
     planConfirmed,
     planTimestamp,
-    previewWorkflow,
     renameThread,
     resetConversation,
     sandboxRequirement,
@@ -140,10 +136,6 @@ export function AiAssistantPanel({
     }
   }
 
-  const handleApply = () => {
-    onApplyWorkflow(previewWorkflow)
-    resetConversation()
-  }
   const waitingForClarification = Boolean(clarification)
   const waitingForPlanConfirmation = Boolean(plan && !planConfirmed && !isStreaming)
   const executionState: ExecutionState = waitingForClarification
@@ -158,18 +150,22 @@ export function AiAssistantPanel({
     : executionState === 'plan'
       ? '等待确认流程草图'
       : runStatusText || '规划、生成并校验你的工作流'
-  const visibleToolActivities = toolActivities
+  const representedToolActivities = toolActivities
     .filter((activity) => !isActivityRepresentedByResult(activity, {
       hasClarification: Boolean(clarification || confirmedClarifications.length),
+      hasError: Boolean(errorText),
       hasPlan: Boolean(plan),
       hasSandboxRequirement: Boolean(sandboxRequirement),
     }))
     .slice(-24)
-  const latestPreviewGraphSummary = [...visibleToolActivities]
+  const latestPreviewGraphSummary = [...representedToolActivities]
     .reverse()
     .find((activity) => activity.previewGraphSummary)
     ?.previewGraphSummary
-  const plannedNodeCount = plan ? countPlannedNodes(plan) : undefined
+  const {
+    activities: visibleToolActivities,
+    graphGenerationSteps,
+  } = compactExecutionActivities(representedToolActivities)
   const latestToolActivityId = visibleToolActivities[visibleToolActivities.length - 1]?.id
   const latestTimelineTimestamp = Math.max(
     0,
@@ -389,7 +385,11 @@ export function AiAssistantPanel({
                   activity={item.activity}
                   isLatest={item.activity.id === latestToolActivityId}
                   latestPreviewGraphSummary={latestPreviewGraphSummary}
-                  plannedNodeCount={plannedNodeCount}
+                  progressSteps={
+                    item.activity.toolName === 'generate_workflow_patch'
+                      ? graphGenerationSteps
+                      : undefined
+                  }
                 />
               )
             }
@@ -404,19 +404,9 @@ export function AiAssistantPanel({
           )}
 
           {isComplete && (
-            <div className="space-y-3">
-              {latestPreviewGraphSummary ? (
-                <WorkflowCompleteSummary summary={latestPreviewGraphSummary} />
-              ) : null}
-              <button
-                type="button"
-                onClick={handleApply}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(16,185,129,0.2)] transition hover:bg-emerald-400"
-              >
-                <Check className="h-4 w-4" />
-                应用到正式画布
-              </button>
-            </div>
+            latestPreviewGraphSummary ? (
+              <WorkflowCompleteSummary summary={latestPreviewGraphSummary} />
+            ) : null
           )}
         </div>
       </div>
@@ -436,10 +426,10 @@ export function AiAssistantPanel({
             onClick={() => (isStreaming ? stopStreaming() : void sendMessage())}
             disabled={!isStreaming && !inputValue.trim()}
             className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border text-white shadow-[0_10px_24px_rgba(37,99,235,0.18)] transition disabled:cursor-not-allowed disabled:border-white/8 disabled:bg-white/[0.04] disabled:text-slate-600 disabled:shadow-none',
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition disabled:cursor-not-allowed disabled:border-white/8 disabled:bg-white/[0.04] disabled:text-slate-600 disabled:shadow-none',
               isStreaming
-                ? 'border-rose-300/20 bg-rose-500 hover:bg-rose-400'
-                : 'border-blue-300/20 bg-blue-500 hover:bg-blue-400',
+                ? 'border-blue-300/24 bg-blue-400/14 text-blue-100 shadow-[0_10px_24px_rgba(59,130,246,0.12)] hover:border-blue-200/32 hover:bg-blue-400/22'
+                : 'border-blue-300/20 bg-blue-500 text-white shadow-[0_10px_24px_rgba(37,99,235,0.18)] hover:bg-blue-400',
             )}
             aria-label={isStreaming ? '停止生成' : '发送'}
           >

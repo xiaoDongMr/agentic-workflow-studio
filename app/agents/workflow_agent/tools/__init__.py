@@ -3,7 +3,6 @@ from app.agents.workflow_agent.tools.control import (
     request_workflow_sandbox_tool,
     return_workflow_answer_tool,
     return_workflow_error_tool,
-    return_workflow_graph_tool,
     return_workflow_plan_tool,
     workflow_ask_clarification_tool,
 )
@@ -22,7 +21,6 @@ WORKFLOW_AGENT_TOOLS = [
     request_workflow_sandbox_tool,
     return_workflow_answer_tool,
     return_workflow_plan_tool,
-    return_workflow_graph_tool,
     return_workflow_error_tool,
 ]
 
@@ -34,7 +32,6 @@ __all__ = [
     "request_workflow_sandbox_tool",
     "return_workflow_answer_tool",
     "return_workflow_error_tool",
-    "return_workflow_graph_tool",
     "return_workflow_plan_tool",
     "run_node_skill_tool",
     "workflow_ask_clarification_tool",

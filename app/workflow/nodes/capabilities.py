@@ -34,7 +34,77 @@ _BASE_CONFIG: dict[str, Any] = {
     "timeoutSeconds": 180,
     "retryCount": 1,
     "errorStrategy": "ignore",
+    "fallbackOutput": "",
 }
+
+START_CONFIG_KEYS: tuple[str, ...] = (
+    "prompt",
+    "model",
+    "temperature",
+    "maxTokens",
+    "enabled",
+    "fallbackToHuman",
+    "responseMode",
+    "outputKey",
+    "inputMappings",
+)
+
+CODE_CONFIG_KEYS: tuple[str, ...] = (
+    "prompt",
+    "model",
+    "temperature",
+    "maxTokens",
+    "enabled",
+    "fallbackToHuman",
+    "responseMode",
+    "outputKey",
+    "inputMappings",
+    "codeLanguage",
+    "codeCapability",
+    "codeSource",
+    "codeFilePath",
+    "codeEntryFunction",
+    "codeSyncStatus",
+    "codeLastSavedSignature",
+    "timeoutSeconds",
+    "retryCount",
+    "errorStrategy",
+    "fallbackOutput",
+)
+
+_START_CONFIG: dict[str, Any] = {
+    "prompt": "用户输入会在这里进入工作流。",
+    "model": "N/A",
+    "temperature": 0,
+    "maxTokens": 0,
+    "enabled": True,
+    "fallbackToHuman": False,
+    "responseMode": "text",
+    "outputKey": "input",
+    "inputMappings": [],
+}
+
+DEFAULT_CODE_SNIPPET = """# 在这里，您可以通过 'args'  获取节点中的输入变量，并通过 'ret' 输出结果
+# 'args' 已经被正确地注入到环境中
+# 下面是一个示例，首先获取节点的全部输入参数params，其次获取其中参数名为'input'的值：
+# params = args.params;
+# input = params['input'];
+# 下面是一个示例，输出一个包含多种数据类型的 'ret' 对象：
+# ret: Output =  { "name": '小明', "hobbies": ["看书", "旅游"] };
+
+async def main(args: Args) -> Output:
+    params = args.params
+    # 构建输出对象
+    ret: Output = {
+        "code_result": {
+            "key0": params['input'] + params['input'], # 拼接两次入参 input 的值
+            "key1": ["hello", "world"],  # 输出一个数组
+            "key2": { # 输出一个Object
+                "key21": "hi",
+            },
+        }
+    }
+    return ret"""
 
 
 def _io(name: str, value_type: str, description: str) -> dict[str, str]:
@@ -48,15 +118,31 @@ CAPABILITIES: dict[str, WorkflowNodeCapability] = {
         "声明工作流输入",
         (),
         (_io("input", "String", "用户输入"),),
-        {**_BASE_CONFIG, "outputKey": "input"},
+        _START_CONFIG,
     ),
     "llm": WorkflowNodeCapability(
         "llm",
         "大模型",
-        "语义理解、分类和内容生成",
-        (_io("input", "String", "模型输入"),),
-        (_io("output", "String", "模型输出"),),
-        {**_BASE_CONFIG, "temperature": 0.3, "maxTokens": 1024},
+        "调用大语言模型，基于输入变量和提示词生成回复。",
+        (_io("input", "String", ""),),
+        (_io("result", "String", ""),),
+        {
+            **_BASE_CONFIG,
+            "userPrompt": "{{input}}",
+            "temperature": 0.7,
+            "maxTokens": 4096,
+            "outputKey": "",
+            "inputMappings": [
+                {
+                    "field": "input",
+                    "sourceType": "node",
+                    "source": "start.input",
+                    "valueType": "String",
+                }
+            ],
+            "visionInputAsBase64": False,
+            "supportContinuation": False,
+        },
     ),
     "selector": WorkflowNodeCapability(
         "selector",
@@ -75,16 +161,33 @@ CAPABILITIES: dict[str, WorkflowNodeCapability] = {
     ),
     "code": WorkflowNodeCapability(
         "code",
-        "编码",
-        "确定性数据处理",
-        (_io("input", "String", "处理输入"),),
-        (_io("output", "String", "处理结果"),),
+        "编码节点",
+        "在调试沙箱中执行 Python 代码，转换并返回结构化结果。",
+        (_io("input", "String", "传入代码的上下文对象"),),
+        (_io("code_result", "Object", "代码执行结果"),),
         {
             **_BASE_CONFIG,
+            "prompt": DEFAULT_CODE_SNIPPET,
+            "model": "Python",
+            "maxTokens": 600,
+            "responseMode": "json",
+            "outputKey": "code_result",
+            "inputMappings": [
+                {
+                    "field": "input",
+                    "sourceType": "node",
+                    "source": "start.input",
+                    "valueType": "String",
+                }
+            ],
             "codeLanguage": "python",
             "codeCapability": "python",
             "codeSource": "sandbox_snippet",
+            "codeFilePath": "",
             "codeEntryFunction": "main",
+            "codeSyncStatus": "saved",
+            "codeLastSavedSignature": "",
+            "errorStrategy": "interrupt",
         },
     ),
     "loop": WorkflowNodeCapability(
@@ -120,7 +223,11 @@ def normalize_node_payload(payload: dict[str, Any], sequence: int) -> dict[str, 
     node_type = str(payload.get("type") or "code")
     capability = CAPABILITIES.get(node_type)
     if capability is None:
-        raise ValueError(f"unsupported workflow node type: {node_type}")
+        supported = ", ".join(CAPABILITIES)
+        raise ValueError(
+            f"unsupported workflow node type: {node_type}. "
+            f"Supported node types: {supported}. Do not use default."
+        )
 
     normalized = deepcopy(payload)
     normalized["type"] = node_type

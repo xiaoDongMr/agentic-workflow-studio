@@ -15,6 +15,11 @@ import { WorkflowEditorHeader } from '@/features/workflow/components/workflow-ed
 import { WorkflowOverview } from '@/features/workflow/components/workflow-overview'
 import { useWorkflowSandboxSession } from '@/features/workflow/hooks/use-workflow-sandbox-session'
 import { useWorkflowWorkspace } from '@/features/workflow/hooks/use-workflow-workspace'
+import {
+  findWorkflowNodeById,
+  flattenWorkflowEdges,
+  flattenWorkflowNodes,
+} from '@/features/workflow/utils/workflow-document'
 import { validateWorkflowGraph } from '@/features/workflow/validation/workflow-validation-service'
 import { SandboxPoolPage } from '@/features/sandbox/sandbox-pool-page'
 import { cn } from '@/lib/utils'
@@ -29,8 +34,6 @@ function App() {
   const workspace = useWorkflowWorkspace()
   const {
     activeView,
-    allWorkflowEdges,
-    allWorkflowNodes,
     canvasApi,
     draftHydrated,
     hasUnsavedChanges,
@@ -45,7 +48,6 @@ function App() {
     restoringVersionId,
     saveMessage,
     saveStatus,
-    selectedNode,
     selectedNodeId,
     workflow,
     workflowEditorOpen,
@@ -85,6 +87,18 @@ function App() {
     updateWorkflowMetadata,
   } = workspace
   const displayedWorkflow = assistantPreviewWorkflow ?? workflow
+  const displayedSelectedNode = useMemo(
+    () => findWorkflowNodeById(displayedWorkflow.nodes, selectedNodeId),
+    [displayedWorkflow.nodes, selectedNodeId],
+  )
+  const displayedWorkflowNodes = useMemo(
+    () => flattenWorkflowNodes(displayedWorkflow.nodes),
+    [displayedWorkflow.nodes],
+  )
+  const displayedWorkflowEdges = useMemo(
+    () => flattenWorkflowEdges(displayedWorkflow.nodes, displayedWorkflow.edges),
+    [displayedWorkflow.edges, displayedWorkflow.nodes],
+  )
 
   const handleAssistantPreviewWorkflow = useCallback((nextWorkflow: WorkflowDocument | null) => {
     setAssistantPreviewWorkflow(nextWorkflow)
@@ -96,6 +110,15 @@ function App() {
     setAssistantPreviewWorkflow(null)
     setAssistantPreviewRevision((current) => current + 1)
   }, [applyAssistantWorkflow])
+
+  const handleAssistantPreviewGraphChange = useCallback((
+    nodes: WorkflowDocument['nodes'],
+    edges: WorkflowDocument['edges'],
+  ) => {
+    setAssistantPreviewWorkflow((current) => (
+      current ? { ...current, nodes, edges } : current
+    ))
+  }, [])
 
   useEffect(() => {
     setAssistantPreviewWorkflow(null)
@@ -126,10 +149,10 @@ function App() {
               <main className="min-h-0 flex-1 p-4 lg:p-6">
                 <div className="flex h-full min-h-[820px] flex-col gap-3">
                   <WorkflowEditorHeader
-                    description={workflow.description}
+                    description={displayedWorkflow.description}
                     hasUnsavedChanges={hasUnsavedChanges}
                     lastSavedAt={lastSavedAt}
-                    name={workflow.name}
+                    name={displayedWorkflow.name}
                     saveMessage={saveMessage}
                     saveStatus={saveStatus}
                     versions={workflowVersions}
@@ -176,13 +199,8 @@ function App() {
                         sandbox={workflowSandboxSession.sandbox}
                         selectedNodeId={selectedNodeId}
                         onSelectNode={setSelectedNodeId}
-                        onGraphChange={assistantPreviewWorkflow
-                          ? (nodes, edges) => {
-                              setAssistantPreviewWorkflow((current) => current
-                                ? { ...current, nodes, edges }
-                                : current)
-                            }
-                          : undefined}
+                        autoLayoutOnMount={Boolean(assistantPreviewWorkflow)}
+                        onGraphChange={assistantPreviewWorkflow ? handleAssistantPreviewGraphChange : undefined}
                         onReady={setCanvasApi}
                       />
                     ) : (
@@ -228,26 +246,28 @@ function App() {
                       </button>
                     )}
 
-                    {selectedNode && !assistantPreviewWorkflow && (
+                    {displayedSelectedNode && (
                       <div className="absolute right-3 top-3 z-20 h-[calc(100%-24px)] w-[min(480px,calc(100%_-_24px))] 2xl:w-[min(540px,calc(100%_-_24px))]">
                         <NodeConfigPanel
-                          key={selectedNode.id}
+                          key={displayedSelectedNode.id}
                           className="h-full"
-                          node={selectedNode}
-                          nodes={allWorkflowNodes}
-                          edges={allWorkflowEdges}
+                          node={displayedSelectedNode}
+                          nodes={displayedWorkflowNodes}
+                          edges={displayedWorkflowEdges}
                           sandbox={workflowSandboxSession.sandbox}
                           sandboxSession={workflowSandboxSession.session}
                           workflowId={workflow.id}
                           workflowSaved={currentWorkflowSaved}
-                          validationResult={validationResult.nodeResults[selectedNode.id]}
+                          validationResult={validationResult.nodeResults[displayedSelectedNode.id]}
                           onUpdateNode={(partial) => {
                             if (canvasApi) {
                               canvasApi.updateSelectedNode(partial)
                               return
                             }
 
-                            updateSelectedNode(partial)
+                            if (!assistantPreviewWorkflow) {
+                              updateSelectedNode(partial)
+                            }
                           }}
                         />
                         <button

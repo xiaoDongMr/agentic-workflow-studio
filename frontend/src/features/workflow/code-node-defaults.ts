@@ -1,13 +1,11 @@
 import type { WorkflowNodeIO } from '@/types/workflow'
 
 export const DEFAULT_CODE_NODE_INPUTS: WorkflowNodeIO[] = [
-  { name: 'input', type: 'Integer', description: '示例入参' },
+  { name: 'input', type: 'String', description: '传入代码的上下文对象' },
 ]
 
 export const DEFAULT_CODE_NODE_OUTPUTS: WorkflowNodeIO[] = [
-  { name: 'key0', type: 'Integer', description: '示例数值结果' },
-  { name: 'key1', type: 'Array<String>', description: '示例数组结果' },
-  { name: 'key2', type: 'Object', description: '示例对象结果' },
+  { name: 'code_result', type: 'Object', description: '代码执行结果' },
 ]
 
 export const DEFAULT_BROWSER_CODE_NODE_INPUTS: WorkflowNodeIO[] = [
@@ -32,10 +30,12 @@ async def main(args: Args) -> Output:
     params = args.params
     # 构建输出对象
     ret: Output = {
-        "key0": params['input'] + params['input'], # 拼接两次入参 input 的值
-        "key1": ["hello", "world"],  # 输出一个数组
-        "key2": { # 输出一个Object
-            "key21": "hi",
-        },
+        "code_result": {
+            "key0": params['input'] + params['input'], # 拼接两次入参 input 的值
+            "key1": ["hello", "world"],  # 输出一个数组
+            "key2": { # 输出一个Object
+                "key21": "hi",
+            },
+        }
     }
     return ret`

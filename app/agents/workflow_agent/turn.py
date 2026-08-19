@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
+from typing import Any
 
+from app.agents.workflow_agent.graph_payload import (
+    graph_business_payload,
+    node_business_payload,
+)
 from app.agents.workflow_agent.schemas import (
     WorkflowAgentContext,
     WorkflowAssistantStreamRequest,
 )
 from app.agents.workflow_agent.state import WorkflowAgentState
-
-
-MAX_REPAIR_ATTEMPTS = 2
 
 
 def request_from_state(
@@ -55,30 +56,7 @@ def build_task(
         if context.plan is None:
             raise ValueError("工作流计划不存在或已过期，请重新提交需求")
         next_context.pendingConfirmation = False
-        next_context.stageIndex = 0
-        next_context.repairAttempts = 0
-        return _generation_task(request, next_context, mode="generate"), next_context
-
-    if request.clientEvent == "stage_validated":
-        if context.plan is None:
-            if context.lastIntent is None:
-                raise ValueError("没有可完成的工作流变更")
-            return {"mode": "complete"}, next_context
-        next_context.stageIndex += 1
-        next_context.repairAttempts = 0
-        if next_context.stageIndex >= len(context.plan.stages):
-            return {"mode": "complete"}, next_context
-        return _generation_task(request, next_context, mode="generate"), next_context
-
-    if request.clientEvent == "validation_failed":
-        if context.plan is None and context.lastIntent is None:
-            raise ValueError("没有可修复的工作流变更")
-        next_context.repairAttempts += 1
-        if next_context.repairAttempts > MAX_REPAIR_ATTEMPTS:
-            raise ValueError("自动修复已达到最大次数，请调整需求或手动修复")
-        if context.plan is None:
-            return _direct_repair_task(request, next_context), next_context
-        return _generation_task(request, next_context, mode="repair"), next_context
+        return _generation_task(request, next_context), next_context
 
     if request.clientEvent == "sandbox_bound":
         if not request.sandboxId or request.sandboxBindingStatus != "bound":
@@ -90,46 +68,73 @@ def build_task(
     )
     next_context.requestSummary = _merge_request(previous_request, request.message)
     next_context.awaitingClarification = False
+    is_start_only_draft = _is_start_only_draft(request)
     return (
         {
             "mode": "decide",
             "userRequest": request.message,
             "previousRequest": previous_request,
             "selectedNodeId": request.selectedNodeId,
+            "selectedNode": _selected_node_payload(request),
             "workflowSummary": {
-                "id": request.workflow.id,
+                "id": request.workflowId,
                 "name": request.workflow.name,
                 "nodeCount": len(request.workflow.nodes),
                 "edgeCount": len(request.workflow.edges),
+                "isStartOnlyDraft": is_start_only_draft,
             },
+            "workflowGraph": _graph_payload(request),
             "instruction": (
-                "判断用户场景并自主选择工作流工具。只读需求直接回答；"
-                "低风险局部修改可返回 patch；中高风险修改返回 plan。"
+                "先判断用户意图是否具体明确；若存在无法从当前请求和已有"
+                "上下文确定、且不同答案会显著改变流程结构的关键选择，"
+                "必须先调用 workflow_ask_clarification，禁止自行假设后"
+                "直接画流程草图。只读需求直接回答；"
+                "调用 generate_workflow_patch 时只传最终业务目标 goal；"
+                "工具会从当前运行状态读取完整 workflowGraph 和已确认草图。"
+                "生成成功后会自动完成并结束当前运行；"
+                "中高风险修改调用 return_workflow_plan，且只传 summary "
+                "和 mermaid。"
+                "如果 workflowSummary.isStartOnlyDraft=true，表示当前画布只有"
+                "占位开始节点，应按从 0 创建完整工作流处理，优先使用 "
+                "intent=create_workflow、scope=full_workflow 并调用 "
+                "return_workflow_plan；确认前不要调用 generate_workflow_patch。"
             ),
         },
         next_context,
     )
 
 
-def status_message(mode: str) -> str:
-    if mode == "repair":
-        return "正在根据画布校验结果自动修复"
+def status_message(
+    mode: str,
+    *,
+    client_event: str | None = None,
+    has_previous_request: bool = False,
+) -> str:
     if mode == "generate":
-        return "正在生成已确认的工作流变更"
+        return "正在生成已确认的完整工作流"
+    if client_event == "sandbox_bound":
+        return "沙箱已就绪，正在恢复中断的执行"
+    if has_previous_request:
+        return "正在整合补充信息并更新方案"
     return "正在理解需求并规划工作流调整"
+
+
+def _is_start_only_draft(request: WorkflowAssistantStreamRequest) -> bool:
+    return (
+        len(request.workflow.nodes) == 1
+        and request.workflow.nodes[0].type == "start"
+        and len(request.workflow.edges) == 0
+    )
 
 
 def _generation_task(
     request: WorkflowAssistantStreamRequest,
     context: WorkflowAgentContext,
-    *,
-    mode: Literal["generate", "repair"],
 ) -> dict[str, Any]:
-    if context.plan is None or context.stageIndex >= len(context.plan.stages):
-        raise ValueError("当前工作流阶段不存在")
-    stage = context.plan.stages[context.stageIndex]
+    if context.plan is None:
+        raise ValueError("已确认的工作流计划不存在")
     return {
-        "mode": mode,
+        "mode": "generate",
         "confirmed": True,
         "userRequest": context.requestSummary,
         "selectedNodeId": request.selectedNodeId,
@@ -140,45 +145,40 @@ def _generation_task(
             "targetNodeIds": context.targetNodeIds,
         },
         "confirmedPlan": context.plan.model_dump(),
-        "currentStage": stage.model_dump(),
-        "validation": request.validation if mode == "repair" else None,
-        "repairAttempt": context.repairAttempts,
+        "workflowGraph": _graph_payload(request),
         "instruction": (
-            "只生成当前阶段的最小 Patch，调用 build_workflow_patch 和 "
-            "validate_workflow_patch 后返回 kind=patch。"
+            "如需补全工作流名称或描述，可先调用 generate_workflow_metadata。"
+            "随后调用 generate_workflow_patch，并且只传最终业务目标 goal；"
+            "工具会从当前运行状态读取完整 workflowGraph 和 confirmedPlan.mermaid。"
+            "成功后会自动完成并结束当前运行。"
+            "本模式禁止调用 return_workflow_answer 或 return_workflow_plan；"
+            "即使历史里有失败说明，也必须先尝试 generate_workflow_patch。"
         ),
     }
 
 
-def _direct_repair_task(
+def _graph_payload(request: WorkflowAssistantStreamRequest) -> dict[str, Any]:
+    return graph_business_payload(request.workflow)
+
+
+def _selected_node_payload(
     request: WorkflowAssistantStreamRequest,
-    context: WorkflowAgentContext,
-) -> dict[str, Any]:
-    return {
-        "mode": "repair",
-        "confirmed": True,
-        "userRequest": context.requestSummary,
-        "selectedNodeId": request.selectedNodeId,
-        "action": {
-            "intent": context.lastIntent,
-            "scope": context.lastScope,
-            "riskLevel": context.lastRiskLevel,
-            "targetNodeIds": context.targetNodeIds,
-        },
-        "currentStage": {
-            "stageId": "direct-change",
-            "sequence": 1,
-            "title": "修复工作流调整",
-            "instruction": "只修复当前工作流变更的校验错误",
-            "final": True,
-        },
-        "validation": request.validation,
-        "repairAttempt": context.repairAttempts,
-        "instruction": (
-            "根据 validation 只生成最小修复 Patch，调用 build_workflow_patch 和 "
-            "validate_workflow_patch 后返回 kind=patch。"
+) -> dict[str, Any] | None:
+    if not request.selectedNodeId:
+        return None
+    node = next(
+        (
+            item
+            for item in request.workflow.nodes
+            if item.id == request.selectedNodeId
         ),
-    }
+        None,
+    )
+    return (
+        node_business_payload(node)
+        if node is not None
+        else None
+    )
 
 
 def _merge_request(previous_request: str, message: str) -> str:

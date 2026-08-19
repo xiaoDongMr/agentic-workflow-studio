@@ -190,6 +190,7 @@ function workflowThreadTitle(message: string) {
 function restoreWorkflowMessages(runs: AssistantThreadRun[]): WorkflowAssistantMessage[] {
   const messages: WorkflowAssistantMessage[] = []
   for (const run of runs) {
+    const timestamp = parseRunTimestamp(run)
     const request = getWorkflowRequest(run)
     if (
       request
@@ -200,6 +201,7 @@ function restoreWorkflowMessages(runs: AssistantThreadRun[]): WorkflowAssistantM
         id: `history-user-${run.run_id}`,
         role: 'user',
         content: request.message.trim(),
+        timestamp,
       })
     }
     if (run.status === 'error') {
@@ -208,6 +210,7 @@ function restoreWorkflowMessages(runs: AssistantThreadRun[]): WorkflowAssistantM
         role: 'system',
         content: '该次工作流助手请求执行失败',
         tone: 'error',
+        timestamp,
       })
     }
   }
@@ -217,8 +220,18 @@ function restoreWorkflowMessages(runs: AssistantThreadRun[]): WorkflowAssistantM
     content: messages.length > 0
       ? '已恢复历史需求记录，可以基于当前画布继续调整。'
       : '该会话暂无可恢复的需求记录，可以基于当前画布继续调整。',
+    timestamp: Date.now(),
   })
   return messages
+}
+
+function parseRunTimestamp(run: AssistantThreadRun) {
+  const value = run.created_at ?? run.updated_at
+  if (!value) {
+    return Date.now()
+  }
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : Date.now()
 }
 
 function getWorkflowRequest(run: AssistantThreadRun): WorkflowAssistantStreamRequest | undefined {

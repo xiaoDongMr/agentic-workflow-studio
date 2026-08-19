@@ -4,6 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from langchain_core.language_models.fake_chat_models import (
+    FakeMessagesListChatModel,
+)
+from langchain_core.messages import AIMessage
+
 from deerflow.agents.middlewares.token_usage_middleware import (
     TokenUsageMiddleware,
 )
@@ -12,14 +17,19 @@ from deerflow.config.summarization_config import (
     SummarizationConfig,
 )
 from deerflow.config.token_usage_config import TokenUsageConfig
+from deerflow.config.app_config import CircuitBreakerConfig
+from deerflow.config.loop_detection_config import LoopDetectionConfig
 
 from app.agents.workflow_agent.skills import (
-    workflow_skills_container_path_from_payload,
+    workflow_skills_container_path_from_state,
 )
 from app.agents.workflow_agent.react_factory import (
     _build_middlewares,
     _create_workflow_summarization_middleware,
     make_workflow_react_agent,
+)
+from app.agents.workflow_agent.middleware import (
+    WorkflowLoopDetectionMiddleware,
 )
 
 
@@ -31,6 +41,7 @@ def _app_config(
     return SimpleNamespace(
         summarization=summarization,
         token_usage=token_usage or TokenUsageConfig(enabled=False),
+        circuit_breaker=CircuitBreakerConfig(),
         loop_detection=SimpleNamespace(enabled=False),
         skills=SimpleNamespace(container_path="/mnt/workflow-skills"),
         workflow_agent=SimpleNamespace(
@@ -38,6 +49,11 @@ def _app_config(
             max_output_tokens=8192,
         ),
     )
+
+
+class ToolBoundFakeChatModel(FakeMessagesListChatModel):
+    def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+        return self
 
 
 class WorkflowReactFactoryTest(unittest.TestCase):
@@ -125,14 +141,18 @@ class WorkflowReactFactoryTest(unittest.TestCase):
             "/workflows/workflow-1/skills",
         )
 
-    def test_workflow_skill_path_uses_safe_workflow_id(self) -> None:
+    def test_workflow_skill_path_uses_workflow_id_from_state(self) -> None:
         app_config = _app_config(
             summarization=SummarizationConfig(enabled=False),
         )
 
         self.assertEqual(
-            workflow_skills_container_path_from_payload(
-                {"workflow": {"id": "../workflow 1"}},
+            workflow_skills_container_path_from_state(
+                {
+                    "workflowAssistant": {
+                        "workflowId": "../workflow 1",
+                    }
+                },
                 app_config,
             ),
             "/workflows/workflow_1/skills",
@@ -161,6 +181,21 @@ class WorkflowReactFactoryTest(unittest.TestCase):
             any(
                 isinstance(middleware, TokenUsageMiddleware)
                 for middleware in enabled_middlewares
+            )
+        )
+
+    def test_loop_detection_uses_workflow_event_bridge(self) -> None:
+        app_config = _app_config(
+            summarization=SummarizationConfig(enabled=False),
+        )
+        app_config.loop_detection = LoopDetectionConfig(enabled=True)
+
+        middlewares = _build_middlewares(app_config)
+
+        self.assertTrue(
+            any(
+                isinstance(middleware, WorkflowLoopDetectionMiddleware)
+                for middleware in middlewares
             )
         )
 
@@ -222,27 +257,33 @@ class WorkflowReactFactoryTest(unittest.TestCase):
             {
                 "describe_workflow",
                 "inspect_workflow_node",
-                "build_workflow_patch",
-                "validate_workflow_patch",
-                "validate_python_node_code",
+                "generate_workflow_patch",
                 "workflow_ask_clarification",
                 "generate_workflow_metadata",
                 "request_workflow_sandbox",
+                "return_workflow_answer",
+                "return_workflow_plan",
+                "return_workflow_error",
             },
         )
         self.assertEqual(
             [type(item).__name__ for item in agent_kwargs["middleware"]],
             [
                 "ThreadDataMiddleware",
+                "WorkflowPrepareMiddleware",
                 "DanglingToolCallMiddleware",
                 "ToolErrorHandlingMiddleware",
                 "TokenUsageMiddleware",
-                "WorkflowClarificationMiddleware",
+                "WorkflowToolActivityMiddleware",
+                "WorkflowOutputMiddleware",
                 "WorkflowMetadataMiddleware",
                 "WorkflowSandboxMiddleware",
-                "LLMErrorHandlingMiddleware",
+                "WorkflowFinalOutputGuardMiddleware",
+                "WorkflowLLMErrorHandlingMiddleware",
+                "WorkflowClarificationMiddleware",
             ],
         )
+        self.assertNotIn("response_format", agent_kwargs)
         self.assertEqual(agent_kwargs["name"], "workflow-agent")
         self.assertIn(
             "/workflows/{workflow_id}/skills/public/foo/SKILL.md",
@@ -287,6 +328,186 @@ class WorkflowReactFactoryTest(unittest.TestCase):
             make_workflow_react_agent({}, app_config=app_config)
 
         self.assertNotIn("max_tokens", create_model.call_args.kwargs)
+
+
+class WorkflowReactStreamTest(unittest.IsolatedAsyncioTestCase):
+    async def test_loop_hard_stop_streams_specific_terminal_notice(self) -> None:
+        app_config = _app_config(
+            summarization=SummarizationConfig(enabled=False),
+        )
+        app_config.loop_detection = LoopDetectionConfig(
+            enabled=True,
+            warn_threshold=2,
+            hard_limit=3,
+            tool_freq_warn=20,
+            tool_freq_hard_limit=30,
+        )
+        model = ToolBoundFakeChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "describe_workflow",
+                            "id": f"call-read-{index}",
+                            "type": "tool_call",
+                            "args": {},
+                        }
+                    ],
+                )
+                for index in range(3)
+            ]
+        )
+        with (
+            patch(
+                "app.agents.workflow_agent.react_factory.create_chat_model",
+                return_value=model,
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "get_enabled_skills_for_config",
+                return_value=[],
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "get_skills_prompt_section",
+                return_value="",
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "filter_tools_by_skill_allowed_tools",
+                side_effect=lambda tools, _skills: tools,
+            ),
+        ):
+            agent = make_workflow_react_agent({}, app_config=app_config)
+
+        events = [
+            event
+            async for event in agent.astream(
+                {
+                    "workflowAssistant": {
+                        "threadId": "thread-loop",
+                        "message": "检查当前流程",
+                        "workflow": {
+                            "id": "workflow-1",
+                            "name": "测试流程",
+                            "nodes": [],
+                            "edges": [],
+                        },
+                    }
+                },
+                config={"configurable": {"thread_id": "thread-loop"}},
+                stream_mode="custom",
+            )
+        ]
+        event_types = [event["type"] for event in events]
+
+        self.assertEqual(event_types.count("workflow.systemNotice"), 2)
+        self.assertNotIn("workflow.error", event_types)
+        self.assertEqual(
+            event_types[-2:],
+            ["workflow.systemNotice", "workflow.end"],
+        )
+        self.assertEqual(events[-2]["code"], "tool_loop_hard_stop")
+        self.assertTrue(events[-2]["terminal"])
+
+    async def test_final_tool_events_stream_without_subgraph_mode(self) -> None:
+        app_config = _app_config(
+            summarization=SummarizationConfig(enabled=False),
+        )
+        model = ToolBoundFakeChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "return_workflow_plan",
+                            "id": "call-plan",
+                            "type": "tool_call",
+                            "args": {
+                                "summary": "创建测试流程",
+                                "mermaid": (
+                                    "flowchart TD\n"
+                                    "  start[提交订单] --> review[审核订单]"
+                                ),
+                            },
+                        }
+                    ],
+                )
+            ]
+        )
+        with (
+            patch(
+                "app.agents.workflow_agent.react_factory.create_chat_model",
+                return_value=model,
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "get_enabled_skills_for_config",
+                return_value=[],
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "get_skills_prompt_section",
+                return_value="",
+            ),
+            patch(
+                "app.agents.workflow_agent.react_factory."
+                "filter_tools_by_skill_allowed_tools",
+                side_effect=lambda tools, _skills: tools,
+            ),
+        ):
+            agent = make_workflow_react_agent({}, app_config=app_config)
+
+        events = [
+            event
+            async for event in agent.astream(
+                {
+                    "workflowAssistant": {
+                        "threadId": "thread-stream",
+                        "message": "创建测试流程",
+                        "workflow": {
+                            "id": "workflow-1",
+                            "name": "未命名项目",
+                            "nodes": [],
+                            "edges": [],
+                        },
+                    }
+                },
+                config={"configurable": {"thread_id": "thread-stream"}},
+                stream_mode="custom",
+            )
+        ]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            [
+                "workflow.session",
+                "workflow.message",
+                "workflow.toolActivity",
+                "workflow.planPreview",
+                "workflow.end",
+                "workflow.toolActivity",
+            ],
+        )
+        tool_events = [
+            event
+            for event in events
+            if event["type"] == "workflow.toolActivity"
+        ]
+        self.assertEqual(
+            [event["status"] for event in tool_events],
+            ["running", "completed"],
+        )
+        self.assertTrue(
+            all(
+                event["toolName"] == "return_workflow_plan"
+                for event in tool_events
+            )
+        )
+        self.assertTrue(
+            all(event["actor"] == "main-agent" for event in tool_events)
+        )
 
 
 if __name__ == "__main__":

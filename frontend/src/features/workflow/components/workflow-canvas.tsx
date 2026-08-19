@@ -20,6 +20,7 @@ interface WorkflowCanvasProps {
   onSelectNode: (nodeId: string) => void
   onGraphChange?: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void
   onReady?: (api: import('@/features/workflow/editor/workflow-editor').WorkflowCanvasApi) => void
+  autoLayoutOnMount?: boolean
   className?: string
 }
 

@@ -239,12 +239,12 @@ export function useWorkflowWorkspace() {
     [activateLocalWorkflowDraft, loadWorkflowProject, setSelectedNodeId, startNewWorkflow],
   )
 
-  const saveCurrentWorkflowDraft = useCallback(async () => {
-    const previousWorkflowId = workflow.id
+  const saveCurrentWorkflowDraft = useCallback(async (workflowToSave: WorkflowDocument = workflow) => {
+    const previousWorkflowId = workflowToSave.id
     setSaveStatus('saving')
     setSaveMessage('正在保存到服务端')
     try {
-      const saved = await saveWorkflowDraft(workflow)
+      const saved = await saveWorkflowDraft(workflowToSave)
       removeLocalDraft(previousWorkflowId)
       removeLocalDraft(saved.workflow.id)
       setWorkflow(saved.workflow)
@@ -271,16 +271,9 @@ export function useWorkflowWorkspace() {
     workflow,
   ])
 
-  const handleSaveWorkflow = useCallback(() => {
-    void saveCurrentWorkflowDraft()
+  const handleSaveWorkflow = useCallback((workflowToSave?: WorkflowDocument) => {
+    return saveCurrentWorkflowDraft(workflowToSave)
   }, [saveCurrentWorkflowDraft])
-
-  const applyAssistantWorkflow = useCallback((nextWorkflow: WorkflowDocument) => {
-    setWorkflow(nextWorkflow)
-    upsertLocalDraft(nextWorkflow)
-    setSelectedNodeId('')
-    setCanvasApi(null)
-  }, [setSelectedNodeId, setWorkflow, upsertLocalDraft])
 
   const restoreSavedWorkflowVersion = useCallback(
     async (versionId: string) => {
@@ -676,7 +669,6 @@ export function useWorkflowWorkspace() {
     versionsError,
     versionsLoading,
     cancelPendingLeave,
-    applyAssistantWorkflow,
     changeActiveView,
     closeWorkflowEditor,
     createWorkflow,

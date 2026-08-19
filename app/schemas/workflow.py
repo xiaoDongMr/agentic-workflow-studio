@@ -98,7 +98,7 @@ class WorkflowNodeConfig(BaseModel):
     codeSyncStatus: Literal["saved", "dirty", "saving", "failed"] = "saved"
     codeLastSavedSignature: str = ""
     selectorBranches: list[WorkflowSelectorBranch] = Field(default_factory=list)
-    selectorElseBranch: str = "default"
+    selectorElseBranch: str = "else"
     loopMode: Literal["array", "count"] = "array"
     loopCount: int = Field(default=3, ge=1, le=100)
     loopBodyNodes: list["WorkflowNode"] = Field(default_factory=list)

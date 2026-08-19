@@ -85,9 +85,6 @@ export interface WorkflowSelectorCondition {
   operator: WorkflowSelectorOperator
   left: WorkflowSelectorOperand
   right: WorkflowSelectorOperand
-  field?: string
-  value?: string
-  valueType?: WorkflowValueType | string
 }
 
 export interface WorkflowSelectorBranch {

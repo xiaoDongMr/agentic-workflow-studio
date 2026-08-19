@@ -29,13 +29,32 @@ class WorkflowTurnTest(unittest.TestCase):
                 edges=[],
             ),
         )
+        self.assertEqual(request.workflowId, "workflow-1")
         task, _context = build_task(
             request,
             WorkflowAgentContext(threadId="thread-1"),
         )
 
         self.assertTrue(task["workflowSummary"]["isStartOnlyDraft"])
+        self.assertEqual(task["workflowSummary"]["id"], "workflow-1")
         self.assertIn("从 0 创建完整工作流", task["instruction"])
+        self.assertIn(
+            "不同答案会显著改变流程结构的关键选择",
+            task["instruction"],
+        )
+        self.assertIn("workflow_ask_clarification", task["instruction"])
+
+    def test_rejects_mismatched_workflow_id(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must match"):
+            WorkflowAssistantStreamRequest(
+                workflowId="workflow-other",
+                workflow=WorkflowDocument(
+                    id="workflow-1",
+                    name="测试流程",
+                    nodes=[],
+                    edges=[],
+                ),
+            )
 
 
 if __name__ == "__main__":

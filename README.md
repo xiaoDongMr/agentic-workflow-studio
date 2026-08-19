@@ -6,8 +6,6 @@
 
 ## Product Preview
 
-动态流程使用 `WebP` 在 README 中直接预览，高清版本保留为 `MP4` 链接；静态页面使用 `PNG` 展示。
-
 ### 1. 工作流项目管理
 
 <p align="center">
@@ -36,9 +34,20 @@
 
 ### 5. 沙箱绑定与运行环境
 
-| 沙箱绑定 | 进入沙箱 |
-| --- | --- |
-| <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-binding.png" alt="Sandbox binding" width="100%" /> | <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-enter.webp" alt="Enter sandbox" width="100%" /> |
+<table>
+  <tr>
+    <th width="50%">沙箱绑定</th>
+    <th width="50%">进入沙箱</th>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-binding.png" alt="Sandbox binding" width="100%" />
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-enter.webp" alt="Enter sandbox" width="100%" />
+    </td>
+  </tr>
+</table>
 
 
 ### 6. 沙箱资源管理

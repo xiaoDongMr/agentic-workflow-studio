@@ -24,6 +24,7 @@ import type { NodePanelRenderProps } from '@flowgram.ai/free-node-panel-plugin'
 import {
   bottomLibrarySections,
   paletteToNodeType,
+  workflowAutoLayoutOptions,
 } from '@/features/workflow/editor/workflow-editor.config'
 import { uploadMediaFile } from '@/api/storage'
 import { SelectorTrialInputSection } from '@/features/workflow/editor/selector-debug/selector-trial-input-section'
@@ -1017,7 +1018,10 @@ export function EditorBottomBar({
             <BottomToolButton ariaLabel="适应画布" onClick={() => tools.fitView()}>
               <Scan className="h-4 w-4" />
             </BottomToolButton>
-            <BottomToolButton ariaLabel="自动布局" onClick={() => tools.autoLayout()}>
+            <BottomToolButton
+              ariaLabel="自动布局"
+              onClick={() => void tools.autoLayout(workflowAutoLayoutOptions(true))}
+            >
               <LayoutGrid className="h-4 w-4" />
             </BottomToolButton>
             <BottomToolButton ariaLabel="撤销" disabled={!canUndo} onClick={() => history.undo()}>

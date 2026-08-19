@@ -90,8 +90,8 @@ export function WorkflowOverview({
   })
 
   const localDraftById = useMemo(
-    () => new Map(localDrafts.filter((draft) => draft.id !== workflow.id).map((draft) => [draft.id, draft])),
-    [localDrafts, workflow.id],
+    () => new Map(localDrafts.map((draft) => [draft.id, draft])),
+    [localDrafts],
   )
   const totalPages = Math.max(Math.ceil(projectsTotal / projectsPageSize), 1)
 

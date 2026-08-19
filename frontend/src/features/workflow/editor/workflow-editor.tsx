@@ -19,7 +19,10 @@ import { createFreeSnapPlugin } from '@flowgram.ai/free-snap-plugin'
 import { createMinimapPlugin } from '@flowgram.ai/minimap-plugin'
 import '@flowgram.ai/free-layout-editor/index.css'
 
-import { defaultRegistries } from '@/features/workflow/editor/workflow-editor.config'
+import {
+  defaultRegistries,
+  workflowAutoLayoutOptions,
+} from '@/features/workflow/editor/workflow-editor.config'
 import {
   EditorBottomBar,
   EditorTrialRunPanel,
@@ -129,6 +132,7 @@ interface WorkflowEditorProps {
   onSelectNode: (nodeId: string) => void
   onGraphChange?: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void
   onReady?: (api: WorkflowCanvasApi) => void
+  autoLayoutOnMount?: boolean
   className?: string
 }
 
@@ -186,6 +190,7 @@ export function WorkflowEditor({
   onSelectNode,
   onGraphChange,
   onReady,
+  autoLayoutOnMount = false,
   className,
 }: WorkflowEditorProps) {
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null)
@@ -955,11 +960,22 @@ export function WorkflowEditor({
       onAllLayersRendered: (ctx) => {
         patchLoopChildDragIsolation(ctx)
         installNodeDragEndPersistence(ctx, commitSanitizedWorkflowGraph)
-        ctx.tools.fitView(false)
+        if (autoLayoutOnMount) {
+          void ctx.tools.autoLayout(workflowAutoLayoutOptions(false)).then(() => {
+            lockAllLoopChildPositions(ctx)
+            const liveJson = getWorkflowJSONWithLivePositions(ctx)
+            commitSanitizedWorkflowGraph(...fromFlowgramJSON(liveJson))
+          }).catch(() => {
+            void ctx.tools.fitView(false)
+          })
+          return
+        }
+        void ctx.tools.fitView(false)
       },
     }),
     [
       clearTrialRunTimers,
+      autoLayoutOnMount,
       copyNode,
       deleteNode,
       initialData,

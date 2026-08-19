@@ -434,7 +434,7 @@ execution sandbox 从 base sandbox 或 environment snapshot 派生。
 
 ### 阶段 6：Checkpointer 和上下文持久化
 
-- [x] 新增 `WorkflowAgentState`，纳入 `messages`、`workflowContext`、`workflowTask`、`workflowDecision`、`policyResult`、`validationResult`。
+- [x] `WorkflowAgentState` 只持久化 `messages`、`workflowContext`、`workflowTask`、metadata 去重和错误状态；最终输出与策略结果由 return tools 同步校验并发出，不写入 checkpoint。
 - [x] 将当前 `WorkflowAgentOrchestrator._sessions` 中的跨 Run 状态迁入 LangGraph state。
 - [x] 验证同一 `thread_id` 的后续 Run 自动恢复最新 checkpoint。
 - [ ] 验证不同 `thread_id` 之间状态完全隔离。

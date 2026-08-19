@@ -6,84 +6,47 @@
 
 ## Product Preview
 
-建议在 `docs/assets/` 下放置截图、GIF 或视频。下方展示区会直接引用这些素材，上传同名文件后即可在 GitHub README 中预览核心功能。
+动态流程使用 `WebP` 在 README 中直接预览，高清版本保留为 `MP4` 链接；静态页面使用 `PNG` 展示。
 
-素材建议：README 内嵌预览优先使用 `WebP` 动图或高清 `GIF`，静态页面使用 `PNG`；高清完整版视频放到 GitHub Releases，并在 README 中提供 `MP4` 链接。
-
-### Overview
+### 1. 工作流项目管理
 
 <p align="center">
-  <img src="docs/assets/overview.webp" alt="Agentic Workflow Studio overview" width="100%" />
+  <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/workflow-list.png" alt="Workflow list" width="100%" />
 </p>
 
-[查看项目总览视频](docs/assets/overview.mp4)
-
-### Workflow Building
-
-#### 自动生成工作流
+### 2. 自然语言生成工作流
 
 <p align="center">
-  <img src="docs/assets/workflow-generation.webp" alt="Workflow generation" width="100%" />
+  <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/workflow-generation.webp" alt="Workflow generation" width="100%" />
 </p>
 
-[查看自动生成工作流视频](docs/assets/workflow-generation.webp)
-
-#### 可视化编排画布
-
-<p align="center">
-  <img src="docs/assets/workflow-canvas.png" alt="Workflow canvas" width="100%" />
-</p>
-
-#### 节点配置与单节点调试
+### 3. 节点配置与单节点调试
 
 | 节点配置 | 单节点调试 |
 | --- | --- |
-| <img src="docs/assets/node-configs.png" alt="Node configs" width="100%" /> | <img src="docs/assets/node-debug.webp" alt="Node debug" width="100%" /> |
+| <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/node-configs.webp" alt="Node configs" width="100%" /> | <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/node-debug.webp" alt="Node debug" width="100%" /> |
 
-#### 工作流编排运行
+
+### 4. 工作流编排运行
 
 <p align="center">
-  <img src="docs/assets/workflow-run.webp" alt="Workflow run" width="100%" />
+  <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/workflow-run.webp" alt="Workflow run" width="100%" />
 </p>
 
-[查看工作流编排运行视频](docs/assets/workflow-run.mp4)
 
-### Sandbox & Runtime
-
-#### 沙箱绑定与进入沙箱
+### 5. 沙箱绑定与运行环境
 
 | 沙箱绑定 | 进入沙箱 |
 | --- | --- |
-| <img src="docs/assets/sandbox-binding.png" alt="Sandbox binding" width="100%" /> | <img src="docs/assets/sandbox-enter.webp" alt="Enter sandbox" width="100%" /> |
+| <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-binding.png" alt="Sandbox binding" width="100%" /> | <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-enter.webp" alt="Enter sandbox" width="100%" /> |
 
-#### 资源与历史管理
 
-| 工作流列表 | 会话历史恢复 |
-| --- | --- |
-| <img src="docs/assets/workflow-list.png" alt="Workflow list" width="100%" /> | <img src="docs/assets/thread-history.png" alt="Thread history" width="100%" /> |
+### 6. 沙箱资源管理
 
 | 沙箱列表 | 上传沙箱镜像 |
 | --- | --- |
-| <img src="docs/assets/sandbox-list.png" alt="Sandbox list" width="100%" /> | <img src="docs/assets/sandbox-image-upload.png" alt="Sandbox image upload" width="100%" /> |
+| <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-list.png" alt="Sandbox list" width="100%" /> | <img src="https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/sandbox-image-upload.png" alt="Sandbox image upload" width="100%" /> |
 
-### Media Checklist
-
-下表按一次完整使用流程编排，素材文件可先保留占位，后续替换为真实截图或录屏。
-
-| 顺序 | 场景 | 素材路径 | 类型建议 | 展示重点 |
-| --- | --- | --- | --- | --- |
-| 1 | 工作流列表 | `docs/assets/workflow-list.png` | Screenshot | 展示工作流项目管理、搜索、创建、打开和版本入口。 |
-| 2 | 自动生成工作流 | `docs/assets/workflow-generation.webp` / [MP4](https://github.com/xiaoDongMr/agentic-workflow-studio/releases/download/v0.1.0/workflow-generation.mp4) | WebP + Video | 展示用户输入自然语言需求后，Workflow Agent 自动生成工作流图。 |
-| 3 | 可视化编排画布 | `docs/assets/workflow-canvas.png` | Screenshot | 展示节点拓扑、连线关系、节点库和整体编排视图。 |
-| 4 | 节点配置 | `docs/assets/node-configs.png` | Screenshot | 展示 Start、LLM、Code、Selector、Loop、End 等节点的配置能力。 |
-| 5 | 单节点调试 | `docs/assets/node-debug.webp` / `docs/assets/node-debug.mp4` | WebP + Video | 展示单独运行节点、查看输入输出、错误信息和调试结果。 |
-| 6 | 沙箱绑定 | `docs/assets/sandbox-binding.png` | Screenshot | 展示工作流绑定沙箱实例，为代码节点提供隔离执行环境。 |
-| 7 | 进入沙箱 | `docs/assets/sandbox-enter.webp` / `docs/assets/sandbox-enter.mp4` | WebP + Video | 展示从工作台进入 aio-sandbox，查看文件环境、运行页面或调试页面。 |
-| 8 | 工作流编排运行 | `docs/assets/workflow-run.webp` / `docs/assets/workflow-run.mp4` | WebP + Video | 展示完整工作流运行过程、节点状态流转、流式反馈和最终输出。 |
-| 9 | 会话历史恢复 | `docs/assets/thread-history.png` | Screenshot | 展示多轮 AI 助手会话、历史记录和工作流快照恢复。 |
-| 10 | 沙箱列表 | `docs/assets/sandbox-list.png` | Screenshot | 展示沙箱实例状态、访问地址、Pod / Service 信息和生命周期管理。 |
-| 11 | 上传沙箱镜像 | `docs/assets/sandbox-image-upload.png` | Screenshot | 展示自定义镜像上传、镜像能力识别和镜像列表管理。 |
-| 12 | 项目总览 | `docs/assets/overview.webp` / `docs/assets/overview.mp4` | WebP + Video | 用 1 分钟以内串联工作流创建、AI 生成、调试、沙箱执行和运行结果。 |
 
 ## Highlights
 

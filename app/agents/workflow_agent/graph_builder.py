@@ -14,7 +14,6 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
-from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -36,7 +35,6 @@ from app.agents.workflow_agent.node_skill_registry import (
 from app.agents.workflow_agent.node_skill_runner import NodeSkillScriptRunner
 from app.agents.workflow_agent.schemas import (
     WorkflowGraphInput,
-    WorkflowNodeCapability,
 )
 from app.agents.workflow_agent.tools.execute_node_skill_script import (
     make_execute_node_skill_script_tool,
@@ -92,29 +90,28 @@ GRAPH_BUILDER_SYSTEM_PROMPT = """
 
 执行：
 可见输出：每次调用工具时，用一句简短中文说明当前动作；不要输出工具参数或 JSON。
-1. 第一轮必须调用 plan_node_capabilities，一次性确定所有待创建或修改节点的 title、nodeType 和简短理由；后续节点类型必须遵守该规划。
-2. 能力选择规则：
+1. 能力选择规则：
    - llm：语义理解、方案设计、内容生成、总结分析等需要模型推理的任务。
    - code：仅用于有明确代码逻辑的数据转换、计算，或已有 API/浏览器执行能力的确定性任务；不得因为标题含“执行、搭建、投放”等动词就选择 code。
    - selector：仅用于互斥条件分支；并行执行或策略规划不得使用 selector。
    - loop：同一子流程需要重复执行时使用。
    - end：汇总并输出最终结果。
-3. 每一轮只能调用一个工具，禁止在同一次响应中批量调用多个工具。
-4. 禁止一次性生成多个节点；必须按节点逐个生成或修改。
-5. 首次处理一种节点类型前，用 Skill 目录中的路径调用一次 read_file；同一 Skill 在本次任务中禁止重复读取。
-6. Skill 是节点字段和配置的唯一依据。
-7. 每个节点必须按顺序执行：
+2. 每一轮只能调用一个工具，禁止在同一次响应中批量调用多个工具。
+3. 禁止一次性生成多个节点；必须按节点逐个生成或修改。
+4. 首次处理一种节点类型前，用 Skill 目录中的路径调用一次 read_file；同一 Skill 在本次任务中禁止重复读取。
+5. Skill 是节点字段和配置的唯一依据。
+6. 每个节点必须按顺序执行：
    a. read_file：首次处理该节点类型时读取对应 SKILL.md。
    b. 按 SKILL.md 调用零个或多个辅助脚本，例如 list_input_sources、list_models、resolve_model_config；辅助脚本返回后继续，不要结束。
    c. 调用一次 build_node 或 update_node；脚本返回的完整 node 会由运行时缓存。
    d. update_current_graph：只传与该节点直接相关的完整边；工具会写入节点并立即发布 Graph。
-8. edge 端口字段只能使用 sourcePortID 和 targetPortID，禁止使用 sourcePortId、targetPortId 或其他未知字段。
-9. 禁止一次性提交多个未生成节点之间的边。
-10. 禁止将脚本返回的 node 复制到 update_current_graph 参数。
-11. 非最后一个节点调用 update_current_graph 时传 done=false；最后一个节点传 done=true。
-12. 不自行输出最终文本，必须以 update_current_graph(done=true) 完成本次任务。
-13. 相同模型能力条件下，list_models 和 resolve_model_config 各调用一次并复用结果，禁止为后续同类节点重复查询。
-14. edge 的 source 和 target 必须是当前 Graph 已存在节点或本轮刚构建节点的真实 ID；不得提前连接尚未构建的节点。
+7. edge 端口字段只能使用 sourcePortID 和 targetPortID，禁止使用 sourcePortId、targetPortId 或其他未知字段。
+8. 禁止一次性提交多个未生成节点之间的边。
+9. 禁止将脚本返回的 node 复制到 update_current_graph 参数。
+10. 非最后一个节点调用 update_current_graph 时传 done=false；最后一个节点传 done=true。
+11. 不自行输出最终文本，必须以 update_current_graph(done=true) 完成本次任务。
+12. 相同模型能力条件下，list_models 和 resolve_model_config 各调用一次并复用结果，禁止为后续同类节点重复查询。
+13. edge 的 source 和 target 必须是当前 Graph 已存在节点或本轮刚构建节点的真实 ID；不得提前连接尚未构建的节点。
 
 update_node 的 changes 语义：
 - object 递归合并，array 整体替换，scalar 直接替换。
@@ -213,8 +210,6 @@ class WorkflowGraphBuilder:
         published_revision = 0
         completed = False
         pending_node: dict[str, Any] | None = None
-        capability_plan: dict[str, str] = {}
-        capabilities_planned = False
         runner = NodeSkillScriptRunner(self._registry)
         skill_context = {
             "workflowId": workflow_id,
@@ -224,42 +219,6 @@ class WorkflowGraphBuilder:
                 for model in getattr(self._app_config, "models", []) or []
             ]
         }
-
-        @tool("plan_node_capabilities", parse_docstring=True)
-        def plan_node_capabilities(
-            nodes: list[WorkflowNodeCapability],
-        ) -> str:
-            """Set node capability types before reading or executing Node Skills.
-
-            Args:
-                nodes: All nodes that will be created or modified in this run.
-            """
-            nonlocal capabilities_planned
-            if capabilities_planned:
-                raise ValueError("Node capabilities have already been planned")
-            if not nodes:
-                raise ValueError("At least one node capability is required")
-            next_plan: dict[str, str] = {}
-            for item in nodes:
-                title = item.title.strip()
-                if title in next_plan:
-                    raise ValueError(f"Duplicate node capability title: {title}")
-                next_plan[title] = item.nodeType
-            capability_plan.update(next_plan)
-            capabilities_planned = True
-            return json.dumps(
-                {
-                    "ok": True,
-                    "plannedNodeCount": len(capability_plan),
-                },
-                ensure_ascii=False,
-            )
-
-        def require_capability_plan() -> None:
-            if not capabilities_planned:
-                raise ValueError(
-                    "Call plan_node_capabilities before executing Node Skills"
-                )
 
         async def record_skill_read(
             node_type: str,
@@ -284,7 +243,6 @@ class WorkflowGraphBuilder:
 
         def record_node_result(node: dict[str, Any]) -> None:
             nonlocal pending_node
-            require_capability_plan()
             if completed:
                 raise ValueError("Graph generation is already complete")
             if graph_revision != published_revision:
@@ -294,18 +252,6 @@ class WorkflowGraphBuilder:
             if pending_node is not None:
                 raise ValueError(
                     "Call update_current_graph before generating another node"
-                )
-            title = str(node.get("title") or "").strip()
-            planned_type = capability_plan.get(title)
-            if planned_type is None:
-                raise ValueError(
-                    f"Node {title!r} was not declared in plan_node_capabilities"
-                )
-            actual_type = str(node.get("type") or "")
-            if actual_type != planned_type:
-                raise ValueError(
-                    f"Node {title!r} must use planned type {planned_type!r}, "
-                    f"got {actual_type!r}"
                 )
             pending_node = deepcopy(node)
             logger.info(
@@ -327,7 +273,6 @@ class WorkflowGraphBuilder:
             read_node_types=read_node_types,
             runtime_context=skill_context,
             on_node_result=record_node_result,
-            before_execute=require_capability_plan,
         )
 
         def require_previous_snapshot() -> None:
@@ -428,7 +373,6 @@ class WorkflowGraphBuilder:
         agent = create_agent(
             model=self._model,
             tools=[
-                plan_node_capabilities,
                 read_file,
                 execute_node_skill_script,
                 update_current_graph,

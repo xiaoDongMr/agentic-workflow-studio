@@ -10,7 +10,10 @@ import {
   Sparkles,
   Waypoints,
 } from 'lucide-react'
-import type { WorkflowNodeRegistry } from '@flowgram.ai/free-layout-editor'
+import type {
+  AutoLayoutToolOptions,
+  WorkflowNodeRegistry,
+} from '@flowgram.ai/free-layout-editor'
 
 import {
   DEFAULT_LOOP_CANVAS_HEIGHT,
@@ -27,6 +30,25 @@ export const CANVAS_OFFSET_X = 420
 export const CANVAS_OFFSET_Y = 90
 export const NODE_GAP_X = 308
 export const NODE_GAP_Y = 142
+
+export function workflowAutoLayoutOptions(
+  enableAnimation: boolean,
+): AutoLayoutToolOptions {
+  return {
+    layoutConfig: {
+      rankdir: 'LR',
+      nodesep: 96,
+      edgesep: 24,
+      ranksep: 120,
+      marginx: 48,
+      marginy: 48,
+      ranker: 'network-simplex',
+    },
+    alignTopEdge: false,
+    enableAnimation,
+    animationDuration: 240,
+  }
+}
 
 export const paletteToNodeType: Record<string, WorkflowNode['type']> = {
   llm: 'llm',
@@ -156,8 +178,8 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
     title: '大模型',
     description: '调用大语言模型，基于输入变量和提示词生成回复。',
     status: 'active',
-    inputs: [{ name: 'input', type: 'String', description: '用户输入' }],
-    outputs: [{ name: 'output', type: 'String', description: '模型输出' }],
+    inputs: [{ name: 'input', type: 'String', description: '' }],
+    outputs: [{ name: 'result', type: 'String', description: '' }],
     config: {
       prompt: '',
       systemPrompt: '',
@@ -171,7 +193,7 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
       responseMode: 'text',
       outputKey: '',
       reasoningKey: 'reasoning_content',
-      inputMappings: [{ field: 'input', sourceType: 'literal', source: 'hello', valueType: 'String' }],
+      inputMappings: [{ field: 'input', sourceType: 'context', source: 'input', valueType: 'String' }],
       visionInputAsBase64: false,
       supportContinuation: false,
       thinkingEnabled: false,
@@ -290,8 +312,8 @@ export const defaultNodeContent: Record<WorkflowNode['type'], Omit<WorkflowNode,
       enabled: true,
       fallbackToHuman: false,
       responseMode: 'json',
-      outputKey: 'key0',
-      inputMappings: [],
+      outputKey: 'code_result',
+      inputMappings: [{ field: 'input', sourceType: 'context', source: 'input', valueType: 'String' }],
       codeLanguage: 'python',
       codeCapability: 'python',
       codeSource: 'sandbox_snippet',

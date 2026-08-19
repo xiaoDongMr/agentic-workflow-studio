@@ -225,12 +225,14 @@ function getParentLoopNodePosition(node: WorkflowNodeProps['node']) {
   }
   const meta = parentJson.meta as { position?: { x?: number; y?: number } } | undefined
   const position = meta?.position
-  if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+  const x = position?.x
+  const y = position?.y
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
     return undefined
   }
   return {
-    x: position.x,
-    y: position.y,
+    x,
+    y,
   }
 }
 
@@ -386,10 +388,10 @@ export function FlowgramNodeCard({
       : undefined
   const loopNodeSize = loopCanvasSize ? getLoopNodeRenderSize(loopCanvasSize) : undefined
   const nodeWidth = isLoopEndpoint ? 156 : loopNodeSize?.width
-  const nodeRenderSize = {
+  const nodeRenderSize = useMemo(() => ({
     width: nodeWidth ?? 320,
     height: loopNodeSize?.height ?? Math.max(nodeMinHeight ?? 154, 154),
-  }
+  }), [loopNodeSize?.height, nodeMinHeight, nodeWidth])
   const handleAddFromSelectorPort = useCallback((sourcePortID: string | number, topPercent: number) => {
     onToggleQuickAdd(
       nodeId,

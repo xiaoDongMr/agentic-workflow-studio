@@ -210,18 +210,3 @@ class WorkflowGraphEdgeInput(BaseModel):
     target: str
     sourcePortID: str | int | None = None
     targetPortID: str | int | None = None
-
-
-class WorkflowNodeCapability(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = Field(min_length=1)
-    nodeType: Literal[
-        "start",
-        "llm",
-        "selector",
-        "loop",
-        "code",
-        "end",
-    ]
-    reason: str = Field(min_length=1, max_length=200)

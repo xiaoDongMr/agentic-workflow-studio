@@ -324,7 +324,6 @@ class WorkflowGraphBuilderTaskTest(unittest.TestCase):
         self.assertIn("不是真实 Graph 节点 ID", GRAPH_BUILDER_SYSTEM_PROMPT)
         self.assertIn("同一 Skill 在本次任务中禁止重复读取", GRAPH_BUILDER_SYSTEM_PROMPT)
         self.assertIn("各调用一次并复用结果", GRAPH_BUILDER_SYSTEM_PROMPT)
-        self.assertIn("第一轮必须调用 plan_node_capabilities", GRAPH_BUILDER_SYSTEM_PROMPT)
         self.assertIn("并行执行或策略规划不得使用 selector", GRAPH_BUILDER_SYSTEM_PROMPT)
         self.assertIn("不得因为标题含", GRAPH_BUILDER_SYSTEM_PROMPT)
 

@@ -68,8 +68,6 @@ def model_tool_decision_text(response: Any) -> str:
         tool_args = args if isinstance(args, dict) else {}
         if name == "read_file":
             decisions.append("正在读取节点配置规则")
-        elif name == "plan_node_capabilities":
-            decisions.append("正在规划节点能力类型")
         elif name == "execute_node_skill_script":
             function_name = str(tool_args.get("function_name") or "")
             decisions.append(
